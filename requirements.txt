@@ -1,0 +1,11 @@
+# WEKA App Store Operator Python Dependencies
+
+# Kubernetes Operator Framework
+kopf>=1.38.0
+
+# Kubernetes API Client
+kr8s>=0.17.0
+
+# Official Kubernetes Python Client
+kubernetes>=27.0.0
+
