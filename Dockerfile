@@ -1,8 +1,11 @@
 # Use a lightweight Python base image
 FROM python:3.13-slim
 
-# Install the Kopf framework and any other dependencies
-RUN pip install kopf
+# Copy the requirements file first (for better caching)
+COPY requirements.txt .
+
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Set the working directory
 WORKDIR /app
