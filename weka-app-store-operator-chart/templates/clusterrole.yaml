@@ -1,0 +1,15 @@
+{{- if and .Values.rbac.create .Values.rbac.clusterWide }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{- if .Values.rbac.clusterRoleName }} {{ .Values.rbac.clusterRoleName }} {{- else }} {{ include "weka-app-store-operator-chart.fullname" . }}-clusterrole {{- end }}
+  labels:
+    {{- include "weka-app-store-operator-chart.labels" . | nindent 4 }}
+rules:
+  {{- if .Values.rbac.clusterRole.rules }}
+  {{- toYaml .Values.rbac.clusterRole.rules | nindent 2 }}
+  {{- end }}
+  {{- if .Values.rbac.clusterRole.extraRules }}
+  {{- toYaml .Values.rbac.clusterRole.extraRules | nindent 2 }}
+  {{- end }}
+{{- end }}
