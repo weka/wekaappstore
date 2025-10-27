@@ -27,6 +27,8 @@ rbac:
   clusterWide: true
   # Optional custom name for the ClusterRole; if empty a name based on the release is used.
   clusterRoleName: ""
+  # Enable temporarily to grant extremely broad permissions for troubleshooting only.
+  permissive: false
   # Default rules for the operator. Adjust as needed.
   # These grant read across namespaces and write where necessary to manage typical app resources.
   clusterRole:
@@ -48,14 +50,66 @@ rbac:
         verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
       - apiGroups: ["apiextensions.k8s.io"]
         resources: ["customresourcedefinitions"]
-        verbs: ["get", "list", "watch", "create", "update", "patch"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
       - apiGroups: ["warp.io"]
         resources: ["wekaappstores", "wekaappstores/status", "wekaappstores/finalizers"]
         verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
     # Add any extra rules without overriding defaults
     extraRules:
+      # Required for aggregating APIs (already commonly needed by adapters)
       - apiGroups: ["apiregistration.k8s.io"]
         resources: ["apiservices"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      # Allow creating roles/bindings that carry higher privileges (needed when installing charts like prometheus-adapter)
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        resources: ["clusterroles", "clusterrolebindings"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "bind", "escalate"]
+      # Permissions commonly required by metrics adapters and auth delegators
+      - apiGroups: ["authentication.k8s.io"]
+        resources: ["tokenreviews"]
+        verbs: ["create"]
+      - apiGroups: ["authorization.k8s.io"]
+        resources: ["subjectaccessreviews"]
+        verbs: ["create"]
+      # Access to custom metrics API resources
+      - apiGroups: ["custom.metrics.k8s.io"]
+        resources: ["*"]
+        verbs: ["*"]
+      # Webhooks for operators (Milvus, GPU Operator, cert-manager, etc.)
+      - apiGroups: ["admissionregistration.k8s.io"]
+        resources: ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      # Leader election
+      - apiGroups: ["coordination.k8s.io"]
+        resources: ["leases"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      # Priority classes occasionally created by operators
+      - apiGroups: ["scheduling.k8s.io"]
+        resources: ["priorityclasses"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      # CSI and storage resources that certain charts define
+      - apiGroups: ["storage.k8s.io"]
+        resources: ["storageclasses", "csidrivers", "csinodes", "csistoragecapacities"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      # RuntimeClass used by some GPU workloads
+      - apiGroups: ["node.k8s.io"]
+        resources: ["runtimeclasses"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      # Pod disruption budgets commonly defined by charts
+      - apiGroups: ["policy"]
+        resources: ["poddisruptionbudgets"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      # Certificates for webhooks when cert-manager isn't used
+      - apiGroups: ["certificates.k8s.io"]
+        resources: ["certificatesigningrequests", "certificatesigningrequests/approval", "certificatesigningrequests/status"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      # Read-only access to nodes for operators that validate cluster capabilities
+      - apiGroups: [""]
+        resources: ["nodes"]
+        verbs: ["get", "list", "watch"]
+      # Prometheus Operator CRDs (if present) often used by charts to expose metrics
+      - apiGroups: ["monitoring.coreos.com"]
+        resources: ["servicemonitors", "podmonitors", "prometheuses", "alertmanagers", "prometheusrules"]
         verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
 customResourceDefinition:
