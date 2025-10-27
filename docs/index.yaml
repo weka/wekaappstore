@@ -9,6 +9,6 @@ entries:
     name: weka-app-store-operator-chart
     type: application
     urls:
-    - https://weka.github.io/wekaappstore/weka-app-store-operator-chart-0.1.0.tgz
-    version: 0.1.0
+    - https://weka.github.io/wekaappstore/weka-app-store-operator-chart-0.1.1.tgz
+    version: 0.1.1
 generated: "2025-10-27T12:08:58.492586+11:00"
