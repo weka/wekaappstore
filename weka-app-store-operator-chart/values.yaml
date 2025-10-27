@@ -53,7 +53,10 @@ rbac:
         resources: ["wekaappstores", "wekaappstores/status", "wekaappstores/finalizers"]
         verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
     # Add any extra rules without overriding defaults
-    extraRules: []
+    extraRules:
+      - apiGroups: ["apiregistration.k8s.io"]
+        resources: ["apiservices"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
 customResourceDefinition:
   create: true
