@@ -2,7 +2,7 @@ replicaCount: 1
 
 # This sets the container image more information can be found here: https://kubernetes.io/docs/concepts/containers/images/
 image:
-  repository: wekachrisjen/weka-app-store
+  repository: wekachrisjen/weka-app-store-multi-arch
   pullPolicy: IfNotPresent
   tag: "v0.1"
 
