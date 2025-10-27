@@ -240,4 +240,4 @@ spec:
     kind: WekaAppStore
     plural: wekaappstores
   scope: Namespaced
-
+{{- end }}
