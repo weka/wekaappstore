@@ -6,13 +6,54 @@ image:
   pullPolicy: IfNotPresent
   tag: "v0.1"
 
+# Service configuration for Kubernetes Service
+service:
+  type: ClusterIP
+  port: 80
+
+# Autoscaling toggle used in templates
+autoscaling:
+  enabled: false
+
 # This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/
 serviceAccount:
   create: true
   name: ""
+  automount: true
 
 rbac:
   create: true
+  # When true, install ClusterRole and ClusterRoleBinding for cluster-wide permissions.
+  clusterWide: true
+  # Optional custom name for the ClusterRole; if empty a name based on the release is used.
+  clusterRoleName: ""
+  # Default rules for the operator. Adjust as needed.
+  # These grant read across namespaces and write where necessary to manage typical app resources.
+  clusterRole:
+    rules:
+      - apiGroups: [""]
+        resources: ["pods", "pods/log", "services", "endpoints", "events", "configmaps", "secrets", "serviceaccounts", "namespaces"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      - apiGroups: ["apps"]
+        resources: ["deployments", "daemonsets", "statefulsets", "replicasets"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      - apiGroups: ["batch"]
+        resources: ["jobs", "cronjobs"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      - apiGroups: ["networking.k8s.io"]
+        resources: ["ingresses", "networkpolicies"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      - apiGroups: ["apiextensions.k8s.io"]
+        resources: ["customresourcedefinitions"]
+        verbs: ["get", "list", "watch", "create", "update", "patch"]
+      - apiGroups: ["warp.io"]
+        resources: ["wekaappstores", "wekaappstores/status", "wekaappstores/finalizers"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    # Add any extra rules without overriding defaults
+    extraRules: []
 
 customResourceDefinition:
   create: true
