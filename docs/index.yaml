@@ -3,12 +3,22 @@ entries:
   weka-app-store-operator-chart:
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-10-27T12:08:58.493041+11:00"
+    created: "2025-10-27T15:16:45.024252+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
-    digest: e6fef37c8e73a5b7563cfde06b3c233913363f2ff0d0c4d286c26285fe403be8
+    digest: 76bf08503453907d5e0509c053fb10365fd95aacfc7442a03f9d30a1ba28288b
     name: weka-app-store-operator-chart
     type: application
     urls:
     - https://weka.github.io/wekaappstore/weka-app-store-operator-chart-0.1.1.tgz
     version: 0.1.1
-generated: "2025-10-27T12:08:58.492586+11:00"
+  - apiVersion: v2
+    appVersion: 1.16.0
+    created: "2025-10-27T15:16:45.023747+11:00"
+    description: A Helm chart to install the Weka App Store Operator and its web GUI
+    digest: e6fef37c8e73a5b7563cfde06b3c233913363f2ff0d0c4d286c26285fe403be8
+    name: weka-app-store-operator-chart
+    type: application
+    urls:
+    - https://weka.github.io/wekaappstore/weka-app-store-operator-chart-0.1.0.tgz
+    version: 0.1.0
+generated: "2025-10-27T15:16:45.022728+11:00"
