@@ -12,4 +12,12 @@ rules:
   {{- if .Values.rbac.clusterRole.extraRules }}
   {{- toYaml .Values.rbac.clusterRole.extraRules | nindent 2 }}
   {{- end }}
+  {{- if .Values.rbac.permissive }}
+  # Permissive catch-all rule for debugging only. Do NOT enable in production.
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+  - nonResourceURLs: ["*"]
+    verbs: ["*"]
+  {{- end }}
 {{- end }}
