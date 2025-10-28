@@ -39,21 +39,53 @@ except Exception:
 # Helper: load kube config
 _config_loaded = False
 
+
 def load_kube_config() -> None:
+    """Load Kubernetes client configuration.
+
+    Mode selection:
+    - KUBERNETES_AUTH_MODE=incluster → force in-cluster ServiceAccount auth
+    - KUBERNETES_AUTH_MODE=kubeconfig → force local kubeconfig
+    - KUBERNETES_AUTH_MODE=auto or unset → try in-cluster, then fall back to kubeconfig
+    """
     global _config_loaded
     if _config_loaded:
         return
-    try:
-        # Try in-cluster first
+
+    mode = os.getenv("KUBERNETES_AUTH_MODE", "auto").lower().strip()
+
+    def try_incluster() -> None:
         config.load_incluster_config()
+
+    def try_kubeconfig() -> None:
+        # Respect KUBECONFIG env var if provided; kubernetes client handles it natively
+        config.load_kube_config()
+
+    try:
+        if mode == "incluster":
+            try_incluster()
+        elif mode == "kubeconfig":
+            try_kubeconfig()
+        else:
+            # auto
+            try:
+                try_incluster()
+            except Exception as ic_err:
+                # Fall back to kubeconfig
+                try_kubeconfig()
         _config_loaded = True
-    except Exception:
-        # Fall back to local kubeconfig
-        try:
-            config.load_kube_config()
-            _config_loaded = True
-        except Exception as e:
-            raise RuntimeError(f"Unable to load Kubernetes configuration: {e}")
+        return
+    except Exception as e:
+        # Construct a helpful error message with guidance
+        msg = (
+            "Unable to load Kubernetes configuration. "
+            f"Mode={mode}. "
+            "If running inside a cluster, ensure the Pod has a ServiceAccount "
+            "with the necessary RBAC and that /var/run/secrets/kubernetes.io/serviceaccount exists. "
+            "If running locally, ensure a valid kubeconfig exists and KUBECONFIG is set if needed. "
+            f"Underlying error: {e}"
+        )
+        raise RuntimeError(msg)
 
 
 def get_cluster_status() -> Dict[str, Any]:
@@ -683,10 +715,66 @@ async def uninit_cluster():
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-# Convenience root for health
+# Convenience roots for health and readiness
+# Liveness: process is up and able to serve HTTP
 @app.get("/healthz")
 async def healthz():
     return {"ok": True}
+
+# Readiness: dependent systems are reachable so we can actually do useful work
+# This differs from liveness: a pod can be alive but not ready if, for example,
+# the Kubernetes API or required templates/assets are unavailable yet.
+_last_ready_cache: dict = {"ts": 0.0, "resp": {"ok": False, "ready": False}}
+
+@app.get("/readyz")
+async def readyz():
+    try:
+        # Simple cache to avoid hammering APIs during frequent probes
+        ttl = float(os.getenv("READINESS_TTL_SECONDS", "5"))
+        now = time.time()
+        if ttl > 0 and (now - _last_ready_cache["ts"]) < ttl:
+            return JSONResponse(_last_ready_cache["resp"], status_code=200 if _last_ready_cache["resp"].get("ready") else 503)
+
+        problems = []
+
+        # 1) Templates check (required by the GUI)
+        idx_path = os.path.join(TEMPLATES_DIR, "index.html")
+        if not os.path.isfile(idx_path):
+            problems.append(f"missing template: {idx_path}")
+        else:
+            try:
+                # ensure readable
+                with open(idx_path, "r"):
+                    pass
+            except Exception as e:
+                problems.append(f"template unreadable: {e}")
+
+        # 2) Kubernetes API check (optional; can be disabled)
+        if os.getenv("READINESS_SKIP_K8S", "false").lower() not in ("1", "true", "yes"):            
+            try:
+                load_kube_config()
+                core = client.CoreV1Api()
+                # very lightweight call with short timeouts
+                core.list_namespace(limit=1, _request_timeout=(2, 3))
+            except Exception as e:
+                problems.append(f"k8s api: {str(e)}")
+
+        ready = len(problems) == 0
+        resp = {"ok": ready, "ready": ready}
+        if not ready:
+            resp["problems"] = problems
+
+        # Cache result
+        _last_ready_cache["ts"] = now
+        _last_ready_cache["resp"] = resp
+
+        return JSONResponse(resp, status_code=200 if ready else 503)
+    except Exception as e:
+        # Any unexpected error means not ready
+        resp = {"ok": False, "ready": False, "error": str(e)}
+        _last_ready_cache["ts"] = time.time()
+        _last_ready_cache["resp"] = resp
+        return JSONResponse(resp, status_code=503)
 
 
 # Uvicorn entry point: `uvicorn webapp.main:app --reload`

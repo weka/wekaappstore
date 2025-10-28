@@ -5,7 +5,7 @@ metadata:
   labels:
     app: wekaappstoregui
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: wekaappstoregui
@@ -19,19 +19,19 @@ spec:
         runAsUser: 10001
       containers:
         - name: wekaappstoregui
-          image: wekachrisjen/weka-app-store-gui:v0.1
+          image: wekachrisjen/weka-app-store-gui:v0.5
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
           env:
             - name: UVICORN_WORKERS
               value: "1"
-          readinessProbe:
-            httpGet:
-              path: /readyz
-              port: 8000
-            initialDelaySeconds: 2
-            periodSeconds: 5
+#          readinessProbe:
+#            httpGet:
+#              path: /readyz
+#              port: 8000
+#            initialDelaySeconds: 2
+#            periodSeconds: 5
           livenessProbe:
             httpGet:
               path: /healthz
