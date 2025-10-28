@@ -111,6 +111,10 @@ rbac:
       - apiGroups: ["monitoring.coreos.com"]
         resources: ["servicemonitors", "podmonitors", "prometheuses", "alertmanagers", "prometheusrules"]
         verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      # NVIDIA GPU Operator CRDs (e.g., ClusterPolicy) required during helm install/upgrade
+      - apiGroups: ["nvidia.com"]
+        resources: ["clusterpolicies", "clusterpolicies/status", "*"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
 customResourceDefinition:
   create: true
