@@ -115,6 +115,22 @@ rbac:
       - apiGroups: ["nvidia.com"]
         resources: ["clusterpolicies", "clusterpolicies/status", "*"]
         verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      # NVIDIA Node Feature Discovery CRDs used by GPU Operator
+      - apiGroups: ["nfd.k8s-sigs.io"]
+        resources: ["nodefeatures"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      # Allow creating namespaced Roles/RoleBindings that grant higher privileges
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        resources: ["roles", "rolebindings"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "bind", "escalate"]
+      # Core subresources that charts often include in Roles; must be held to grant them
+      - apiGroups: [""]
+        resources: ["pods/eviction", "services/finalizers"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      # Apps subresources/resources used in Roles
+      - apiGroups: ["apps"]
+        resources: ["controllerrevisions"]
+        verbs: ["get", "list", "watch"]
 
 customResourceDefinition:
   create: true
