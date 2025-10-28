@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WEKA App Store</title>
+  {% if logo_b64 %}
+    <link rel="icon" type="image/png" href="data:image/png;base64,{{ logo_b64 }}">
+  {% endif %}
+  <!-- TailwindCSS via CDN for simplicity -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --weka-purple: #6b2fb3; --weka-purple-dark: #552695; --weka-dark: #0B0C10; }
+    body { background: #0b0c10; color: #e5e7eb; }
+    .brand-grad { background: linear-gradient(135deg, #1f2937 0%, #0b0c10 100%); }
+    .card { background: rgba(31, 41, 55, 0.6); border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(6px); }
+    .btn-purple { background: var(--weka-purple); color: white; }
+    .btn-purple:hover { background: var(--weka-purple-dark); }
+    .muted { color: #9ca3af; }
+    .status-dot { width: 10px; height: 10px; border-radius: 9999px; display: inline-block; margin-left: 8px; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <header class="brand-grad border-b border-white/10">
+    <div class="max-w-6xl mx-auto px-4 py-6 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        {% if logo_b64 %}
+          <img src="data:image/png;base64,{{ logo_b64 }}" alt="WEKA App Store" class="w-8 h-8 rounded-sm object-contain bg-white/0" />
+        {% else %}
+          <div class="w-8 h-8 rounded-sm" style="background: var(--weka-purple);"></div>
+        {% endif %}
+        <h1 class="text-2xl font-semibold tracking-tight">WEKA App Store</h1>
+      </div>
+      <a href="/" class="text-sm text-white/80 hover:text-white">Refresh</a>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-8 space-y-10">
+
+    <!-- Catalog -->
+    <section>
+      <div class="flex items-end justify-between mb-4">
+        <div>
+          <h2 class="text-xl font-semibold">App Catalog</h2>
+          <p class="muted text-sm">Choose an application to deploy to your Kubernetes cluster.</p>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="card rounded-lg p-5">
+          <h3 class="font-semibold">OSS RAG</h3>
+          <p class="muted text-sm mb-4">Deploy open-source RAG stack to your cluster.</p>
+          <a href="/blueprint/oss-rag" class="btn-purple px-4 py-2 rounded-md text-sm font-medium inline-block text-center">Learn More & Install</a>
+        </div>
+        <div class="card rounded-lg p-5">
+          <h3 class="font-semibold">NVIDIA RAG</h3>
+          <p class="muted text-sm mb-4">NVIDIA-optimized RAG stack. Requires GPU nodes.</p>
+          <a href="/blueprint/nvidia-rag" class="btn-purple px-4 py-2 rounded-md text-sm font-medium inline-block text-center">Learn More & Install</a>
+        </div>
+        <div class="card rounded-lg p-5">
+          <h3 class="font-semibold">NVIDIA VSS</h3>
+          <p class="muted text-sm mb-4">Vector search service with NVIDIA acceleration.</p>
+          <a href="/blueprint/nvidia-vss" class="btn-purple px-4 py-2 rounded-md text-sm font-medium inline-block text-center">Learn More & Install</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Cluster Status -->
+    <section>
+      <div class="flex items-end justify-between mb-4">
+        <div>
+          <h2 class="text-xl font-semibold">Cluster Status</h2>
+          <p class="muted text-sm">Overview of the connected Kubernetes cluster.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="init-cluster" class="btn-purple px-4 py-2 rounded-md text-sm font-medium">Initialize Cluster</button>
+          {% set dot_class = 'bg-green-500' if status.app_store_cluster_init_present is true else ('bg-red-500' if status.app_store_cluster_init_present is false else 'bg-gray-500') %}
+          <span class="status-dot {{ dot_class }}" title="Cluster Init Status"></span>
+          <button id="uninit-cluster" class="px-4 py-2 rounded-md text-sm font-medium border border-white/20 hover:bg-white/10">Un-initialize</button>
+        </div>
+      </div>
+      <div id="init-result" class="text-xs text-white/80 mb-2"></div>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="card rounded-lg p-5">
+          <div class="muted text-xs">CPU Worker Nodes</div>
+          <div class="text-2xl font-semibold">{{ status.cpu_nodes if status.cpu_nodes is not none else '-' }}</div>
+          <div class="text-xs muted mt-1">
+            CPU cores: 
+            {% if status.cpu_cores_used is not none and status.cpu_cores_free is not none and status.cpu_cores_total is not none %}
+              {{ status.cpu_cores_used }}/{{ status.cpu_cores_free }} ({{ status.cpu_cores_total }})
+            {% else %}
+              -
+            {% endif %}
+          </div>
+        </div>
+        <div class="card rounded-lg p-5">
+          <div class="muted text-xs">GPU Worker Nodes</div>
+          <div class="text-2xl font-semibold">{{ status.gpu_nodes if status.gpu_nodes is not none else '-' }}</div>
+          <div class="text-xs muted mt-1">
+            GPUs: 
+            {% if status.gpu_devices_used is not none and status.gpu_devices_free is not none and status.gpu_devices_total is not none %}
+              {{ status.gpu_devices_used }}/{{ status.gpu_devices_free }} ({{ status.gpu_devices_total }})
+            {% else %}
+              -
+            {% endif %}
+          </div>
+        </div>
+        <div class="card rounded-lg p-5">
+          <div class="muted text-xs">NVIDIA GPU Operator</div>
+          <div class="text-lg font-medium">
+            {% if status.gpu_operator_installed is true %}
+              <span class="text-green-400">Installed</span>
+            {% elif status.gpu_operator_installed is false %}
+              <span class="text-red-400">Not Installed</span>
+            {% else %}
+              <span class="muted">Unknown</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="card rounded-lg p-5">
+          <div class="muted text-xs">Kubernetes Version</div>
+          <div class="text-lg font-medium">{{ status.k8s_version if status.k8s_version else '-' }}</div>
+        </div>
+        <div class="card rounded-lg p-5">
+          <div class="muted text-xs">Default StorageClass</div>
+          <div class="text-lg font-medium">{{ status.default_storage_class if status.default_storage_class else '-' }}</div>
+          {% if status.default_storage_class_details %}
+          <div class="mt-2 text-xs text-white/80 space-y-1">
+            <div><span class="muted">Provisioner:</span> {{ status.default_storage_class_details.provisioner or '-' }}</div>
+            <div><span class="muted">Reclaim Policy:</span> {{ status.default_storage_class_details.reclaimPolicy or '-' }}</div>
+            <div><span class="muted">Volume Binding:</span> {{ status.default_storage_class_details.volumeBindingMode or '-' }}</div>
+            <div><span class="muted">Allow Expansion:</span> {{ status.default_storage_class_details.allowVolumeExpansion if status.default_storage_class_details.allowVolumeExpansion is not none else '-' }}</div>
+            {% if status.default_storage_class_details.parameters %}
+            <div class="muted">Parameters:</div>
+            <ul class="list-disc list-inside">
+              {% for k, v in status.default_storage_class_details.parameters.items() %}
+              <li class="text-white/80">{{ k }}: {{ v }}</li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+          </div>
+          {% endif %}
+        </div>
+        <div class="card rounded-lg p-5">
+          <div class="muted text-xs">Applied WekaAppStore CRs</div>
+          <div class="mt-1 text-sm">
+            {% if status.app_store_crd_installed is false %}
+              <span class="text-red-400">CRD not installed</span>
+            {% else %}
+              {% set crs = status.app_store_crs or [] %}
+              {% if crs|length == 0 %}
+                <span class="text-white/80">No CRs applied.</span>
+              {% else %}
+                <ul class="list-disc list-inside">
+                  {% for n in crs %}
+                    <li class="text-white/80">{{ n }}</li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <footer class="max-w-6xl mx-auto px-4 py-8 muted text-xs">
+    <div>Styled in the spirit of weka.io. This is a demo app store using FastAPI and Tailwind.</div>
+  </footer>
+
+  <script>
+    async function post(url, data) {
+      const options = data ? { method: 'POST', body: data } : { method: 'POST' };
+      const res = await fetch(url, options);
+      return res.json();
+    }
+
+    // Initialize Cluster direct deploy
+    const initBtn = document.getElementById('init-cluster');
+    if (initBtn) {
+      initBtn.addEventListener('click', async () => {
+        const resEl = document.getElementById('init-result');
+        resEl.textContent = 'Submitting cluster initialization...';
+        initBtn.disabled = true;
+        try {
+          const fd = new FormData();
+          fd.append('app_name', 'cluster-init');
+          fd.append('namespace', 'default'); // ignored by backend for cluster-init
+          const data = await post('/deploy', fd);
+          if (data.ok) {
+            const applied = (data.result && data.result.applied) ? data.result.applied.join(', ') : 'OK';
+            resEl.textContent = 'Initialize submitted. Applied: ' + applied + '. Reload the page to refresh status.';
+          } else {
+            resEl.textContent = 'Error: ' + (data.error || 'Unknown error');
+          }
+        } catch (e) {
+          resEl.textContent = 'Request failed: ' + e;
+        } finally {
+          initBtn.disabled = false;
+        }
+      });
+    }
+
+    // Un-initialize Cluster
+    const uninitBtn = document.getElementById('uninit-cluster');
+    if (uninitBtn) {
+      uninitBtn.addEventListener('click', async () => {
+        const resEl = document.getElementById('init-result');
+        resEl.textContent = 'Submitting un-initialize...';
+        uninitBtn.disabled = true;
+        try {
+          const data = await post('/uninit-cluster');
+          if (data.ok) {
+            resEl.textContent = 'Un-initialize submitted. ' + (data.result ? JSON.stringify(data.result) : 'OK') + '. Reload the page to refresh status.';
+          } else {
+            resEl.textContent = 'Error: ' + (data.error || 'Unknown error');
+          }
+        } catch (e) {
+          resEl.textContent = 'Request failed: ' + e;
+        } finally {
+          uninitBtn.disabled = false;
+        }
+      });
+    }
+  </script>
+</body>
+</html>

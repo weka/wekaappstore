@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wekaappstoregui-deployment
+  labels:
+    app: wekaappstoregui
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: wekaappstoregui
+  template:
+    metadata:
+      labels:
+        app: wekaappstoregui
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: wekaappstoregui
+          image: wekachrisjen/weka-app-store-gui:v0.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: UVICORN_WORKERS
+              value: "1"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wekaappstoregui-svc
+  labels:
+    app: wekaappstoregui
+spec:
+  type: ClusterIP
+  selector:
+    app: wekaappstoregui
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wekaappstoregui-lb
+  labels:
+    app: wekaappstoregui
+  # --- (Optional) provider-specific knobs shown below in comments ---
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"                 # create an NLB
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"   # external LB
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"       # target pods directly
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    # (optional) pin to specific subnets; otherwise rely on subnet tags
+    service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-0ec601f62aeb0d8f7,subnet-0a805aa002262cf4a"
+    # (optional) enable Proxy Protocol v2 if your app/ingress inside expects it
+    # service.beta.kubernetes.io/aws-load-balancer-proxy-protocol: "*"
+  #
+  #   # GKE (external; defaults are fine—annotations typically not needed)
+  #   # cloud.google.com/neg: '{"ingress": false}'                              # leave off unless you need NEGs
+  #
+  #   # Azure
+  #   # service.beta.kubernetes.io/azure-load-balancer-internal: "false"        # "true" for internal LB
+  #   # service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: "/healthz"
+spec:
+  type: LoadBalancer
+  selector:
+    app: wekaappstoregui
+  ports:
+    - name: http
+      port: 80            # external LB port
+      targetPort: 8000    # your container's port
+      protocol: TCP
+  # Keep the client source IP and let cloud LB health-check node ports.
+  # If you set Local, be sure at least one pod is on each node that receives traffic.
+  externalTrafficPolicy: Cluster
+  # To restrict who can hit the LB (CIDR allowlist), uncomment:
+  # loadBalancerSourceRanges:
+  #   - 0.0.0.0/0
