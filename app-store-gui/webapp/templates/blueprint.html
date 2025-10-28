@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blueprint Details</title>
+  {% if logo_b64 %}
+    <link rel="icon" type="image/png" href="data:image/png;base64,{{ logo_b64 }}">
+  {% endif %}
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --weka-purple: #6b2fb3; --weka-purple-dark: #552695; --weka-dark: #0B0C10; }
+    body { background: #0b0c10; color: #e5e7eb; }
+    .brand-grad { background: linear-gradient(135deg, #1f2937 0%, #0b0c10 100%); }
+    .card { background: rgba(31, 41, 55, 0.6); border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(6px); }
+    .btn-purple { background: var(--weka-purple); color: white; }
+    .btn-purple:hover { background: var(--weka-purple-dark); }
+    .muted { color: #9ca3af; }
+    .badge { padding: 2px 8px; border-radius: 9999px; font-size: 12px; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <header class="brand-grad border-b border-white/10">
+    <div class="max-w-6xl mx-auto px-4 py-6 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        {% if logo_b64 %}
+          <img src="data:image/png;base64,{{ logo_b64 }}" alt="WEKA App Store" class="w-12 h-12 rounded-sm object-contain bg-white/0" />
+        {% else %}
+          <div class="w-12 h-12 rounded-sm" style="background: var(--weka-purple);"></div>
+        {% endif %}
+        <a href="/" class="text-2xl font-semibold tracking-tight hover:underline">WEKA App Store</a>
+      </div>
+      <a href="/" class="text-sm text-white/80 hover:text-white">Back</a>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+      <div class="lg:col-span-2 space-y-6">
+        <div class="card rounded-lg p-6">
+          <h1 class="text-2xl font-semibold mb-2">
+            {% if name == 'oss-rag' %}Open-Source RAG Blueprint{% else %}{{ name | capitalize }} Blueprint{% endif %}
+          </h1>
+          <p class="muted">The WEKA Open Source Retrieval-Augmented Generation (RAG) project is designed to combine the power of large language models (LLMs) with high-performance data retrieval, providing accurate, context-aware, and verifiable responses. At its core, RAG integrates two major processes — retrieval and generation. The retrieval component efficiently indexes and searches through large volumes of text or vectorized data (using tools such as FAISS), while the generation component uses a local or cloud-based LLM (e.g., Llama or similar) to produce natural language answers informed by the retrieved context</p>
+        </div>
+
+        {% if oss_img_b64 %}
+        <div class="card rounded-lg p-3">
+          <img src="data:image/png;base64,{{ oss_img_b64 }}" alt="OSS RAG overview" class="w-full rounded-md" />
+        </div>
+        {% endif %}
+
+        <div class="card rounded-lg p-6">
+          <h2 class="text-xl font-semibold mb-3">What this blueprint installs</h2>
+          <ul class="list-disc ml-6 space-y-2 text-sm">
+            <li>Monitoring powered by Prometheus and Grafana)</li>
+            <li>Prometheus Adapter for custom metrics</li>
+            <li>NVIDIA GPU Operator</li>
+            <li>Cert-Manager</li>
+            <li>Milvus Vector Database</li>
+            <li>vLLM Inference Servers for embedding and Chat</li>
+            <li>Open WebUI for end-user interface</li>
+          </ul>
+          <div class="mt-3 text-xs muted">Manifest: {{ yaml_path }}</div>
+        </div>
+      </div>
+
+      <div class="space-y-6">
+        <div class="card rounded-lg p-6">
+          <h2 class="text-lg font-semibold mb-4">Cluster Compatibility</h2>
+          <div class="space-y-3 text-sm">
+            <div class="flex items-center justify-between">
+              <div>CPU worker nodes</div>
+              <div class="flex items-center gap-2">
+                <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need ≥ {{ requirements.cpu_nodes }}</span>
+                {% if meets.cpu is none %}
+                  <span class="badge" style="background: #374151;">unknown</span>
+                {% elif meets.cpu %}
+                  <span class="badge" style="background: #065f46; color: #d1fae5;">ok (have {{ status.cpu_nodes }})</span>
+                {% else %}
+                  <span class="badge" style="background: #7f1d1d; color: #fee2e2;">insufficient (have {{ status.cpu_nodes }})</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="flex items-center justify-between">
+              <div>GPU worker nodes</div>
+              <div class="flex items-center gap-2">
+                <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need ≥ {{ requirements.gpu_nodes }}</span>
+                {% if meets.gpu is none %}
+                  <span class="badge" style="background: #374151;">unknown</span>
+                {% elif meets.gpu %}
+                  <span class="badge" style="background: #065f46; color: #d1fae5;">ok (have {{ status.gpu_nodes }})</span>
+                {% else %}
+                  <span class="badge" style="background: #7f1d1d; color: #fee2e2;">insufficient (have {{ status.gpu_nodes }})</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="flex items-center justify-between">
+              <div>NVIDIA GPU Operator</div>
+              <div>
+                {% if status.gpu_operator_installed is true %}
+                  <span class="badge" style="background: #065f46; color: #d1fae5;">installed</span>
+                {% elif status.gpu_operator_installed is false %}
+                  <span class="badge" style="background: #7f1d1d; color: #fee2e2;">not installed</span>
+                {% else %}
+                  <span class="badge" style="background: #374151;">unknown</span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card rounded-lg p-6">
+          <h2 class="text-lg font-semibold mb-3">Configure</h2>
+          <form id="deploy-form" class="space-y-4">
+            <div>
+              <label class="block text-sm mb-1" for="namespace">Namespace</label>
+              <input id="namespace" name="namespace" placeholder="default" value="default"
+                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+              <div class="muted text-xs mt-1">Only namespace is configurable from this page.</div>
+            </div>
+            <button type="submit" class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium">Deploy Blueprint</button>
+            <div id="deploy-result" class="text-xs mt-2"></div>
+          </form>
+
+          <div id="progress" class="mt-4 hidden">
+            <h3 class="text-sm font-semibold mb-2">Installation Progress</h3>
+            <ul id="progress-list" class="space-y-1 text-sm"></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="max-w-6xl mx-auto px-4 py-8 muted text-xs">
+    <div>Blueprint page inspired by NVIDIA Blueprints, adapted for WARRP.</div>
+  </footer>
+
+  <script>
+    const form = document.getElementById('deploy-form');
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const ns = document.getElementById('namespace').value || 'default';
+      const resEl = document.getElementById('deploy-result');
+      const progressEl = document.getElementById('progress');
+      const listEl = document.getElementById('progress-list');
+
+      // Reset UI
+      resEl.textContent = 'Starting deployment...';
+      listEl.innerHTML = '';
+      progressEl.classList.remove('hidden');
+
+      const url = `/deploy-stream?app_name={{ name }}&namespace=${encodeURIComponent(ns)}`;
+      const es = new EventSource(url);
+
+      let currentIndex = -1;
+
+      es.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'init') {
+            // Render items
+            listEl.innerHTML = '';
+            (msg.items || []).forEach((item, idx) => {
+              const li = document.createElement('li');
+              li.textContent = item;
+              li.className = 'px-3 py-2 rounded border border-white/10 bg-gray-800/40';
+              li.dataset.idx = idx;
+              listEl.appendChild(li);
+            });
+            resEl.textContent = 'Applying manifest to cluster...';
+          } else if (msg.type === 'progress') {
+            // Update highlight
+            if (currentIndex >= 0) {
+              const prev = listEl.querySelector(`li[data-idx="${currentIndex}"]`);
+              if (prev) prev.className = 'px-3 py-2 rounded border border-white/10 bg-gray-800/40';
+            }
+            currentIndex = msg.currentIndex ?? -1;
+            const cur = listEl.querySelector(`li[data-idx="${currentIndex}"]`);
+            if (cur) cur.className = 'px-3 py-2 rounded border border-yellow-400 bg-yellow-500/10 text-yellow-300';
+          } else if (msg.type === 'complete') {
+            // Mark all as done
+            listEl.querySelectorAll('li').forEach(li => {
+              li.className = 'px-3 py-2 rounded border border-green-500/60 bg-green-500/10 text-green-300';
+            });
+            resEl.textContent = 'Deployment submitted. Applied: ' + ((msg.result && msg.result.applied && msg.result.applied.join(', ')) || 'OK');
+            es.close();
+          } else if (msg.type === 'error') {
+            resEl.textContent = 'Error: ' + (msg.message || 'Unknown error');
+            es.close();
+          }
+        } catch (err) {
+          resEl.textContent = 'Stream parse error: ' + err;
+          es.close();
+        }
+      };
+
+      es.onerror = () => {
+        resEl.textContent = 'Stream connection error.';
+        es.close();
+      };
+    });
+  </script>
+</body>
+</html>
