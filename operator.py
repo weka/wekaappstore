@@ -5,6 +5,7 @@ import subprocess
 import yaml
 import tempfile
 import os
+import time
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 
@@ -302,13 +303,15 @@ def wait_for_component_ready(component: Dict[str, Any], namespace: str, timeout:
     check_type = readiness_check.get('type', 'pod')
 
     # Build a smarter default selector:
-    # Prefer Helm's standard label app.kubernetes.io/instance=<releaseName>,
-    # fall back to app=<component name> if no helm config present.
+    # Prefer Helm's standard labels and include a secondary name label if possible.
     default_selector = f"app={component['name']}"
     helm_cfg = component.get('helmChart') or {}
     release_name = helm_cfg.get('releaseName', component.get('name'))
+    # Some charts set app.kubernetes.io/name to the chart/release name; use component name as a reasonable default
+    chart_name = (helm_cfg.get('name') or component.get('chartName') or component.get('name'))
     if release_name:
-        default_selector = f"app.kubernetes.io/instance={release_name}"
+        # Try a compound selector first (instance + name) which matches many Helm charts
+        default_selector = f"app.kubernetes.io/instance={release_name},app.kubernetes.io/name={chart_name}"
 
     # Normalize selector: accept string, dict (matchLabels), or list
     raw_selector = readiness_check.get('selector')
@@ -324,6 +327,7 @@ def wait_for_component_ready(component: Dict[str, Any], namespace: str, timeout:
         selector = str(raw_selector)
 
     check_timeout = int(readiness_check.get('timeout', timeout))
+    grace_period = int(readiness_check.get('gracePeriodSeconds', 5))
 
     target_namespace = component.get('targetNamespace', namespace)
 
@@ -342,6 +346,10 @@ def wait_for_component_ready(component: Dict[str, Any], namespace: str, timeout:
         logging.info(
             f"Waiting for component '{component['name']}' (type={check_type}, resource={resource}, selector='{selector}') to be ready (timeout: {check_timeout}s) in ns '{target_namespace}'...")
 
+        # Small grace period to let resources appear after Helm returns
+        if grace_period > 0:
+            time.sleep(grace_period)
+
         cmd = [
             'kubectl', 'wait', f"--for=condition={condition}", resource,
             '-l', selector,
@@ -355,28 +363,55 @@ def wait_for_component_ready(component: Dict[str, Any], namespace: str, timeout:
             logging.info(f"Component '{component['name']}' is ready")
             return True
 
-        # If no matching resources, try a conservative fallback selector once
-        stderr = (result.stderr or '').lower()
-        if 'no matching resources' in stderr and selector != f"app={component['name']}":
-            fallback_selector = f"app={component['name']}"
+        stderr_full = result.stderr or ''
+        stdout_full = result.stdout or ''
+        stderr = stderr_full.lower()
+
+        # If the selector matched nothing on the chosen resource type, try a deployment as a common fallback
+        if 'no matching resources' in stderr:
+            # First try switching resource to deployment with the same selector
+            if resource != 'deployment':
+                logging.warning(
+                    f"No resources found for selector '{selector}' on {resource}. Retrying once as 'deployment'.")
+                cmd_deploy = [
+                    'kubectl', 'wait', f"--for=condition=available", 'deployment',
+                    '-l', selector,
+                    '-n', target_namespace,
+                    f"--timeout={min(90, check_timeout)}s"
+                ]
+                result_dep = subprocess.run(cmd_deploy, capture_output=True, text=True, timeout=min(105, check_timeout + 15))
+                if result_dep.returncode == 0:
+                    logging.info(f"Component '{component['name']}' is ready (deployment)")
+                    return True
+                # Fall through to label fallback below using pods
+
+            # Then try a conservative fallback selector once on pods
+            if selector != f"app={component['name']}":
+                fallback_selector = f"app={component['name']}"
+                logging.warning(
+                    f"No resources found for selector '{selector}'. Retrying once with fallback selector '{fallback_selector}'.")
+                cmd_fallback = [
+                    'kubectl', 'wait', f"--for=condition={condition}", 'pod',
+                    '-l', fallback_selector,
+                    '-n', target_namespace,
+                    f"--timeout={min(60, check_timeout)}s"
+                ]
+                result_fb = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=min(75, check_timeout + 15))
+                if result_fb.returncode == 0:
+                    logging.info(f"Component '{component['name']}' is ready (fallback selector)")
+                    return True
+                logging.warning(
+                    f"Component '{component['name']}' not ready with fallback: {result_fb.stderr or result_fb.stdout}")
+                return False
+
+        # Explicitly surface Forbidden errors to hint at RBAC issues
+        if 'forbidden' in stderr:
             logging.warning(
-                f"No resources found for selector '{selector}'. Retrying once with fallback selector '{fallback_selector}'.")
-            cmd_fallback = [
-                'kubectl', 'wait', f"--for=condition={condition}", resource,
-                '-l', fallback_selector,
-                '-n', target_namespace,
-                f"--timeout={min(60, check_timeout)}s"
-            ]
-            result_fb = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=min(75, check_timeout + 15))
-            if result_fb.returncode == 0:
-                logging.info(f"Component '{component['name']}' is ready (fallback selector)")
-                return True
-            logging.warning(
-                f"Component '{component['name']}' not ready with fallback: {result_fb.stderr or result_fb.stdout}")
+                f"RBAC forbidden while waiting for component '{component['name']}': {stderr_full or stdout_full}")
             return False
 
         logging.warning(
-            f"Component '{component['name']}' not ready: {result.stderr or result.stdout}")
+            f"Component '{component['name']}' not ready: {stderr_full or stdout_full}")
         return False
 
     except Exception as e:
