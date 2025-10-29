@@ -19,6 +19,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+BLUEPRINTS_DIR = os.path.join(BASE_DIR, "blueprints")
 
 # Mount static if present (not strictly required since we use Tailwind CDN)
 if os.path.isdir(STATIC_DIR):
@@ -601,9 +602,11 @@ def infer_requirements_from_yaml(file_path: str) -> Dict[str, int]:
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     status = get_cluster_status()
+    auth = get_auth_status()
     return templates.TemplateResponse("index.html", {
         "request": request,
         "status": status,
+        "auth": auth,
         "logo_b64": LOGO_B64,
     })
 
@@ -613,13 +616,121 @@ async def status_endpoint():
     return JSONResponse(get_cluster_status())
 
 
+def get_auth_status() -> Dict[str, Any]:
+    """Return whether the app can authenticate to the Kubernetes API, with connection details.
+
+    Semantics:
+    - authenticated=True (green) if we can load config and successfully call the Version API.
+    - 403 Forbidden is treated as authenticated (identity recognized) but unauthorized (still green for auth light).
+    - 401 or other failures → authenticated=False (red).
+
+    Also returns `details` describing how we connected.
+    """
+    mode = os.getenv("KUBERNETES_AUTH_MODE", "auto").lower().strip()
+
+    # Default details
+    details: Dict[str, Any] = {
+        "source": "unknown",   # incluster | kubeconfig | unknown
+        "server": None,
+        "context": None,
+        "namespace": None,
+        "user": None,
+    }
+
+    def detect_details_after_load() -> None:
+        """Populate `details` by inspecting the active client configuration and environment."""
+        try:
+            # Host (API server) from the active client config
+            cfg = client.Configuration.get_default_copy() if hasattr(client.Configuration, 'get_default_copy') else client.Configuration()
+            host = getattr(cfg, 'host', None)
+            if not host:
+                # Fallback via ApiClient
+                try:
+                    api_client = client.ApiClient()
+                    host = getattr(api_client.configuration, 'host', None)
+                except Exception:
+                    host = None
+            details["server"] = host
+        except Exception:
+            pass
+
+        # Heuristics to determine source/context/namespace/user
+        sa_token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+        sa_ns_path = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+        svc_host_env = os.getenv("KUBERNETES_SERVICE_HOST")
+        try:
+            # Prefer in-cluster if SA files/env present and host resembles in-cluster
+            incluster_hint = (os.path.exists(sa_token_path) and (svc_host_env is not None or (details.get("server") or "").endswith(".svc")))
+            if incluster_hint:
+                details["source"] = "incluster"
+                # Namespace from SA file if available
+                try:
+                    if os.path.exists(sa_ns_path):
+                        with open(sa_ns_path, 'r') as f:
+                            details["namespace"] = f.read().strip() or None
+                except Exception:
+                    pass
+                details["user"] = "ServiceAccount (in-cluster)"
+                return
+        except Exception:
+            pass
+
+        # Otherwise, attempt to obtain kubeconfig context info
+        try:
+            contexts, current = config.list_kube_config_contexts()
+            cur_ctx_name = (current or {}).get('name')
+            cur_ctx = (current or {}).get('context') or {}
+            ns = cur_ctx.get('namespace') or 'default'
+            user = cur_ctx.get('user')
+            details.update({
+                "source": "kubeconfig",
+                "context": cur_ctx_name,
+                "namespace": ns,
+                "user": user,
+            })
+        except Exception:
+            # Leave as unknown if not available
+            pass
+
+    try:
+        # Try to load configuration (in-cluster or kubeconfig depending on env)
+        load_kube_config()
+        detect_details_after_load()
+    except Exception as e:
+        return {"authenticated": False, "mode": mode, "message": str(e), "details": details}
+
+    try:
+        version_api = client.VersionApi()
+        ver = version_api.get_code()
+        return {
+            "authenticated": True,
+            "mode": mode,
+            "message": f"Connected to Kubernetes {getattr(ver, 'git_version', 'unknown')}",
+            "details": details,
+        }
+    except ApiException as e:
+        # 403 generally means the token is valid (authenticated) but lacks permission
+        if e.status == 403:
+            return {"authenticated": True, "mode": mode, "message": f"Authenticated but forbidden (RBAC): {e.reason}", "details": details}
+        if e.status == 401:
+            return {"authenticated": False, "mode": mode, "message": f"Unauthorized: {e.reason}", "details": details}
+        return {"authenticated": False, "mode": mode, "message": f"API error: {e.reason}", "details": details}
+    except Exception as e:
+        return {"authenticated": False, "mode": mode, "message": str(e), "details": details}
+
+
+@app.get("/auth-status")
+async def auth_status_endpoint():
+    return JSONResponse(get_auth_status())
+
+
 @app.get("/blueprint/{name}", response_class=HTMLResponse)
 async def blueprint_detail(request: Request, name: str):
     app_map = {
-        "oss-rag": os.path.join("Production Deployments", "oss-rag-stack.yaml"),
+        "oss-rag": os.path.join(BLUEPRINTS_DIR, "oss-rag-stack.yaml"),
         "nvidia-rag": os.path.join("Production Deployments", "nvidia-rag.yaml"),
         "nvidia-vss": os.path.join("Production Deployments", "nvidia-vss.yaml"),
-        "cluster-init": os.path.join("Production Deployments", "app-store-cluster-init.yaml"),
+        "cluster-init": os.path.join(BLUEPRINTS_DIR, "app-store-cluster-init.yaml"),
     }
     yaml_path = app_map.get(name)
     if not yaml_path:
@@ -656,10 +767,10 @@ async def blueprint_detail(request: Request, name: str):
 async def deploy(app_name: str = Form(...), namespace: str = Form("default")):
     # Map app names to yaml paths
     app_map = {
-        "oss-rag": os.path.join("Production Deployments", "oss-rag-stack.yaml"),
+        "oss-rag": os.path.join(BLUEPRINTS_DIR, "oss-rag-stack.yaml"),
         "nvidia-rag": os.path.join("Production Deployments", "nvidia-rag.yaml"),
         "nvidia-vss": os.path.join("Production Deployments", "nvidia-vss.yaml"),
-        "cluster-init": os.path.join("Production Deployments", "app-store-cluster-init.yaml"),
+        "cluster-init": os.path.join(BLUEPRINTS_DIR, "app-store-cluster-init.yaml"),
     }
     yaml_path = app_map.get(app_name)
     if not yaml_path:
@@ -815,10 +926,10 @@ async def deploy_stream(request: Request, app_name: str, namespace: str = "defau
     - {type: 'error', message: '...'}
     """
     app_map = {
-        "oss-rag": os.path.join("Production Deployments", "oss-rag-stack.yaml"),
+        "oss-rag": os.path.join(BLUEPRINTS_DIR, "oss-rag-stack.yaml"),
         "nvidia-rag": os.path.join("Production Deployments", "nvidia-rag.yaml"),
         "nvidia-vss": os.path.join("Production Deployments", "nvidia-vss.yaml"),
-        "cluster-init": os.path.join("Production Deployments", "app-store-cluster-init.yaml"),
+        "cluster-init": os.path.join(BLUEPRINTS_DIR, "app-store-cluster-init.yaml"),
     }
     yaml_path = app_map.get(app_name)
 
