@@ -165,7 +165,52 @@
   </main>
 
   <footer class="max-w-6xl mx-auto px-4 py-8 muted text-xs">
-    <div>Styled in the spirit of weka.io. This is a demo app store using FastAPI and Tailwind.</div>
+    <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div>Styled in the spirit of weka.io. This is a demo app store using FastAPI and Tailwind.</div>
+      <div class="flex-1 w-full">
+        <div class="flex items-center text-sm mb-3">
+          <span>Kubernetes Auth</span>
+          {% set auth_class = 'bg-green-500' if auth and auth.authenticated else 'bg-red-500' %}
+          <span id="auth-status-dot" class="status-dot {{ auth_class }}" title=""></span>
+          <span id="auth-status-text" class="ml-2">
+            {% if auth and auth.authenticated %}Connected{% else %}Not connected{% endif %}
+          </span>
+        </div>
+        <!-- Auth Details Box -->
+        <div class="card rounded-lg p-4 text-xs">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <div class="muted">Mode</div>
+              <div id="auth-detail-mode" class="text-white/90">{{ auth.mode if auth else '-' }}</div>
+            </div>
+            <div>
+              <div class="muted">Source</div>
+              <div id="auth-detail-source" class="text-white/90">{{ auth.details.source if auth and auth.details else '-' }}</div>
+            </div>
+            <div>
+              <div class="muted">Server</div>
+              <div id="auth-detail-server" class="text-white/90 truncate" title="{{ auth.details.server if auth and auth.details else '' }}">{{ auth.details.server if auth and auth.details else '-' }}</div>
+            </div>
+            <div>
+              <div class="muted">Context</div>
+              <div id="auth-detail-context" class="text-white/90">{{ auth.details.context if auth and auth.details else '-' }}</div>
+            </div>
+            <div>
+              <div class="muted">Namespace</div>
+              <div id="auth-detail-namespace" class="text-white/90">{{ auth.details.namespace if auth and auth.details else '-' }}</div>
+            </div>
+            <div>
+              <div class="muted">User</div>
+              <div id="auth-detail-user" class="text-white/90">{{ auth.details.user if auth and auth.details else '-' }}</div>
+            </div>
+            <div class="md:col-span-3">
+              <div class="muted">Message</div>
+              <div id="auth-detail-message" class="text-white/90">{{ auth.message if auth else '-' }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </footer>
 
   <script>
@@ -174,6 +219,62 @@
       const res = await fetch(url, options);
       return res.json();
     }
+
+    async function get(url) {
+      const res = await fetch(url);
+      return res.json();
+    }
+
+    async function refreshAuthStatus() {
+      try {
+        const data = await get('/auth-status');
+        const dot = document.getElementById('auth-status-dot');
+        const text = document.getElementById('auth-status-text');
+        if (!dot || !text) return;
+        if (data && data.authenticated) {
+          dot.classList.remove('bg-red-500');
+          dot.classList.add('bg-green-500');
+          text.textContent = 'Connected';
+        } else {
+          dot.classList.remove('bg-green-500');
+          dot.classList.add('bg-red-500');
+          text.textContent = 'Not connected';
+        }
+        // Update tooltip/title with diagnostic message if available
+        if (data && data.message) {
+          dot.title = data.message;
+        }
+        // Update details box if present
+        const setText = (id, val) => {
+          const el = document.getElementById(id);
+          if (el) { el.textContent = (val !== undefined && val !== null && val !== '') ? String(val) : '-'; }
+        };
+        setText('auth-detail-mode', data?.mode);
+        setText('auth-detail-source', data?.details?.source);
+        // For server we also update the title attribute
+        const serverEl = document.getElementById('auth-detail-server');
+        if (serverEl) {
+          const v = data?.details?.server;
+          serverEl.textContent = (v ? String(v) : '-');
+          serverEl.title = v ? String(v) : '';
+        }
+        setText('auth-detail-context', data?.details?.context);
+        setText('auth-detail-namespace', data?.details?.namespace);
+        setText('auth-detail-user', data?.details?.user);
+        setText('auth-detail-message', data?.message);
+      } catch (e) {
+        const dot = document.getElementById('auth-status-dot');
+        const text = document.getElementById('auth-status-text');
+        if (dot) { dot.classList.remove('bg-green-500'); dot.classList.add('bg-red-500'); dot.title = String(e); }
+        if (text) { text.textContent = 'Not connected'; }
+        const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = '-'; };
+        ['auth-detail-mode','auth-detail-source','auth-detail-server','auth-detail-context','auth-detail-namespace','auth-detail-user','auth-detail-message'].forEach(id => setText(id, '-'));
+      }
+    }
+
+    // Kick off an initial refresh after page load and poll periodically
+    refreshAuthStatus();
+    setInterval(refreshAuthStatus, 10000);
 
     // Initialize Cluster direct deploy
     const initBtn = document.getElementById('init-cluster');

@@ -137,3 +137,6 @@ rbac:
 
 customResourceDefinition:
   create: true
+
+gui:
+  enabled: true

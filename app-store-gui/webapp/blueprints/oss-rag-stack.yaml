@@ -1,0 +1,524 @@
+apiVersion: warp.io/v1alpha1
+kind: WekaAppStore
+metadata:
+  name: oss-rag-stack
+  namespace: default
+spec:
+  appStack:
+    components:
+        # 1. cert-manager - Depends on cert-manager being ready
+      - name: cert-manager
+        description: "Certificate management for Kubernetes"
+        enabled: true
+        helmChart:
+          name: "oci://quay.io/jetstack/charts/cert-manager"
+          version: "v1.19.0"
+          releaseName: "cert-manager"
+        values:
+          crds:
+            enabled: true
+        waitForReady: true
+        readinessCheck:
+          type: pod
+          selector: "app=cert-manager"
+          timeout: 300
+        targetNamespace: default
+      
+      # 2. Milvus - Depends on cert-manager being ready
+      - name: milvus
+        description: "Milvus vector database cluster"
+        enabled: true
+        dependsOn:
+          - cert-manager
+        helmChart:
+          repository: "https://zilliztech.github.io/milvus-helm/"
+          name: "milvus"
+          #version: "2.5.1"
+          releaseName: "my-release"
+        valuesFiles:
+          - kind: ConfigMap
+            name: milvus-config
+            key: milvus_values.yaml
+        waitForReady: true
+        readinessCheck:
+          type: pod
+          selector: "app.kubernetes.io/instance=my-release"
+          timeout: 300
+        targetNamespace: default
+
+      # Initialize Milvus database for Open WebUI
+      - name: milvus-init-db
+        targetNamespace: default
+        dependsOn:
+          - milvus
+        description: "Initialize Milvus database for application"
+        enabled: true
+        kubernetesManifest: |
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: milvus-init-db
+          spec:
+            template:
+              spec:
+                restartPolicy: OnFailure
+                containers:
+                - name: create-db
+                  image: curlimages/curl:8.16.0
+                  env:
+                    - name: CLUSTER_ENDPOINT
+                      value: "http://my-release-milvus.default.svc.cluster.local:19530"
+                    - name: DB_NAME
+                      value: "openwebui"
+                  command:
+                    - /bin/sh
+                    - -c
+                    - |
+                      set -euo pipefail
+                      # create DB (idempotent—OK if it already exists)
+                      curl -sS -X POST "${CLUSTER_ENDPOINT}/v2/vectordb/databases/create" \
+                        -H "Content-Type: application/json" \
+                        -d "{\"dbName\":\"${DB_NAME}\"}" || true
+      
+      # 3. vLLM Embedding Stack - Depends on Milvus
+      - name: vllm-embedding
+        description: "vLLM embedding model server"
+        enabled: true
+        helmChart:
+          repository: "https://vllm-project.github.io/production-stack"
+          name: "vllm-stack"
+          releaseName: "vllm-embed"
+        valuesFiles:
+          - kind: ConfigMap
+            name: vllm-config
+            key: vllm-stack-embed.yaml
+        waitForReady: true
+        readinessCheck:
+          type: pod
+          selector: "helm-release-name=vllm-embed"
+          timeout: 600
+        targetNamespace: default
+      
+      # 4. vLLM Chat Stack - Depends on Milvus (parallel with embedding)
+      - name: vllm-chat
+        description: "vLLM chat model server"
+        enabled: true
+        helmChart:
+          repository: "https://vllm-project.github.io/production-stack"
+          name: "vllm-stack"
+          releaseName: "vllm-chat"
+        valuesFiles:
+          - kind: ConfigMap
+            name: vllm-config
+            key: vllm-stack-chat.yaml
+        waitForReady: true
+        readinessCheck:
+          type: pod
+          selector: "helm-release-name=vllm-chat"
+          timeout: 900
+        targetNamespace: default
+      
+      # 5. Hayhooks Indexing Pipeline - Depends on both vLLM services
+      # NOTE: This is a placeholder. To use this component:
+      # 1. Include the full Kubernetes manifest from hayhooks-configmaps.yaml and hayhook.yaml
+      # 2. Or use a Helm chart if available
+      # 3. Or set enabled: false and deploy separately
+      - name: hayhooks-indexing
+        description: "Hayhooks indexing pipeline service"
+        enabled: false  # Set to false since this is a placeholder
+        dependsOn:
+          - vllm-embedding
+        kubernetesManifest: |
+          # PLACEHOLDER: Empty manifest
+          # To use this component, replace with actual Hayhooks manifest
+          # from hayhooks-configmaps.yaml and hayhook.yaml
+        waitForReady: true
+        readinessCheck:
+          type: pod
+          selector: "app=haystack"
+          timeout: 300
+        targetNamespace: default
+      
+      # 6. Hayhooks RAG Search - Depends on indexing pipeline and chat model
+      # NOTE: This is a placeholder. To use this component:
+      # 1. Include the full Kubernetes manifest from hayhook-openai.yaml
+      # 2. Or use a Helm chart if available
+      # 3. Or set enabled: false and deploy separately
+      - name: hayhooks-rag-search
+        description: "Hayhooks RAG search pipeline service"
+        enabled: false  # Set to false since this is a placeholder
+        dependsOn:
+          - vllm-chat
+        kubernetesManifest: |
+          # PLACEHOLDER: Empty manifest
+          # To use this component, replace with actual Hayhooks RAG manifest
+          # from hayhook-openai.yaml
+        waitForReady: true
+        readinessCheck:
+          type: pod
+          selector: "app=haystack-rag"
+          timeout: 300
+        targetNamespace: default
+      
+      # 7. Open WebUI - Depends on all services being ready
+      - name: open-webui
+        description: "Open WebUI frontend"
+        enabled: true
+        dependsOn:
+          - milvus
+          - milvus-init-db
+          - vllm-chat
+          - vllm-embedding
+        helmChart:
+          repository: "https://open-webui.github.io/helm-charts"
+          name: "open-webui"
+          releaseName: "openwebui"
+        valuesFiles:
+          - kind: ConfigMap
+            name: openwebui-config
+            key: values-openwebui.yaml
+        waitForReady: true
+        readinessCheck:
+          type: pod
+          selector: "app.kubernetes.io/name=open-webui"
+          timeout: 300
+        targetNamespace: default
+---
+# ConfigMap for Milvus values
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: milvus-config
+  namespace: default
+data:
+  milvus_values.yaml: |
+    ## Enable or disable Milvus Cluster mode
+    cluster:
+      enabled: true
+    
+    image:
+      all:
+        repository: milvusdb/milvus
+        tag: v2.5.1
+        pullPolicy: IfNotPresent
+      tools:
+        repository: milvusdb/milvus-config-tool
+        tag: v0.1.2
+        pullPolicy: IfNotPresent
+    
+    service:
+      type: ClusterIP
+      port: 19530
+      portName: milvus
+      nodePort: ""
+      annotations: {}
+      labels: {}
+    
+    streaming:
+      enabled: false
+
+    attu:
+      enabled: true
+      name: attu
+      image:
+        repository: zilliz/attu
+        tag: latest
+        pullPolicy: IfNotPresent
+      service:
+        annotations: {}
+        labels: {}
+        type: ClusterIP
+        port: 3000
+        # loadBalancerIP: ""
+      resources: {}
+      ingress:
+        enabled: false
+        annotations: {}
+        # Annotation example: set nginx ingress type
+        # kubernetes.io/ingress.class: nginx
+        labels: {}
+        hosts:
+          - milvus-attu.local
+        tls: []
+        #  - secretName: chart-attu-tls
+        #    hosts:
+        #      - milvus-attu.local
+    
+    metrics:
+      serviceMonitor:
+        enabled: true
+        # Optional: if your Prometheus Operator watches a specific namespace or selector:
+        namespace: monitoring
+        additionalLabels:
+          release: kube-prom-stack    # must match your Prometheus Operator's selector
+    
+        # Optional: interval and scrape settings
+        interval: 15s
+        scrapeTimeout: 10s
+    
+    livenessProbe:
+      enabled: true
+      initialDelaySeconds: 90
+      periodSeconds: 30
+      timeoutSeconds: 5
+      successThreshold: 1
+      failureThreshold: 5
+    
+    readinessProbe:
+      enabled: true
+      initialDelaySeconds: 90
+      periodSeconds: 10
+      timeoutSeconds: 5
+      successThreshold: 1
+      failureThreshold: 5
+    
+    log:
+      level: "info"
+      file:
+        maxSize: 300    # MB
+        maxAge: 10    # day
+        maxBackups: 20
+      format: "text"    # text/json
+    
+      persistence:
+        mountPath: "/milvus/logs"
+        ## If true, create/use a Persistent Volume Claim
+        ## If false, use emptyDir
+        ##
+        enabled: false
+        annotations:
+          helm.sh/resource-policy: delete
+        persistentVolumeClaim:
+          existingClaim: ""
+          ## Milvus Logs Persistent Volume Storage Class
+          ## If defined, storageClassName: <storageClass>
+          ## If set to "-", storageClassName: "", which disables dynamic provisioning
+          ## If undefined (the default) or set to null, no storageClassName spec is
+          ##   set, choosing the default provisioner.
+          ## ReadWriteMany access mode required for milvus cluster.
+          ##
+          storageClass: default
+          accessModes: ReadWriteOnce
+          size: 10Gi
+          subPath: ""
+---
+# ConfigMap for Open WebUI values
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openwebui-config
+  namespace: default
+data:
+  values-openwebui.yaml: |
+    # values-dev-milvus.yaml
+    # Open WebUI (dev) with Milvus as the vector database
+    
+    replicaCount: 1
+    
+    image:
+      repository: ghcr.io/open-webui/open-webui
+      tag: 0.6.30
+      pullPolicy: IfNotPresent
+    
+    service:
+      # For local dev, NodePort is simple to access via minikube service/port-forward.
+      type: ClusterIP
+      port: 3000
+    #  nodePort: null   # let Kubernetes pick a free port; or set e.g. 30080
+    
+    ingress:
+      enabled: false
+    
+    # Lightweight persistence for uploaded files/configs in dev
+    persistence:
+      enabled: true
+      storageClass: "default"
+      accessMode: ReadWriteOnce
+      size: 20Gi
+    
+    # Resource knobs (modest defaults for laptops/small clusters)
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1
+        memory: 1Gi
+    
+    # --- RAG / Vector DB: Milvus ---
+    # The MILVUS_DB needs to exist prior to installing Open WebUI
+    
+    extraEnvVars:
+      - name: VECTOR_DB
+        value: "milvus"
+      - name: MILVUS_URI
+        value: "http://my-release-milvus.default.svc.cluster.local:19530"
+    
+      - name: MILVUS_DB
+        value: "openwebui"
+    #  - name: MILVUS_TOKEN
+    #    value: ""
+    
+    # --- Optional: turn off user memory in dev if you want only KB-backed RAG ---
+    # (Some users disable this during early Milvus tests.)
+    #  - name: ENABLE_USER_MEMORY
+    #    value: "false"
+    
+    # Must set this otherwise all the above settings will not apply
+      - name: ENABLE_PERSISTENT_CONFIG
+        value: "false"
+
+    # Enabling local vLLM Server
+      - name: ENABLE_OPENAI_API
+        value: "true"
+      - name: OPENAI_API_BASE_URL
+        value: "http://vllm-chat-mistral-7b-chat-engine-service.default.svc.cluster.local/v1"
+      - name: OPENAI_API_KEY
+        value: "dummy_key"
+      - name: ENABLE_DIRECT_CONNECTIONS
+        value: "true"
+    
+    #Document Embedding
+      - name: RAG_EMBEDDING_ENGINE
+        value: "openai"
+      - name: OPENAI_API_KEY
+        value: "dummy_key"
+      - name: RAG_OPENAI_API_BASE_URL
+        value: "http://vllm-embed-mistral-7b-engine-service.default.svc.cluster.local/v1"
+      # Choose the embedding model
+      - name: RAG_EMBEDDING_MODEL
+        value: "intfloat/e5-mistral-7b-instruct"
+    
+    #Branding of Open WebUI
+      - name: ENABLE_SIGNUP
+        value: "true"
+      - name: DEFAULT_LOCALE
+        value: "en"
+      - name: ENABLE_LOGIN_FORM
+        value: "true"
+      - name: ENABLE_OAUTH_SIGNUP
+        value: "false"
+      - name: ENABLE_CHANNELS
+        value: "false"
+      - name: WEBUI_NAME
+        value: "WEKA Enterprise Search (RAG)"
+    
+    # Enable Pipelines by default (Open WebUI’s chart often ships with this on for dev)
+    pipelines:
+      enabled: true
+    
+    # If you run embedded Ollama in the same release for local models, you can
+    # enable the bundled subchart here (commented out for minimal dev footprint).
+    # ollama:
+    #   gpu:
+    #     enabled: false
+    #   models:
+    #     pull: [ "llama3" ]
+    #     run:  [ "llama3" ]
+---
+# ConfigMap for vLLM values
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-config
+  namespace: default
+data:
+  vllm-stack-embed.yaml: |
+    # vLLM Embedding Stack configuration
+    servingEngineSpec:
+      runtimeClassName: ""
+      modelSpec:
+      - name: "mistral-7b"
+        repository: "vllm/vllm-openai"
+        tag: "v0.9.0"
+        modelURL: "intfloat/e5-mistral-7b-instruct"
+    
+        replicaCount: 1
+    
+        requestCPU: 1
+        requestMemory: "10Gi"
+        requestGPU: 1
+        pvcStorage: "100Gi"
+        pvcAccessMode:
+          - ReadWriteOnce
+        storageClass: "default"
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: "eks.amazonaws.com/nodegroup"
+                operator: "In"
+                values: [ "gpu-node-group-2025102723213486620000001b" ]
+    
+        vllmConfig:
+          enableChunkedPrefill: false
+          enablePrefixCaching: false
+          maxModelLen: 8192
+          task: "embed"
+          enforce_eager: true
+          dtype: "auto"
+          extraArgs: [ 
+            "--disable-log-requests", 
+            "--gpu-memory-utilization", "0.6", 
+            "--max-model-len", "8192",
+            "--max-seq-len-to-capture", "8192",
+          ]
+    
+    #      extraArgs: [
+    #        "--disable-log-requests",
+    #        "--gpu-memory-utilization", "0.6",
+    #        "--max-model-len", "8192",
+    #        "--max-seq-len-to-capture", "4096",
+    #        "--quantization", "bitsandbytes"
+    #      ]
+    
+        env:
+          - name: HUGGING_FACE_HUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: hf-token-secret
+                key: token
+  
+  vllm-stack-chat.yaml: |
+    # vLLM Chat Stack configuration
+    servingEngineSpec:
+      runtimeClassName: ""
+      modelSpec:
+      - name: "mistral-7b-chat"
+        repository: "vllm/vllm-openai"
+        tag: "latest"
+        modelURL: "mistralai/Mistral-7B-Instruct-v0.3"
+    
+        replicaCount: 1
+    
+        requestCPU: 1
+        requestMemory: "5Gi"
+        requestGPU: 1
+        pvcStorage: "100Gi"
+        pvcAccessMode:
+          - ReadWriteOnce
+        storageClass: "default"
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: "eks.amazonaws.com/nodegroup"
+                operator: "In"
+                values: [ "gpu-node-group-2025102723213486620000001b" ]
+    
+    #    nodeSelectorTerms:
+    #      - matchExpressions:
+    #          - key: "topology.kubernetes.io/zone"
+    #            operator: "In"
+    #            values: ["ap-southeast-2c"]
+    
+        vllmConfig:
+          enableChunkedPrefill: false
+          enablePrefixCaching: false
+          maxModelLen: 2048   # Set to a small number to work into the Mem for NVIDIA A10
+          dtype: "bfloat16"
+          extraArgs: [ "--disable-log-requests", "--gpu-memory-utilization", "0.8"]     # GPU Mem utilisation
+    
+        env:
+          - name: HUGGING_FACE_HUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: hf-token-secret
+                key: token
+---
