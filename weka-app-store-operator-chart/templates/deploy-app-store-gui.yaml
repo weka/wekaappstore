@@ -29,7 +29,7 @@ spec:
           args:
             - "--repo=https://github.com/weka/warp-blueprints.git"
             - "--root=/manifests"
-            - "--dest=manifests"
+            - "--link=manifests"
             - "--one-time"
           volumeMounts:
               - { name: manifests, mountPath: /manifests }
@@ -37,8 +37,10 @@ spec:
         - name: wekaappstoregui
           image: wekachrisjen/weka-app-store-gui:v0.8
           volumeMounts:
-            - { name: manifests, mountPath: /app,
-                readOnly: true }
+            - name: manifests
+              mountPath: /app/manifests
+              subPath: manifests/manifests
+              readOnly: true
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000

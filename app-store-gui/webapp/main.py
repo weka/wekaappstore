@@ -19,7 +19,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-BLUEPRINTS_DIR = os.path.join(BASE_DIR, "blueprints")
+BLUEPRINTS_DIR = os.getenv("BLUEPRINTS_DIR", "/app/manifests")
 
 # Mount static if present (not strictly required since we use Tailwind CDN)
 if os.path.isdir(STATIC_DIR):
