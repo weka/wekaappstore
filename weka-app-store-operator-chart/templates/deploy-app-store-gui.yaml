@@ -19,21 +19,37 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
+      volumes:
+        - name: manifests
+          emptyDir: {}
+      initContainers:
+        - name: git-sync
+          image: registry.k8s.io/git-sync/git-sync:v4.5.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--repo=https://github.com/weka/warp-blueprints.git"
+            - "--root=/manifests"
+            - "--one-time"
+          volumeMounts:
+              - { name: manifests, mountPath: /manifests }
       containers:
         - name: wekaappstoregui
-          image: wekachrisjen/weka-app-store-gui:v0.7
+          image: wekachrisjen/weka-app-store-gui:v0.8
+          volumeMounts:
+            - { name: manifests, mountPath: /app/blueprints,
+                readOnly: true }
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
           env:
             - name: UVICORN_WORKERS
               value: "1"
-#          readinessProbe:
-#            httpGet:
-#              path: /readyz
-#              port: 8000
-#            initialDelaySeconds: 2
-#            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 2
+            periodSeconds: 5
           livenessProbe:
             httpGet:
               path: /healthz

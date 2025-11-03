@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form, Query
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -611,9 +611,106 @@ async def index(request: Request):
     })
 
 
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    auth = get_auth_status()
+    # Use detected namespace if available, else default
+    detected_ns = (auth.get("details", {}) or {}).get("namespace") if isinstance(auth, dict) else None
+    return templates.TemplateResponse("settings.html", {
+        "request": request,
+        "auth": auth,
+        "detected_namespace": detected_ns or "default",
+        "logo_b64": LOGO_B64,
+    })
+
+
 @app.get("/status")
 async def status_endpoint():
     return JSONResponse(get_cluster_status())
+
+
+def create_or_update_secret(name: str, namespace: str, string_data: Dict[str, str]) -> Dict[str, Any]:
+    """Create or update an Opaque secret with given string_data.
+
+    Returns a dict with name/namespace and operation performed.
+    """
+    load_kube_config()
+    ensure_namespace_exists(namespace)
+    core = client.CoreV1Api()
+    metadata = client.V1ObjectMeta(name=name, namespace=namespace)
+    secret_body = client.V1Secret(metadata=metadata, type="Opaque", string_data=string_data)
+    try:
+        # Try create
+        core.create_namespaced_secret(namespace=namespace, body=secret_body)
+        return {"name": name, "namespace": namespace, "action": "created"}
+    except ApiException as ae:
+        if ae.status == 409:
+            # Exists – patch to update data without needing resourceVersion
+            patched = client.V1Secret(metadata=metadata, type="Opaque", string_data=string_data)
+            core.patch_namespaced_secret(name=name, namespace=namespace, body=patched)
+            return {"name": name, "namespace": namespace, "action": "updated"}
+        raise
+
+
+@app.post("/api/secret/huggingface")
+async def save_huggingface_key(api_key: str = Form(...), namespace: str = Form("default")):
+    try:
+        result = create_or_update_secret(
+            name="hf-api-key",
+            namespace=namespace.strip() or "default",
+            string_data={"HF_API_KEY": api_key},
+        )
+        return JSONResponse({"ok": True, "secret_name": result["name"], "namespace": result["namespace"], "action": result["action"]})
+    except ApiException as ae:
+        return JSONResponse({"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/secret/nvidia")
+async def save_nvidia_key(api_key: str = Form(...), namespace: str = Form("default")):
+    try:
+        result = create_or_update_secret(
+            name="nvidia-api-key",
+            namespace=namespace.strip() or "default",
+            string_data={"NVIDIA_API_KEY": api_key},
+        )
+        return JSONResponse({"ok": True, "secret_name": result["name"], "namespace": result["namespace"], "action": result["action"]})
+    except ApiException as ae:
+        return JSONResponse({"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/secrets")
+async def list_secrets(namespace: str = Query("all", description="Namespace to list secrets from; use 'all' for all namespaces")):
+    """List Kubernetes Secrets and return safe metadata only.
+
+    Returns items with: name, namespace, type, creationTimestamp.
+    """
+    try:
+        load_kube_config()
+        core = client.CoreV1Api()
+        items = []
+        if (namespace or "").strip().lower() in ("all", "*"):
+            sec_list = core.list_secret_for_all_namespaces(_preload_content=True)
+        else:
+            ns = namespace.strip()
+            sec_list = core.list_namespaced_secret(namespace=ns, _preload_content=True)
+        for s in (sec_list.items or []):
+            md = getattr(s, 'metadata', None)
+            items.append({
+                "name": md.name if md else None,
+                "namespace": md.namespace if md else None,
+                "type": getattr(s, 'type', None),
+                "creationTimestamp": (md.creation_timestamp.isoformat() if (md and md.creation_timestamp) else None),
+            })
+        return JSONResponse({"ok": True, "items": items})
+    except ApiException as ae:
+        # Permission errors or others
+        return JSONResponse({"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 def get_auth_status() -> Dict[str, Any]:
