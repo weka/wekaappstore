@@ -15,7 +15,7 @@ spec:
       labels:
         app: wekaappstoregui
     spec:
-      serviceAccountName: wekaappstoregui-sa
+      serviceAccountName: {{ include "weka-app-store-operator-chart.serviceAccountName" . }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
