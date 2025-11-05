@@ -899,24 +899,78 @@ async def install_crd():
 
 @app.post("/uninit-cluster")
 async def uninit_cluster():
-    """Delete the app-store-cluster-init WekaAppStore CR from the cluster."""
+    """Un-initialize the cluster by deleting the CR defined in the cluster-init blueprint YAML.
+
+    This mimics: kubectl delete -f cluster_init/app-store-cluster-init.yaml
+    using the Kubernetes Python client. We parse the YAML to get name/namespace
+    so we delete the correct object even if the namespace was customized in the file.
+    """
     try:
+        # Resolve the blueprint path (same mapping used by the deploy/init button)
+        yaml_path = os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml")
+        if not os.path.isabs(yaml_path):
+            yaml_path = os.path.join(PROJECT_ROOT, yaml_path)
+        if not os.path.exists(yaml_path):
+            return JSONResponse({"ok": False, "error": f"YAML file not found: {yaml_path}"}, status_code=404)
+
         load_kube_config()
-        co_api = client.CustomObjectsApi()
-        # Attempt delete in default namespace; ignore 404
-        try:
-            resp = co_api.delete_namespaced_custom_object(
-                group="warp.io",
-                version="v1alpha1",
-                namespace="default",
-                plural="wekaappstores",
-                name="app-store-cluster-init",
-            )
-            return JSONResponse({"ok": True, "result": resp})
-        except ApiException as ae:
-            if ae.status == 404:
-                return JSONResponse({"ok": True, "result": "Not present"})
-            raise
+        k8s_client = client.ApiClient()
+        co_api = client.CustomObjectsApi(k8s_client)
+
+        # Load all docs and find the WekaAppStore CR to delete (defensive for multi-doc files)
+        with open(yaml_path, "r") as f:
+            docs = list(yaml.safe_load_all(f))
+
+        deleted: List[Dict[str, Any]] = []
+        found_any = False
+        for doc in docs:
+            if not isinstance(doc, dict):
+                continue
+            api_version = str(doc.get("apiVersion") or "")
+            kind = str(doc.get("kind") or "")
+            if not api_version or not kind:
+                continue
+            md = doc.get("metadata") or {}
+            name = md.get("name")
+            ns = md.get("namespace") or "default"
+
+            # We only expect a WekaAppStore CR here, but guard for either warp.io or warrp.io variants
+            if api_version.startswith("warp.io/") and kind == "WekaAppStore":
+                found_any = True
+                try:
+                    resp = co_api.delete_namespaced_custom_object(
+                        group="warp.io",
+                        version=api_version.split("/", 1)[1],
+                        namespace=ns,
+                        plural="wekaappstores",
+                        name=name,
+                    )
+                    # resp can be a dict-like already; ensure serializable
+                    deleted.append({"group": "warp.io", "version": api_version.split("/", 1)[1], "kind": kind, "name": name, "namespace": ns})
+                except ApiException as ae:
+                    if ae.status == 404:
+                        deleted.append({"group": "warp.io", "version": api_version.split("/", 1)[1], "kind": kind, "name": name, "namespace": ns, "status": "Not present"})
+                    else:
+                        raise
+
+        if not found_any:
+            # Fallback: attempt delete by the conventional name if YAML didn't include the expected doc
+            try:
+                resp = co_api.delete_namespaced_custom_object(
+                    group="warp.io",
+                    version="v1alpha1",
+                    namespace="default",
+                    plural="wekaappstores",
+                    name="app-store-cluster-init",
+                )
+                deleted.append({"group": "warp.io", "version": "v1alpha1", "kind": "WekaAppStore", "name": "app-store-cluster-init", "namespace": "default"})
+            except ApiException as ae:
+                if ae.status == 404:
+                    deleted.append({"group": "warp.io", "version": "v1alpha1", "kind": "WekaAppStore", "name": "app-store-cluster-init", "namespace": "default", "status": "Not present"})
+                else:
+                    raise
+
+        return JSONResponse({"ok": True, "deleted": deleted})
     except ApiException as e:
         return JSONResponse({"ok": False, "error": f"Kubernetes API error: {e.reason}", "status": e.status}, status_code=500)
     except Exception as e:
