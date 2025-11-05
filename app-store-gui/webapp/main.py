@@ -824,10 +824,10 @@ async def auth_status_endpoint():
 @app.get("/blueprint/{name}", response_class=HTMLResponse)
 async def blueprint_detail(request: Request, name: str):
     app_map = {
-        "oss-rag": os.path.join(BLUEPRINTS_DIR, "oss-rag-stack.yaml"),
+        "oss-rag": os.path.join(BLUEPRINTS_DIR, "oss-rag", "oss-rag-stack.yaml"),
         "nvidia-rag": os.path.join("Production Deployments", "nvidia-rag.yaml"),
         "nvidia-vss": os.path.join("Production Deployments", "nvidia-vss.yaml"),
-        "cluster-init": os.path.join(BLUEPRINTS_DIR, "app-store-cluster-init.yaml"),
+        "cluster-init": os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml"),
     }
     yaml_path = app_map.get(name)
     if not yaml_path:
@@ -864,10 +864,10 @@ async def blueprint_detail(request: Request, name: str):
 async def deploy(app_name: str = Form(...), namespace: str = Form("default")):
     # Map app names to yaml paths
     app_map = {
-        "oss-rag": os.path.join(BLUEPRINTS_DIR, "oss-rag-stack.yaml"),
+        "oss-rag": os.path.join(BLUEPRINTS_DIR, "oss-rag", "oss-rag-stack.yaml"),
         "nvidia-rag": os.path.join("Production Deployments", "nvidia-rag.yaml"),
         "nvidia-vss": os.path.join("Production Deployments", "nvidia-vss.yaml"),
-        "cluster-init": os.path.join(BLUEPRINTS_DIR, "app-store-cluster-init.yaml"),
+        "cluster-init": os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml"),
     }
     yaml_path = app_map.get(app_name)
     if not yaml_path:
@@ -1023,10 +1023,10 @@ async def deploy_stream(request: Request, app_name: str, namespace: str = "defau
     - {type: 'error', message: '...'}
     """
     app_map = {
-        "oss-rag": os.path.join(BLUEPRINTS_DIR, "oss-rag-stack.yaml"),
+        "oss-rag": os.path.join(BLUEPRINTS_DIR, "oss-rag", "oss-rag-stack.yaml"),
         "nvidia-rag": os.path.join("Production Deployments", "nvidia-rag.yaml"),
         "nvidia-vss": os.path.join("Production Deployments", "nvidia-vss.yaml"),
-        "cluster-init": os.path.join(BLUEPRINTS_DIR, "app-store-cluster-init.yaml"),
+        "cluster-init": os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml"),
     }
     yaml_path = app_map.get(app_name)
 
