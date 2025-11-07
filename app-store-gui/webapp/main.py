@@ -9,6 +9,9 @@ import base64
 import json
 import time
 import copy
+import subprocess
+import shutil
+import platform
 
 from kubernetes import client, config, utils
 from kubernetes.client.rest import ApiException
@@ -1041,6 +1044,103 @@ async def readyz():
 
 # Uvicorn entry point: `uvicorn webapp.main:app --reload`
 
+
+
+# On-demand git sync endpoint to update manifests from the configured repo
+@app.post("/sync")
+async def sync_blueprints(request: Request):
+    try:
+        # Optional bearer token check
+        token_required = os.environ.get("SYNC_TOKEN", "")
+        if token_required:
+            auth = request.headers.get("Authorization") or ""
+            if not auth.startswith("Bearer ") or auth.split(" ", 1)[1] != token_required:
+                return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+
+        # Config from env with sensible defaults
+        repo = os.environ.get("GIT_SYNC_REPO")
+        branch = os.environ.get("GIT_SYNC_BRANCH", "main")
+        root = os.environ.get("GIT_SYNC_ROOT", "/manifests")
+        link = os.environ.get("GIT_SYNC_LINK", "manifests")
+        if not repo:
+            return JSONResponse({"ok": False, "error": "GIT_SYNC_REPO not set"}, status_code=400)
+
+        # Ensure git-sync binary exists (download if needed)
+        bin_path = await _ensure_git_sync_binary()
+
+        # Serialize concurrent syncs
+        os.makedirs("/var/lock", exist_ok=True)
+        rc = 1
+        stdout = ""
+        stderr = ""
+        try:
+            import fcntl  # type: ignore
+            with open("/var/lock/git-sync.lock", "w") as lf:
+                fcntl.flock(lf, fcntl.LOCK_EX)
+                cmd = [
+                    bin_path,
+                    f"--repo={repo}",
+                    f"--branch={branch}",
+                    f"--root={root}",
+                    "--one-time",
+                    f"--link={link}",
+                ]
+                proc = subprocess.run(cmd, capture_output=True, text=True)
+                rc, stdout, stderr = proc.returncode, proc.stdout, proc.stderr
+        except Exception as e:
+            # If locking fails for any reason, still attempt a one-off run
+            cmd = [
+                bin_path,
+                f"--repo={repo}",
+                f"--branch={branch}",
+                f"--root={root}",
+                "--one-time",
+                f"--link={link}",
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            rc, stdout, stderr = proc.returncode, proc.stdout, proc.stderr
+
+        return JSONResponse({"ok": rc == 0, "stdout": stdout, "stderr": stderr}, status_code=200 if rc == 0 else 500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _ensure_git_sync_binary() -> str:
+    # Use a cached location inside the container FS
+    path_candidates = ["/tmp/git-sync", "/usr/local/bin/git-sync", "/usr/bin/git-sync"]
+    for p in path_candidates:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    # Download appropriate binary for linux arch
+    arch = platform.machine().lower()
+    if arch in ("x86_64", "amd64"):
+        asset = "git-sync-linux-amd64"
+    elif arch in ("aarch64", "arm64"):
+        asset = "git-sync-linux-arm64"
+    else:
+        # Fallback to amd64
+        asset = "git-sync-linux-amd64"
+    version = os.environ.get("GIT_SYNC_VERSION", "v4.5.0")
+    url = f"https://github.com/kubernetes/git-sync/releases/download/{version}/{asset}"
+    dest = "/tmp/git-sync"
+    try:
+        import urllib.request
+        with urllib.request.urlopen(url, timeout=30) as r, open(dest, "wb") as f:
+            shutil.copyfileobj(r, f)
+        os.chmod(dest, 0o755)
+        return dest
+    except Exception as e:
+        # As a last resort, try legacy asset name used by older releases
+        legacy_asset = "git-sync-amd64"
+        legacy_url = f"https://github.com/kubernetes/git-sync/releases/download/{version}/{legacy_asset}"
+        try:
+            import urllib.request
+            with urllib.request.urlopen(legacy_url, timeout=30) as r, open(dest, "wb") as f:
+                shutil.copyfileobj(r, f)
+            os.chmod(dest, 0o755)
+            return dest
+        except Exception as e2:
+            raise RuntimeError(f"Failed to obtain git-sync binary: {e2}")
 
 
 def get_blueprint_components(file_path: str) -> List[str]:
