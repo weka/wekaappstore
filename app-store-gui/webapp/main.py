@@ -1106,41 +1106,77 @@ async def sync_blueprints(request: Request):
 
 
 async def _ensure_git_sync_binary() -> str:
+    # Allow overriding binary path or download URL/version via environment
+    explicit_path = os.environ.get("GIT_SYNC_BIN") or os.environ.get("GIT_SYNC_PATH")
+    if explicit_path and os.path.isfile(explicit_path) and os.access(explicit_path, os.X_OK):
+        return explicit_path
+
     # Use a cached location inside the container FS
     path_candidates = ["/tmp/git-sync", "/usr/local/bin/git-sync", "/usr/bin/git-sync"]
     for p in path_candidates:
         if os.path.isfile(p) and os.access(p, os.X_OK):
             return p
-    # Download appropriate binary for linux arch
+
+    # Determine asset name based on linux arch
     arch = platform.machine().lower()
     if arch in ("x86_64", "amd64"):
         asset = "git-sync-linux-amd64"
+        legacy_asset = "git-sync-amd64"
     elif arch in ("aarch64", "arm64"):
         asset = "git-sync-linux-arm64"
+        legacy_asset = "git-sync-arm64"
     else:
         # Fallback to amd64
         asset = "git-sync-linux-amd64"
-    version = os.environ.get("GIT_SYNC_VERSION", "v4.5.0")
-    url = f"https://github.com/kubernetes/git-sync/releases/download/{version}/{asset}"
-    dest = "/tmp/git-sync"
-    try:
-        import urllib.request
-        with urllib.request.urlopen(url, timeout=30) as r, open(dest, "wb") as f:
-            shutil.copyfileobj(r, f)
-        os.chmod(dest, 0o755)
-        return dest
-    except Exception as e:
-        # As a last resort, try legacy asset name used by older releases
         legacy_asset = "git-sync-amd64"
-        legacy_url = f"https://github.com/kubernetes/git-sync/releases/download/{version}/{legacy_asset}"
+
+    # Build list of URLs to try, in order
+    dest = "/tmp/git-sync"
+    urls_to_try = []
+
+    # If an explicit URL is provided, try it first
+    override_url = os.environ.get("GIT_SYNC_DOWNLOAD_URL")
+    if override_url:
+        urls_to_try.append(override_url)
+
+    # Version candidates: env provided version first, then known good fallbacks
+    env_version = os.environ.get("GIT_SYNC_VERSION")
+    version_candidates = [v for v in [env_version] if v]
+    # Add a few known release versions as fallbacks (keep list short to avoid long delays)
+    version_candidates += [
+        "v4.4.0",
+        "v4.3.0",
+        "v4.2.3",
+        "v4.2.0",
+        "v4.1.0",
+    ]
+
+    for ver in version_candidates:
+        urls_to_try.append(f"https://github.com/kubernetes/git-sync/releases/download/{ver}/{asset}")
+        # Also try legacy asset naming used by some older releases
+        urls_to_try.append(f"https://github.com/kubernetes/git-sync/releases/download/{ver}/{legacy_asset}")
+
+    errors: List[str] = []
+
+    # Try to download from the list
+    for url in urls_to_try:
         try:
             import urllib.request
-            with urllib.request.urlopen(legacy_url, timeout=30) as r, open(dest, "wb") as f:
+            with urllib.request.urlopen(url, timeout=30) as r, open(dest, "wb") as f:
                 shutil.copyfileobj(r, f)
             os.chmod(dest, 0o755)
             return dest
-        except Exception as e2:
-            raise RuntimeError(f"Failed to obtain git-sync binary: {e2}")
+        except Exception as e:
+            errors.append(f"{url} -> {e}")
+            continue
+
+    # If we reach here, all attempts failed
+    detail = "; ".join(errors[-5:])  # keep message concise
+    raise RuntimeError(
+        "Failed to obtain git-sync binary. Tried URLs: " + ", ".join(urls_to_try[:6]) +
+        (" ..." if len(urls_to_try) > 6 else "") +
+        f". Last errors: {detail}"
+    )
 
 
 def get_blueprint_components(file_path: str) -> List[str]:
