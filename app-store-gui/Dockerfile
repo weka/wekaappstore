@@ -8,6 +8,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates && rm -rf /var/lib/apt/lists/*
 
+# Bake git-sync into the image to avoid runtime downloads
+ARG GIT_SYNC_VERSION=v4.4.5
+ENV GIT_SYNC_BIN=/usr/local/bin/git-sync
+RUN set -eux; \
+    url="https://github.com/kubernetes/git-sync/releases/download/${GIT_SYNC_VERSION}/git-sync.linux.amd64"; \
+    echo "Downloading git-sync from ${url}"; \
+    curl -L "${url}" -o "$GIT_SYNC_BIN"; \
+    chmod +x "$GIT_SYNC_BIN"; \
+    "$GIT_SYNC_BIN" --version >/dev/null 2>&1 || true
+
 WORKDIR /app
 
 # install deps first for better caching

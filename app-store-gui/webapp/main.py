@@ -22,7 +22,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-BLUEPRINTS_DIR = os.getenv("BLUEPRINTS_DIR", "/app/manifests")
+# Default BLUEPRINTS_DIR to where git-sync writes (GIT_SYNC_ROOT/GIT_SYNC_LINK)
+_default_git_sync_root = os.getenv("GIT_SYNC_ROOT", "/tmp/git-sync-root")
+_default_git_sync_link = os.getenv("GIT_SYNC_LINK", "manifests")
+_default_blueprints_dir = os.path.join(_default_git_sync_root, _default_git_sync_link)
+BLUEPRINTS_DIR = os.getenv("BLUEPRINTS_DIR", _default_blueprints_dir)
 
 # Mount static if present (not strictly required since we use Tailwind CDN)
 if os.path.isdir(STATIC_DIR):
@@ -1060,22 +1064,29 @@ async def sync_blueprints(request: Request):
         # Config from env with sensible defaults
         repo = os.environ.get("GIT_SYNC_REPO")
         branch = os.environ.get("GIT_SYNC_BRANCH", "main")
-        root = os.environ.get("GIT_SYNC_ROOT", "/manifests")
+        # Default root to a writable path to avoid permission issues when running as non-root
+        root = os.environ.get("GIT_SYNC_ROOT", "/tmp/git-sync-root")
         link = os.environ.get("GIT_SYNC_LINK", "manifests")
         if not repo:
             return JSONResponse({"ok": False, "error": "GIT_SYNC_REPO not set"}, status_code=400)
 
+        # Ensure the root directory exists and is writable
+        try:
+            os.makedirs(root, exist_ok=True)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": f"Failed to create GIT_SYNC_ROOT '{root}': {e}"}, status_code=500)
+
         # Ensure git-sync binary exists (download if needed)
         bin_path = await _ensure_git_sync_binary()
 
-        # Serialize concurrent syncs
-        os.makedirs("/var/lock", exist_ok=True)
+        # Serialize concurrent syncs using a lock file in /tmp (always writable)
+        lock_path = "/tmp/git-sync.lock"
         rc = 1
         stdout = ""
         stderr = ""
         try:
             import fcntl  # type: ignore
-            with open("/var/lock/git-sync.lock", "w") as lf:
+            with open(lock_path, "w") as lf:
                 fcntl.flock(lf, fcntl.LOCK_EX)
                 cmd = [
                     bin_path,
