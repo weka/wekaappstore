@@ -1119,13 +1119,30 @@ async def sync_blueprints(request: Request):
 async def _ensure_git_sync_binary() -> str:
     # Allow overriding binary path or download URL/version via environment
     explicit_path = os.environ.get("GIT_SYNC_BIN") or os.environ.get("GIT_SYNC_PATH")
-    if explicit_path and os.path.isfile(explicit_path) and os.access(explicit_path, os.X_OK):
+    def _is_valid_binary(path: str) -> bool:
+        if not (os.path.isfile(path) and os.access(path, os.X_OK)):
+            return False
+        try:
+            # Prefer --version; many releases support it. Fallback to --help if needed.
+            proc = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=5)
+            if proc.returncode == 0:
+                return True
+            # Some older builds may not support --version; try --help
+            proc = subprocess.run([path, "--help"], capture_output=True, text=True, timeout=5)
+            return proc.returncode == 0
+        except OSError as oe:
+            # e.g., Exec format error (wrong architecture)
+            return False
+        except Exception:
+            return False
+
+    if explicit_path and _is_valid_binary(explicit_path):
         return explicit_path
 
-    # Use a cached location inside the container FS
+    # Use a cached location inside the container FS and common install paths, but validate
     path_candidates = ["/tmp/git-sync", "/usr/local/bin/git-sync", "/usr/bin/git-sync"]
     for p in path_candidates:
-        if os.path.isfile(p) and os.access(p, os.X_OK):
+        if _is_valid_binary(p):
             return p
 
     # Determine asset name based on linux arch
@@ -1176,7 +1193,11 @@ async def _ensure_git_sync_binary() -> str:
             with urllib.request.urlopen(url, timeout=30) as r, open(dest, "wb") as f:
                 shutil.copyfileobj(r, f)
             os.chmod(dest, 0o755)
-            return dest
+            # Validate the downloaded binary to guard against HTML error pages, etc.
+            if _is_valid_binary(dest):
+                return dest
+            else:
+                errors.append(f"{url} -> downloaded but failed to execute")
         except Exception as e:
             errors.append(f"{url} -> {e}")
             continue
@@ -1184,7 +1205,7 @@ async def _ensure_git_sync_binary() -> str:
     # If we reach here, all attempts failed
     detail = "; ".join(errors[-5:])  # keep message concise
     raise RuntimeError(
-        "Failed to obtain git-sync binary. Tried URLs: " + ", ".join(urls_to_try[:6]) +
+        "Failed to obtain a working git-sync binary. Tried URLs: " + ", ".join(urls_to_try[:6]) +
         (" ..." if len(urls_to_try) > 6 else "") +
         f". Last errors: {detail}"
     )

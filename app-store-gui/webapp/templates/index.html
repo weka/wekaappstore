@@ -7,17 +7,38 @@
   {% if logo_b64 %}
     <link rel="icon" type="image/png" href="data:image/png;base64,{{ logo_b64 }}">
   {% endif %}
+  <!-- Inter font for professional typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <!-- TailwindCSS via CDN for simplicity -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React + MUI via CDN (no build step required) -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@emotion/react@11.11.4/dist/emotion-react.umd.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@emotion/styled@11.11.0/dist/emotion-styled.umd.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@mui/material@5.15.14/umd/material-ui.development.js" crossorigin></script>
   <style>
     :root { --weka-purple: #6b2fb3; --weka-purple-dark: #552695; --weka-dark: #0B0C10; }
-    body { background: #0b0c10; color: #e5e7eb; }
-    .brand-grad { background: linear-gradient(135deg, #1f2937 0%, #0b0c10 100%); }
-    .card { background: rgba(31, 41, 55, 0.6); border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(6px); }
+
+    body { background: #0b0c10; color: #e5e7eb; font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; }
+
+    .brand-grad { background: linear-gradient(135deg, #0b0c10 0%, #111827 40%, #0b0c10 100%); }
+    .card { background: rgba(31, 41, 55, 0.55); border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(8px); }
+
     .btn-purple { background: var(--weka-purple); color: white; }
     .btn-purple:hover { background: var(--weka-purple-dark); }
+    .btn-outline { border: 1px solid rgba(255,255,255,0.2); color: #e5e7eb; }
+    .btn-outline:hover { background: rgba(255,255,255,0.06); }
+
     .muted { color: #9ca3af; }
     .status-dot { width: 10px; height: 10px; border-radius: 9999px; display: inline-block; margin-left: 8px; }
+
+    /* Subtle background orbs for a Hyperstack-like glow */
+    .bg-orb { position: absolute; filter: blur(80px); opacity: 0.4; pointer-events: none; }
+    .orb-purple { background: radial-gradient(closest-side, rgba(107,47,179,0.6), transparent 70%); }
+    .orb-blue { background: radial-gradient(closest-side, rgba(59,130,246,0.25), transparent 70%); }
   </style>
 </head>
 <body class="min-h-screen">
@@ -38,37 +59,164 @@
     </div>
   </header>
 
-  <main class="max-w-6xl mx-auto px-4 py-8 space-y-10">
+  <main class="relative overflow-hidden">
+    <!-- background orbs -->
+    <div class="absolute inset-0 -z-10">
+      <div class="bg-orb orb-purple w-[420px] h-[420px] rounded-full" style="top:-120px; left:-120px;"></div>
+      <div class="bg-orb orb-blue w-[520px] h-[520px] rounded-full" style="bottom:-160px; right:-160px;"></div>
+    </div>
 
-    <!-- Catalog -->
-    <section>
+    <!-- Hero -->
+    <section class="max-w-6xl mx-auto px-4 pt-14 pb-8">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+        <div class="lg:col-span-7">
+          <h1 class="text-4xl md:text-5xl font-semibold leading-tight">
+            Operate AI apps on Kubernetes with
+            <span class="bg-clip-text text-transparent" style="background-image: linear-gradient(90deg, var(--weka-purple) 0%, #a855f7 50%, #60a5fa 100%);">WEKA performance</span>
+          </h1>
+          <p class="muted mt-4 max-w-2xl">
+            A curated catalog of blueprints that deploy battle‑tested AI uses cases into your Kubernetes cluster.
+            Built on Open Source and NVIDIA tooling optimised for NeuralMesh by WEKA.
+          </p>
+          <div class="mt-6 flex items-center gap-3">
+            <a href="#catalog" class="btn-purple px-5 py-2.5 rounded-md text-sm font-medium shadow-sm">Explore Blueprints</a>
+            <a href="/settings" class="btn-outline px-5 py-2.5 rounded-md text-sm font-medium">Settings</a>
+          </div>
+        </div>
+        <div class="lg:col-span-5">
+          <div class="card rounded-xl p-6 border-white/10">
+            <div class="text-sm muted mb-2">Cluster connection</div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span id="auth-status-dot" class="status-dot bg-gray-500"></span>
+                <span id="auth-status-text" class="text-white/90 text-sm">Checking...</span>
+              </div>
+              <a href="/settings" class="text-xs text-white/70 hover:text-white">Configure</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="catalog" class="max-w-6xl mx-auto px-4 py-8 space-y-6">
       <div class="flex items-end justify-between mb-4">
         <div>
           <h2 class="text-xl font-semibold">App Catalog</h2>
           <p class="muted text-sm">Choose an application to deploy to your Kubernetes cluster.</p>
         </div>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="card rounded-lg p-5">
-          <h3 class="font-semibold">OSS RAG</h3>
-          <p class="muted text-sm mb-4">Deploy open-source RAG stack to your cluster.</p>
-          <a href="/blueprint/oss-rag" class="btn-purple px-4 py-2 rounded-md text-sm font-medium inline-block text-center">Learn More & Install</a>
-        </div>
-        <div class="card rounded-lg p-5">
-          <h3 class="font-semibold">NVIDIA RAG</h3>
-          <p class="muted text-sm mb-4">NVIDIA-optimized RAG stack. Requires GPU nodes.</p>
-          <a href="/blueprint/nvidia-rag" class="btn-purple px-4 py-2 rounded-md text-sm font-medium inline-block text-center">Learn More & Install</a>
-        </div>
-        <div class="card rounded-lg p-5">
-          <h3 class="font-semibold">NVIDIA VSS</h3>
-          <p class="muted text-sm mb-4">Vector search service with NVIDIA acceleration.</p>
-          <a href="/blueprint/nvidia-vss" class="btn-purple px-4 py-2 rounded-md text-sm font-medium inline-block text-center">Learn More & Install</a>
-        </div>
-      </div>
+      <div id="catalog-root"></div>
+      <script>
+        (function(){
+          const { createElement: h, useMemo } = React;
+          const { createRoot } = ReactDOM;
+          const {
+            createTheme,
+            ThemeProvider,
+            CssBaseline,
+            Card,
+            CardContent,
+            CardActions,
+            CardActionArea,
+            Typography,
+            Button,
+            Grid,
+            Box,
+            Chip,
+            Stack
+          } = MaterialUI;
+
+          const theme = createTheme({
+            palette: {
+              mode: 'dark',
+              primary: { main: getComputedStyle(document.documentElement).getPropertyValue('--weka-purple').trim() || '#6b2fb3' },
+              background: { default: '#0b0c10', paper: 'rgba(31,41,55,0.6)' },
+              text: { primary: '#e5e7eb', secondary: '#9ca3af' }
+            },
+            typography: {
+              fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
+              h6: { fontWeight: 600 }
+            },
+            shape: { borderRadius: 12 },
+            components: {
+              MuiCard: {
+                styleOverrides: {
+                  root: {
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    backdropFilter: 'blur(8px)',
+                    transition: 'transform .2s ease, border-color .2s ease, box-shadow .2s ease',
+                  }
+                }
+              },
+              MuiButton: {
+                styleOverrides: {
+                  root: { textTransform: 'none', borderRadius: 10 }
+                }
+              },
+              MuiChip: {
+                styleOverrides: { root: { background: 'rgba(255,255,255,0.06)', color: '#e5e7eb' } }
+              }
+            }
+          });
+
+          const items = [
+            {
+              title: 'Enterprise Search and Retrieval Augmented Generation (RAG)',
+              desc: 'Deploy an open-source search and summary stack to your cluster for enterprise-grade semantic search and summarization. Utilising leading tools like vLLM and Milvus ',
+              href: '/blueprint/oss-rag',
+              tags: ['Open Source']
+            },
+            {
+              title: 'Enterprise Search and Retrieval Augmented Generation (RAG)',
+              desc: 'NVIDIA-optimized search and summary stack for high-performance enterprise search and summarization. This is based on NVIDIA NIM framework',
+              href: '/blueprint/nvidia-rag',
+              tags: ['NVIDIA']
+            },
+            {
+              title: 'Video Search and Summary',
+              desc: 'Video search catalog and summarisation with NVIDIA NIM framework. With added customisation for NeuralMesh by WEKA to support high stream counts',
+              href: '/blueprint/nvidia-vss',
+              tags: ['NVIDIA']
+            }
+          ];
+
+          function Catalog(){
+            return h(ThemeProvider, { theme },
+              h(CssBaseline, null),
+              h(Box, { sx: { flexGrow: 1 } },
+                h(Grid, { container: true, spacing: 2.5, alignItems: 'stretch' },
+                  items.map((it, idx) => h(Grid, { item: true, xs: 12, md: 4, key: idx },
+                    h(Card, { elevation: 0, sx: { display: 'flex', flexDirection: 'column', height: '100%', ':hover': { transform: 'translateY(-2px)', borderColor: 'primary.main', boxShadow: '0 10px 20px rgba(0,0,0,0.25)' } } },
+                      h(CardActionArea, { component: 'a', href: it.href, sx: { flexGrow: 1, alignItems: 'stretch' } },
+                        h(CardContent, { sx: { display: 'flex', flexDirection: 'column', flexGrow: 1 } },
+                          h(Stack, { direction: 'row', spacing: 1, sx: { mb: 1 } },
+                            ...(it.tags || []).map((t, i) => h(Chip, { key: i, size: 'small', label: t }))
+                          ),
+                          h(Typography, { variant: 'h6', component: 'h3', sx: { mt: 0.5 } }, it.title),
+                          h(Typography, { variant: 'body2', sx: { color: 'text.secondary', mt: 1 } }, it.desc)
+                        )
+                      ),
+                      h(CardActions, { sx: { mt: 'auto', p: 2 } },
+                        h(Button, { variant: 'contained', color: 'primary', size: 'small', href: it.href }, 'Learn More & Install')
+                      )
+                    )
+                  ))
+                )
+              )
+            );
+          }
+
+          const rootEl = document.getElementById('catalog-root');
+          if (rootEl) {
+            const root = createRoot(rootEl);
+            root.render(h(Catalog));
+          }
+        })();
+      </script>
     </section>
 
     <!-- Cluster Status -->
-    <section>
+    <section class="max-w-6xl mx-auto px-4 py-10">
       <div class="flex items-end justify-between mb-4">
         <div>
           <h2 class="text-xl font-semibold">Cluster Status</h2>
@@ -168,10 +316,6 @@
   </main>
 
   <footer class="max-w-6xl mx-auto px-4 py-8 muted text-xs">
-    <div class="flex items-center justify-between">
-      <div>Styled in the spirit of weka.io. This is a demo app store using FastAPI and Tailwind.</div>
-      <a class="text-white/70 hover:text-white text-sm" href="/settings">Settings</a>
-    </div>
   </footer>
 
   <script>
