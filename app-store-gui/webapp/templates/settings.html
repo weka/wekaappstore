@@ -7,10 +7,19 @@
   {% if logo_b64 %}
     <link rel="icon" type="image/png" href="data:image/png;base64,{{ logo_b64 }}">
   {% endif %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React + MUI via CDN to match main page -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@emotion/react@11.11.4/dist/emotion-react.umd.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@emotion/styled@11.11.0/dist/emotion-styled.umd.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@mui/material@5.15.14/umd/material-ui.development.js" crossorigin></script>
   <style>
     :root { --weka-purple: #6b2fb3; --weka-purple-dark: #552695; --weka-dark: #0B0C10; }
-    body { background: #0b0c10; color: #e5e7eb; }
+    body { background: #0b0c10; color: #e5e7eb; font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; }
     .brand-grad { background: linear-gradient(135deg, #1f2937 0%, #0b0c10 100%); }
     .card { background: rgba(31, 41, 55, 0.6); border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(6px); }
     .btn-purple { background: var(--weka-purple); color: white; }
@@ -55,7 +64,7 @@
         </div>
         <div>
           <label class="block text-xs muted mb-1">Namespace</label>
-          <input id="hf-namespace" type="text" value="{{ detected_namespace }}" class="w-full px-3 py-2 rounded-md bg-gray-800/70 border border-white/10 focus:outline-none focus:ring-2 focus:ring-purple-600" />
+          <input id="hf-namespace" type="text" value="{{ detected_namespace }}" readonly class="w-full px-3 py-2 rounded-md bg-gray-800/70 border border-white/10 focus:outline-none focus:ring-2 focus:ring-purple-600 cursor-not-allowed opacity-80" title="Namespace is managed from the main page" />
         </div>
         <div>
           <button id="hf-save" class="btn-purple px-4 py-2 rounded-md text-sm font-medium w-full">Save</button>
@@ -64,8 +73,8 @@
       <div id="hf-result" class="text-xs mt-3 text-white/80"></div>
       <div class="mt-4">
         <div class="flex items-center justify-between mb-2">
-          <div class="text-sm font-medium">All Kubernetes Secrets</div>
-          <div class="text-xs muted">Listing scope: <span class="font-mono">all namespaces</span></div>
+          <div class="text-sm font-medium">Kubernetes Secrets</div>
+          <div class="text-xs muted">Listing scope: <span id="hf-listing-scope" class="font-mono">-</span></div>
         </div>
         <div id="hf-secrets-list" class="text-xs text-white/80"></div>
       </div>
@@ -86,7 +95,7 @@
         </div>
         <div>
           <label class="block text-xs muted mb-1">Namespace</label>
-          <input id="nvidia-namespace" type="text" value="{{ detected_namespace }}" class="w-full px-3 py-2 rounded-md bg-gray-800/70 border border-white/10 focus:outline-none focus:ring-2 focus:ring-purple-600" />
+          <input id="nvidia-namespace" type="text" value="{{ detected_namespace }}" readonly class="w-full px-3 py-2 rounded-md bg-gray-800/70 border border-white/10 focus:outline-none focus:ring-2 focus:ring-purple-600 cursor-not-allowed opacity-80" title="Namespace is managed from the main page" />
         </div>
         <div>
           <button id="nvidia-save" class="btn-purple px-4 py-2 rounded-md text-sm font-medium w-full">Save</button>
@@ -95,8 +104,8 @@
       <div id="nvidia-result" class="text-xs mt-3 text-white/80"></div>
       <div class="mt-4">
         <div class="flex items-center justify-between mb-2">
-          <div class="text-sm font-medium">All Kubernetes Secrets</div>
-          <div class="text-xs muted">Listing scope: <span class="font-mono">all namespaces</span></div>
+          <div class="text-sm font-medium">Kubernetes Secrets</div>
+          <div class="text-xs muted">Listing scope: <span id="nvidia-listing-scope" class="font-mono">-</span></div>
         </div>
         <div id="nvidia-secrets-list" class="text-xs text-white/80"></div>
       </div>
@@ -147,7 +156,105 @@
       </div>
     </section>
 
-    <!-- Section 4: WEKA CSI Driver Placeholder -->
+    <!-- Section 4: Cluster Status (moved from Home) -->
+    <section class="card rounded-lg p-5">
+      <div class="flex items-end justify-between mb-4">
+        <div>
+          <h3 class="font-semibold">Cluster Status</h3>
+          <p class="muted text-sm">Overview of the connected Kubernetes cluster.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="init-cluster" class="btn-purple px-4 py-2 rounded-md text-sm font-medium">Initialize Cluster</button>
+          {% set dot_class = 'bg-green-500' if status.app_store_cluster_init_present is true else ('bg-red-500' if status.app_store_cluster_init_present is false else 'bg-gray-500') %}
+          <span class="status-dot {{ dot_class }}" title="Cluster Init Status"></span>
+          <button id="uninit-cluster" class="px-4 py-2 rounded-md text-sm font-medium border border-white/20 hover:bg-white/10">Un-initialize</button>
+        </div>
+      </div>
+      <div id="init-result" class="text-xs text-white/80 mb-2"></div>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="card rounded-lg p-5">
+          <div class="muted text-xs">CPU Worker Nodes</div>
+          <div class="text-2xl font-semibold">{{ status.cpu_nodes if status.cpu_nodes is not none else '-' }}</div>
+          <div class="text-xs muted mt-1">
+            CPU cores:
+            {% if status.cpu_cores_used is not none and status.cpu_cores_free is not none and status.cpu_cores_total is not none %}
+              {{ status.cpu_cores_used }}/{{ status.cpu_cores_free }} ({{ status.cpu_cores_total }})
+            {% else %}
+              -
+            {% endif %}
+          </div>
+        </div>
+        <div class="card rounded-lg p-5">
+          <div class="muted text-xs">GPU Worker Nodes</div>
+          <div class="text-2xl font-semibold">{{ status.gpu_nodes if status.gpu_nodes is not none else '-' }}</div>
+          <div class="text-xs muted mt-1">
+            GPUs:
+            {% if status.gpu_devices_used is not none and status.gpu_devices_free is not none and status.gpu_devices_total is not none %}
+              {{ status.gpu_devices_used }}/{{ status.gpu_devices_free }} ({{ status.gpu_devices_total }})
+            {% else %}
+              -
+            {% endif %}
+          </div>
+        </div>
+        <div class="card rounded-lg p-5">
+          <div class="muted text-xs">NVIDIA GPU Operator</div>
+          <div class="text-lg font-medium">
+            {% if status.gpu_operator_installed is true %}
+              <span class="text-green-400">Installed</span>
+            {% elif status.gpu_operator_installed is false %}
+              <span class="text-red-400">Not Installed</span>
+            {% else %}
+              <span class="muted">Unknown</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="card rounded-lg p-5">
+          <div class="muted text-xs">Kubernetes Version</div>
+          <div class="text-lg font-medium">{{ status.k8s_version if status.k8s_version else '-' }}</div>
+        </div>
+        <div class="card rounded-lg p-5">
+          <div class="muted text-xs">Default StorageClass</div>
+          <div class="text-lg font-medium">{{ status.default_storage_class if status.default_storage_class else '-' }}</div>
+          {% if status.default_storage_class_details %}
+          <div class="mt-2 text-xs text-white/80 space-y-1">
+            <div><span class="muted">Provisioner:</span> {{ status.default_storage_class_details.provisioner or '-' }}</div>
+            <div><span class="muted">Reclaim Policy:</span> {{ status.default_storage_class_details.reclaimPolicy or '-' }}</div>
+            <div><span class="muted">Volume Binding:</span> {{ status.default_storage_class_details.volumeBindingMode or '-' }}</div>
+            <div><span class="muted">Allow Expansion:</span> {{ status.default_storage_class_details.allowVolumeExpansion if status.default_storage_class_details.allowVolumeExpansion is not none else '-' }}</div>
+            {% if status.default_storage_class_details.parameters %}
+            <div class="muted">Parameters:</div>
+            <ul class="list-disc list-inside">
+              {% for k, v in status.default_storage_class_details.parameters.items() %}
+              <li class="text-white/80">{{ k }}: {{ v }}</li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+          </div>
+          {% endif %}
+        </div>
+        <div class="card rounded-lg p-5">
+          <div class="muted text-xs">Applied WekaAppStore CRs</div>
+          <div class="mt-1 text-sm">
+            {% if status.app_store_crd_installed is false %}
+              <span class="text-red-400">CRD not installed</span>
+            {% else %}
+              {% set crs = status.app_store_crs or [] %}
+              {% if crs|length == 0 %}
+                <span class="text-white/80">No CRs applied.</span>
+              {% else %}
+                <ul class="list-disc list-inside">
+                  {% for n in crs %}
+                    <li class="text-white/80">{{ n }}</li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 5: WEKA CSI Driver Placeholder -->
     <section class="card rounded-lg p-5">
       <h3 class="font-semibold mb-2">WEKA CSI Driver</h3>
       <p class="muted text-sm">Placeholder for future configuration.</p>
@@ -164,7 +271,29 @@
       return res.json();
     }
 
-    // Render secrets list grouped by namespace
+    function getSettingsNamespace() {
+      const saved = localStorage.getItem('selectedNamespace');
+      const hfEl = document.getElementById('hf-namespace');
+      const nvEl = document.getElementById('nvidia-namespace');
+      const fromField = (hfEl && hfEl.value.trim()) || (nvEl && nvEl.value.trim()) || '';
+      // Prefer saved selection from the main page; fall back to current field value, then default
+      return (saved || fromField || 'default');
+    }
+
+    function setSettingsNamespace(ns) {
+      const v = ns && ns.trim() ? ns.trim() : 'default';
+      const hfEl = document.getElementById('hf-namespace');
+      const nvEl = document.getElementById('nvidia-namespace');
+      if (hfEl) hfEl.value = v;
+      if (nvEl) nvEl.value = v;
+      localStorage.setItem('selectedNamespace', v);
+      const hfScope = document.getElementById('hf-listing-scope');
+      const nvScope = document.getElementById('nvidia-listing-scope');
+      if (hfScope) hfScope.textContent = v;
+      if (nvScope) nvScope.textContent = v;
+    }
+
+    // Render secrets list grouped by namespace (single namespace list)
     function renderSecrets(containerId, items) {
       const el = document.getElementById(containerId);
       if (!el) return;
@@ -172,30 +301,22 @@
         el.innerHTML = '<div class="muted">No secrets found or insufficient RBAC.</div>';
         return;
       }
-      // Group by namespace
-      const groups = {};
-      for (const it of items) {
-        const ns = it.namespace || 'default';
-        (groups[ns] = groups[ns] || []).push(it);
+      // Flat list since all belong to one namespace
+      const list = items.slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+      let html = '<ul class="list-disc list-inside space-y-0.5">';
+      for (const s of list) {
+        const t = s.type || 'Opaque';
+        html += `<li><span class="font-mono">${s.name}</span> <span class="muted">(${t})</span></li>`;
       }
-      const nsList = Object.keys(groups).sort();
-      let html = '';
-      for (const ns of nsList) {
-        const list = groups[ns].sort((a,b)=> (a.name||'').localeCompare(b.name||''));
-        html += `<div class="mb-2"><div class="muted mb-1">Namespace: <span class="font-mono text-white/90">${ns}</span></div>`;
-        html += '<ul class="list-disc list-inside space-y-0.5">';
-        for (const s of list) {
-          const t = s.type || 'Opaque';
-          html += `<li><span class="font-mono">${s.name}</span> <span class="muted">(${t})</span></li>`;
-        }
-        html += '</ul></div>';
-      }
+      html += '</ul>';
       el.innerHTML = html;
     }
 
-    async function loadSecrets() {
+    async function loadSecrets(ns) {
+      const namespace = (ns && ns.trim()) || getSettingsNamespace();
+      setSettingsNamespace(namespace);
       try {
-        const data = await get('/api/secrets?namespace=all');
+        const data = await get(`/api/secrets?namespace=${encodeURIComponent(namespace)}`);
         if (data && data.ok) {
           renderSecrets('hf-secrets-list', data.items);
           renderSecrets('nvidia-secrets-list', data.items);
@@ -214,6 +335,7 @@
       }
     }
 
+
     // Save HF key
     const hfBtn = document.getElementById('hf-save');
     if (hfBtn) {
@@ -227,10 +349,12 @@
           const fd = new FormData();
           fd.append('api_key', key);
           fd.append('namespace', ns);
+          // Persist selected namespace for cross-page usage
+          setSettingsNamespace(ns);
           const data = await post('/api/secret/huggingface', fd);
           if (data.ok) {
             out.innerHTML = `Saved. Secret name: <span class="text-blue-400 font-mono">${data.secret_name}</span> (namespace: <span class="font-mono">${data.namespace}</span>).`;
-            await loadSecrets();
+            await loadSecrets(ns);
           } else {
             out.textContent = 'Error: ' + (data.error || 'Unknown error');
           }
@@ -253,10 +377,12 @@
           const fd = new FormData();
           fd.append('api_key', key);
           fd.append('namespace', ns);
+          // Persist selected namespace for cross-page usage
+          setSettingsNamespace(ns);
           const data = await post('/api/secret/nvidia', fd);
           if (data.ok) {
             out.innerHTML = `Saved. Secret name: <span class="text-blue-400 font-mono">${data.secret_name}</span> (namespace: <span class="font-mono">${data.namespace}</span>).`;
-            await loadSecrets();
+            await loadSecrets(ns);
           } else {
             out.textContent = 'Error: ' + (data.error || 'Unknown error');
           }
@@ -312,6 +438,54 @@
     loadSecrets();
     refreshAuthStatus();
     setInterval(refreshAuthStatus, 10000);
+
+    // Initialize Cluster direct deploy (moved from Home)
+    const initBtn = document.getElementById('init-cluster');
+    if (initBtn) {
+      initBtn.addEventListener('click', async () => {
+        const resEl = document.getElementById('init-result');
+        resEl.textContent = 'Submitting cluster initialization...';
+        initBtn.disabled = true;
+        try {
+          const fd = new FormData();
+          fd.append('app_name', 'cluster-init');
+          fd.append('namespace', 'default'); // ignored by backend for cluster-init
+          const data = await post('/deploy', fd);
+          if (data.ok) {
+            const applied = (data.result && data.result.applied) ? data.result.applied.join(', ') : 'OK';
+            resEl.textContent = 'Initialize submitted. Applied: ' + applied + '. Reload the page to refresh status.';
+          } else {
+            resEl.textContent = 'Error: ' + (data.error || 'Unknown error');
+          }
+        } catch (e) {
+          resEl.textContent = 'Request failed: ' + e;
+        } finally {
+          initBtn.disabled = false;
+        }
+      });
+    }
+
+    // Un-initialize Cluster
+    const uninitBtn = document.getElementById('uninit-cluster');
+    if (uninitBtn) {
+      uninitBtn.addEventListener('click', async () => {
+        const resEl = document.getElementById('init-result');
+        resEl.textContent = 'Submitting un-initialize...';
+        uninitBtn.disabled = true;
+        try {
+          const data = await post('/uninit-cluster');
+          if (data.ok) {
+            resEl.textContent = 'Un-initialize submitted. ' + (data.result ? JSON.stringify(data.result) : 'OK') + '. Reload the page to refresh status.';
+          } else {
+            resEl.textContent = 'Error: ' + (data.error || 'Unknown error');
+          }
+        } catch (e) {
+          resEl.textContent = 'Request failed: ' + e;
+        } finally {
+          uninitBtn.disabled = false;
+        }
+      });
+    }
   </script>
 </body>
 </html>

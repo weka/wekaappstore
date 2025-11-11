@@ -7,10 +7,19 @@
   {% if logo_b64 %}
     <link rel="icon" type="image/png" href="data:image/png;base64,{{ logo_b64 }}">
   {% endif %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React + MUI via CDN to match main page -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@emotion/react@11.11.4/dist/emotion-react.umd.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@emotion/styled@11.11.0/dist/emotion-styled.umd.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@mui/material@5.15.14/umd/material-ui.development.js" crossorigin></script>
   <style>
     :root { --weka-purple: #6b2fb3; --weka-purple-dark: #552695; --weka-dark: #0B0C10; }
-    body { background: #0b0c10; color: #e5e7eb; }
+    body { background: #0b0c10; color: #e5e7eb; font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; }
     .brand-grad { background: linear-gradient(135deg, #1f2937 0%, #0b0c10 100%); }
     .card { background: rgba(31, 41, 55, 0.6); border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(6px); }
     .btn-purple { background: var(--weka-purple); color: white; }
@@ -115,9 +124,9 @@
           <form id="deploy-form" class="space-y-4">
             <div>
               <label class="block text-sm mb-1" for="namespace">Namespace</label>
-              <input id="namespace" name="namespace" placeholder="default" value="default"
-                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-              <div class="muted text-xs mt-1">Only namespace is configurable from this page.</div>
+              <input id="namespace" name="namespace" placeholder="default" value="default" readonly
+                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400 cursor-not-allowed opacity-80" title="Namespace is managed from the main page" />
+              <div class="muted text-xs mt-1">Namespace is managed from the main page (Home).</div>
             </div>
             <button type="submit" class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium">Deploy Blueprint</button>
             <div id="deploy-result" class="text-xs mt-2"></div>
@@ -136,10 +145,40 @@
   </footer>
 
   <script>
+    async function get(url) { const res = await fetch(url); return res.json(); }
+    function resolveNamespaceSync() {
+      const saved = localStorage.getItem('selectedNamespace');
+      return saved && saved.trim() ? saved.trim() : null;
+    }
+    async function syncNamespaceField() {
+      const nsInput = document.getElementById('namespace');
+      if (!nsInput) return 'default';
+      // Try saved selection first
+      let ns = resolveNamespaceSync();
+      if (!ns) {
+        try {
+          const data = await get('/auth-status');
+          ns = (data && data.details && data.details.namespace) ? String(data.details.namespace) : null;
+          if (ns) {
+            // If nothing saved, persist for cross-page usage
+            if (!localStorage.getItem('selectedNamespace')) {
+              localStorage.setItem('selectedNamespace', ns);
+            }
+          }
+        } catch (_) { /* ignore */ }
+      }
+      if (!ns) ns = 'default';
+      nsInput.value = ns;
+      return ns;
+    }
+
+    // Initialize namespace on load
+    document.addEventListener('DOMContentLoaded', () => { syncNamespaceField(); });
+
     const form = document.getElementById('deploy-form');
-    form.addEventListener('submit', (e) => {
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const ns = document.getElementById('namespace').value || 'default';
+      const ns = (document.getElementById('namespace').value || (await syncNamespaceField()) || 'default');
       const resEl = document.getElementById('deploy-result');
       const progressEl = document.getElementById('progress');
       const listEl = document.getElementById('progress-list');
