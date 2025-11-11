@@ -621,11 +621,13 @@ async def index(request: Request):
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     auth = get_auth_status()
+    status = get_cluster_status()
     # Use detected namespace if available, else default
     detected_ns = (auth.get("details", {}) or {}).get("namespace") if isinstance(auth, dict) else None
     return templates.TemplateResponse("settings.html", {
         "request": request,
         "auth": auth,
+        "status": status,
         "detected_namespace": detected_ns or "default",
         "logo_b64": LOGO_B64,
     })
@@ -715,6 +717,28 @@ async def list_secrets(namespace: str = Query("all", description="Namespace to l
         return JSONResponse({"ok": True, "items": items})
     except ApiException as ae:
         # Permission errors or others
+        return JSONResponse({"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/namespaces")
+async def list_namespaces():
+    """Return a simple list of namespace names available in the cluster.
+    Example response: {"ok": true, "items": ["default", "kube-system", ...]}
+    """
+    try:
+        load_kube_config()
+        core = client.CoreV1Api()
+        ns_list = core.list_namespace(_request_timeout=(5, 10))
+        names = []
+        for ns in (ns_list.items or []):
+            md = getattr(ns, 'metadata', None)
+            if md and md.name:
+                names.append(md.name)
+        names.sort()
+        return JSONResponse({"ok": True, "items": names})
+    except ApiException as ae:
         return JSONResponse({"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"}, status_code=500)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
