@@ -22,11 +22,44 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-# Default BLUEPRINTS_DIR to where git-sync writes (GIT_SYNC_ROOT/GIT_SYNC_LINK)
+# Resolve BLUEPRINTS_DIR robustly with sane fallbacks
+# Priority:
+# 1) Explicit env BLUEPRINTS_DIR
+# 2) git-sync root+link (GIT_SYNC_ROOT/GIT_SYNC_LINK)
+# 3) /app/manifests (project image default)
+# 4) /manifests (common shared volume mount)
 _default_git_sync_root = os.getenv("GIT_SYNC_ROOT", "/tmp/git-sync-root")
 _default_git_sync_link = os.getenv("GIT_SYNC_LINK", "manifests")
 _default_blueprints_dir = os.path.join(_default_git_sync_root, _default_git_sync_link)
-BLUEPRINTS_DIR = os.getenv("BLUEPRINTS_DIR", _default_blueprints_dir)
+
+_candidates = []
+_env_bp = os.getenv("BLUEPRINTS_DIR")
+if _env_bp:
+    _c = _env_bp.rstrip("/")
+    # Collapse accidental double 'manifests/manifests'
+    if _c.endswith("/manifests/manifests"):
+        _c = _c[:-10]  # remove trailing '/manifests'
+    _candidates.append(_c)
+# git-sync derived path
+_candidates.append(_default_blueprints_dir)
+# image default path
+_candidates.append("/app/manifests")
+# shared volume common path
+_candidates.append("/manifests")
+# project-relative manifests (for local dev)
+_candidates.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "manifests"))
+
+BLUEPRINTS_DIR = None
+for _p in _candidates:
+    try:
+        if _p and os.path.isdir(_p):
+            BLUEPRINTS_DIR = _p
+            break
+    except Exception:
+        pass
+if not BLUEPRINTS_DIR:
+    # Fall back to first candidate even if it doesn't exist to keep behavior predictable
+    BLUEPRINTS_DIR = _candidates[0] if _candidates else _default_blueprints_dir
 
 # Mount static if present (not strictly required since we use Tailwind CDN)
 if os.path.isdir(STATIC_DIR):
