@@ -27,7 +27,7 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 1) Explicit env BLUEPRINTS_DIR
 # 2) git-sync root+link (GIT_SYNC_ROOT/GIT_SYNC_LINK)
 # 3) /app/manifests (project image default)
-# 4) /manifests (common shared volume mount)
+# 4) Project-relative manifests for local dev
 _default_git_sync_root = os.getenv("GIT_SYNC_ROOT", "/tmp/git-sync-root")
 _default_git_sync_link = os.getenv("GIT_SYNC_LINK", "manifests")
 _default_blueprints_dir = os.path.join(_default_git_sync_root, _default_git_sync_link)
@@ -36,16 +36,11 @@ _candidates = []
 _env_bp = os.getenv("BLUEPRINTS_DIR")
 if _env_bp:
     _c = _env_bp.rstrip("/")
-    # Collapse accidental double 'manifests/manifests'
-    if _c.endswith("/manifests/manifests"):
-        _c = _c[:-10]  # remove trailing '/manifests'
     _candidates.append(_c)
 # git-sync derived path
 _candidates.append(_default_blueprints_dir)
 # image default path
 _candidates.append("/app/manifests")
-# shared volume common path
-_candidates.append("/manifests")
 # project-relative manifests (for local dev)
 _candidates.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "manifests"))
 
