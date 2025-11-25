@@ -33,6 +33,12 @@ rbac:
   # These grant read across namespaces and write where necessary to manage typical app resources.
   clusterRole:
     rules:
+      # Global, cluster-wide visibility and safe write operations. This ensures the
+      # operator can see resources and CRs in ALL namespaces and perform non-destructive
+      # updates/patches across the cluster, as requested.
+      - apiGroups: ["*"]
+        resources: ["*"]
+        verbs: ["get", "list", "watch", "update", "patch"]
       - apiGroups: [""]
         resources: ["pods", "pods/log", "services", "endpoints", "events", "configmaps", "secrets", "serviceaccounts", "persistentvolumeclaims", "namespaces"]
         verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

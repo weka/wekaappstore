@@ -1,0 +1,86 @@
+apiVersion: weka.weka.io/v1alpha1
+kind: WekaPolicy
+metadata:
+  name: enable-local-dist-with-trust
+  namespace: weka-operator-system
+spec:
+  type: enable-local-drivers-distribution
+  image: quay.io/weka.io/weka-in-container:4.4.10.150
+  imagePullSecret: quay-io-robot-secret
+  payload:
+    driverDistPayload:
+      # Optional proactive builds, node selectors, etc.
+      ensureImages:
+        - quay.io/weka.io/weka-in-container:4.4.10.150
+      # Pre-run hook inside each builder container
+      builderPreRunScript: |-
+        #!/bin/sh
+        set -euo pipefail
+        set -x
+        # Try to install basic build tools if package manager exists
+        if command -v yum >/dev/null 2>&1; then
+          yum -y install gcc gcc-c++ binutils make ca-certificates || true
+        elif command -v apt-get >/dev/null 2>&1; then
+          apt-get update
+          apt-get install -y gcc g++ binutils make ca-certificates || true
+        fi
+        
+        # Determine actual compiler paths to point wrappers at
+        GCC=$(command -v gcc || true)
+        GPP=$(command -v g++ || command -v g++-10 || true)
+        LD=$(command -v ld.bfd 2>/dev/null || command -v ld || true)
+        
+        if [ -z "$GCC" ]; then
+          echo "No gcc found in image. Consider using an image with compilers or bake one."
+          exit 1
+        fi
+        
+        # Create wrapper directory and wrappers expected by the build scripts
+        mkdir -p /usr/local/bin
+        cat > /usr/local/bin/gcc10-gcc <<'EOF'
+        #!/bin/sh
+        exec "GCC_REPLACE" "$@"
+        EOF
+        cat > /usr/local/bin/gcc10-g++ <<'EOF'
+        #!/bin/sh
+        exec "GPP_REPLACE" "$@"
+        EOF
+        cat > /usr/local/bin/gcc10-ld.bfd <<'EOF'
+        #!/bin/sh
+        exec "LD_REPLACE" "$@"
+        EOF
+        
+        # Replace placeholders with detected paths
+        sed -i "s|GCC_REPLACE|${GCC}|g" /usr/local/bin/gcc10-gcc
+        sed -i "s|GPP_REPLACE|$${GPP:-$${GCC}}|g" /usr/local/bin/gcc10-g++
+        sed -i "s|LD_REPLACE|${LD}|g" /usr/local/bin/gcc10-ld.bfd
+        
+        chmod +x /usr/local/bin/gcc10-* || true
+        
+        export PATH=/usr/local/bin:$PATH
+        
+        # Debug: print versions, file locations
+        echo "Using: gcc -> $(command -v gcc)"; gcc --version || true
+        echo "Wrapper created at /usr/local/bin/gcc10-gcc -> $(/usr/bin/ls -l /usr/local/bin/gcc10-gcc || true)"
+        gcc10-gcc --version || true
+        gcc10-g++ --version || true
+        gcc10-ld.bfd --version || true
+        
+        # Add the dist service CA cert
+        mkdir -p /usr/local/share/ca-certificates
+        # The cert is mounted at /etc/weka/custom-certs/weka-drivers-dist.crt (see volume mounts below)
+        cp /etc/weka/custom-certs/weka-drivers-dist.crt /usr/local/share/ca-certificates/weka-drivers-dist.crt
+        update-ca-certificates
+      
+        # Optional: keep the pod alive briefly for debugging (remove in production)
+        # sleep 30
+    interval: 1m
+  # Used to trust self-signed CA that comes with the Operator
+  extraVolumes:
+    - name: dist-ca
+      configMap:
+        name: weka-drivers-dist-ca
+  extraVolumeMounts:
+    - name: dist-ca
+      mountPath: /etc/weka/custom-certs
+      readOnly: true
