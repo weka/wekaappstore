@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: weka-ca-fetcher
+  namespace: weka-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: weka-ca-configmap-writer
+  namespace: weka-operator-system
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: weka-ca-configmap-writer-binding
+  namespace: weka-operator-system
+subjects:
+  - kind: ServiceAccount
+    name: weka-ca-fetcher
+    namespace: weka-operator-system
+roleRef:
+  kind: Role
+  name: weka-ca-configmap-writer
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: weka-drivers-dist-ca-job
+  namespace: weka-operator-system
+spec:
+  template:
+    spec:
+      serviceAccountName: weka-ca-fetcher
+      restartPolicy: Never
+      containers:
+        - name: fetch-and-store-ca
+          image: ubuntu:22.04
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+
+              detect_pkg_mgr() {
+                if command -v apt-get >/dev/null 2>&1; then
+                  PKG_MGR="apt-get"
+                elif command -v yum >/dev/null 2>&1; then
+                  PKG_MGR="yum"
+                elif command -v dnf >/dev/null 2>&1; then
+                  PKG_MGR="dnf"
+                else
+                  echo "ERROR: No supported package manager found."
+                  exit 1
+                fi
+              }
+
+              install_deps() {
+                case "${PKG_MGR}" in
+                  apt-get)
+                    echo "Installing with apt-get..."
+                    apt-get update
+                    apt-get install -y --no-install-recommends \
+                      ca-certificates curl openssl
+                    ;;
+                  yum|dnf)
+                    echo "Installing with ${PKG_MGR}..."
+                    ${PKG_MGR} install -y curl openssl ca-certificates || \
+                    ${PKG_MGR} install -y curl openssl
+                    ;;
+                esac
+              }
+
+              install_kubectl() {
+                if command -v kubectl >/dev/null 2>&1; then
+                  echo "kubectl already installed."
+                  return
+                fi
+
+                echo "Installing kubectl..."
+                curl -L -o /usr/local/bin/kubectl \
+                  "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl"
+                chmod +x /usr/local/bin/kubectl
+              }
+
+              detect_pkg_mgr
+              install_deps
+              install_kubectl
+
+              echo "Fetching certificate..."
+              echo | openssl s_client \
+                -connect weka-drivers-dist.weka-operator-system.svc.cluster.local:60002 \
+                -showcerts 2>/dev/null \
+                | openssl x509 -outform PEM > /tmp/weka-drivers-dist.crt
+
+              echo "Writing ConfigMap..."
+              kubectl -n weka-operator-system create configmap weka-drivers-dist-ca \
+                --from-file=weka-drivers-dist.crt=/tmp/weka-drivers-dist.crt \
+                --dry-run=client -o yaml | kubectl apply -f -
+
+              echo "Done."

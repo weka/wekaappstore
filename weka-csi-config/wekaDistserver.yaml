@@ -11,7 +11,10 @@ spec:
   image: quay.io/weka.io/weka-in-container:4.4.10.150
   imagePullSecret: "quay-io-robot-secret"
   agentPort: 60001
-  port: 60002
+  exposedPorts:
+    containerPorts:
+      - port: 60002
+        protocol: TCP
   cpuPolicy: auto
   numCores: 1
   state: active
