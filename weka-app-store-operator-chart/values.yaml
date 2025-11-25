@@ -4,7 +4,14 @@ replicaCount: 1
 image:
   repository: wekachrisjen/weka-app-store-multi-arch
   pullPolicy: IfNotPresent
-  tag: "v0.4"
+  tag: "v0.5"
+
+# Control how the operator watches resources
+watch:
+  # When true (default), run Kopf with --all-namespaces to watch CRs cluster-wide
+  allNamespaces: true
+  # Optionally set a single namespace to watch. Effective only when allNamespaces is false.
+  namespace: ""
 
 # Service configuration for Kubernetes Service
 service:
