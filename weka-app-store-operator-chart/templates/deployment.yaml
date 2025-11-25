@@ -34,6 +34,16 @@ spec:
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
+          command: ["kopf"]
+          args:
+            - "run"
+            {{- if .Values.watch.allNamespaces }}
+            - "--all-namespaces"
+            {{- else if .Values.watch.namespace }}
+            - "--namespace={{ .Values.watch.namespace }}"
+            {{- end }}
+            - "--verbose"
+            - "/app/operator.py"
           {{- with .Values.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}

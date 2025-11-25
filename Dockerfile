@@ -26,4 +26,5 @@ WORKDIR /app
 COPY operator.py .
 
 # Use the kopf run command to execute the operator
-CMD ["kopf", "run", "--namespace=default", "--verbose", "operator.py"]
+# Default to watching all namespaces so the image behaves correctly even without the Helm overrides.
+CMD ["kopf", "run", "--all-namespaces", "--verbose", "/app/operator.py"]
