@@ -15,6 +15,7 @@ import platform
 
 from kubernetes import client, config, utils
 from kubernetes.client.rest import ApiException
+from jinja2 import Template
 
 app = FastAPI(title="WEKA App Store")
 
@@ -614,6 +615,98 @@ def apply_blueprint_with_namespace(file_path: str, namespace: str) -> Dict[str, 
     return {"applied": applied_kinds}
 
 
+def apply_blueprint_content_with_namespace(content: str, namespace: str) -> Dict[str, Any]:
+    """Apply a blueprint provided as YAML string, with namespace override logic.
+
+    Mirrors apply_blueprint_with_namespace, but reads from provided content instead of a file.
+    """
+    load_kube_config()
+
+    applied_kinds: list[str] = []
+    k8s_client = client.ApiClient()
+    co_api = client.CustomObjectsApi(k8s_client)
+
+    docs = list(yaml.safe_load_all(content))
+
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+
+        md = doc.setdefault("metadata", {}) if isinstance(doc, dict) else {}
+
+        if isinstance(md, dict) and namespace:
+            md["namespace"] = namespace
+
+        try:
+            spec = doc.get("spec") or {}
+            app_stack = spec.get("appStack") or {}
+            components = app_stack.get("components") or []
+            for comp in components:
+                if isinstance(comp, dict) and namespace and "targetNamespace" in comp:
+                    comp["targetNamespace"] = namespace
+        except Exception:
+            pass
+
+        api_version = str(doc.get("apiVersion") or "")
+        kind = str(doc.get("kind") or "")
+
+        doc_ns = namespace if namespace else (md.get("namespace") if isinstance(md, dict) else None)
+
+        if api_version.startswith("warrp.io/") or kind == "WarrpAppStore" or api_version.startswith("warp.io/") or kind == "WekaAppStore":
+            try:
+                group, version = api_version.split("/", 1)
+            except ValueError:
+                if kind == "WekaAppStore":
+                    group, version = "warp.io", "v1alpha1"
+                else:
+                    group, version = "warrp.io", (api_version or "v1alpha1")
+            lower_kind = (kind or "CustomResource").lower()
+            if lower_kind == "warrpappstore":
+                plural = "warrpappstores"
+            elif lower_kind == "wekaappstore":
+                plural = "wekaappstores"
+            else:
+                plural = lower_kind + "s"
+            name = (md or {}).get("name")
+            if not name:
+                raise ValueError("CustomResource document missing metadata.name")
+            cr_ns = doc_ns or "default"
+            ensure_namespace_exists(cr_ns)
+            body = _with_last_applied_annotation(doc)
+            try:
+                co_api.create_namespaced_custom_object(group=group, version=version, namespace=cr_ns, plural=plural, body=body)
+            except ApiException as ae:
+                if ae.status == 409:
+                    co_api.patch_namespaced_custom_object(group=group, version=version, namespace=cr_ns, plural=plural, name=name, body=body)
+                else:
+                    raise
+            applied_kinds.append(kind or "CustomResource")
+            continue
+
+        if doc_ns:
+            ensure_namespace_exists(doc_ns)
+
+        doc_with_ann = _with_last_applied_annotation(doc)
+        created = utils.create_from_dict(k8s_client, data=doc_with_ann, namespace=(doc_ns or None), verbose=False)
+
+        def _to_tuples(created_any):
+            if isinstance(created_any, list):
+                return created_any
+            elif isinstance(created_any, tuple) and len(created_any) == 2:
+                return [created_any]
+            else:
+                return [(created_any, None)]
+
+        tuples = _to_tuples(created)
+        for obj, _ in tuples:
+            try:
+                applied_kinds.append(obj.kind)
+            except Exception:
+                applied_kinds.append(str(obj))
+
+    return {"applied": applied_kinds}
+
+
 def install_warrp_crd() -> Dict[str, Any]:
     crd_path = os.path.join(PROJECT_ROOT, "warrp-crd.yaml")
     return apply_yaml(crd_path, namespace=None)
@@ -890,6 +983,21 @@ def get_auth_status() -> Dict[str, Any]:
 @app.get("/auth-status")
 async def auth_status_endpoint():
     return JSONResponse(get_auth_status())
+
+
+@app.get("/storage-classes")
+async def list_storage_classes():
+    """Return available StorageClass names in the cluster."""
+    try:
+        load_kube_config()
+        storage_api = client.StorageV1Api()
+        sc_list = storage_api.list_storage_class()
+        names = sorted([sc.metadata.name for sc in (sc_list.items or []) if sc.metadata and sc.metadata.name])
+        return JSONResponse({"ok": True, "items": names})
+    except ApiException as e:
+        return JSONResponse({"ok": False, "error": f"Kubernetes API error: {e.reason}", "status": e.status}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @app.get("/blueprint/{name}", response_class=HTMLResponse)
@@ -1299,7 +1407,7 @@ def get_blueprint_components(file_path: str) -> List[str]:
 
 
 @app.get("/deploy-stream")
-async def deploy_stream(request: Request, app_name: str, namespace: str = "default"):
+async def deploy_stream(request: Request, app_name: str, namespace: str = "default", storage_class: Optional[str] = None, vllm_model: Optional[str] = None):
     """Server-Sent Events stream that emits deployment progress for a blueprint.
 
     Emits JSON events:
@@ -1342,8 +1450,26 @@ async def deploy_stream(request: Request, app_name: str, namespace: str = "defau
                 # Small delay to allow UI to render progression
                 time.sleep(0.15)
 
-            # Apply manifest with namespace overrides
-            result = apply_blueprint_with_namespace(yaml_path, namespace=namespace)
+            # Load and render blueprint YAML as Jinja2 template with provided variables
+            if not os.path.isabs(yaml_path):
+                bp_path = os.path.join(PROJECT_ROOT, yaml_path)
+            else:
+                bp_path = yaml_path
+
+            with open(bp_path, 'r') as f:
+                raw_tpl = f.read()
+
+            template = Template(raw_tpl)
+            # For cluster-init, avoid injecting a default namespace into the template to preserve file-defined namespaces
+            render_ns = ("" if app_name == "cluster-init" else (namespace or "default"))
+            rendered = template.render(
+                namespace=render_ns,
+                storage_class=storage_class,
+                vllm_model=vllm_model,
+            )
+
+            # Apply manifest with namespace overrides using rendered content
+            result = apply_blueprint_content_with_namespace(rendered, namespace=namespace)
             yield sse_event({"type": "complete", "ok": True, "result": result})
         except FileNotFoundError as e:
             yield sse_event({"type": "error", "message": str(e)})
