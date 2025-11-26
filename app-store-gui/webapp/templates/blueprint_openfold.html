@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenFold Protein Prediction - Blueprint</title>
+  {% if logo_b64 %}
+    <link rel="icon" type="image/png" href="data:image/png;base64,{{ logo_b64 }}">
+  {% endif %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@emotion/react@11.11.4/dist/emotion-react.umd.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@emotion/styled@11.11.0/dist/emotion-styled.umd.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@mui/material@5.15.14/umd/material-ui.development.js" crossorigin></script>
+  <style>
+    :root { --weka-purple: #6b2fb3; --weka-purple-dark: #552695; --weka-dark: #0B0C10; }
+    body { background: #0b0c10; color: #e5e7eb; font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; }
+    .brand-grad { background: linear-gradient(135deg, #1f2937 0%, #0b0c10 100%); }
+    .card { background: rgba(31, 41, 55, 0.6); border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(6px); }
+    .btn-purple { background: var(--weka-purple); color: white; }
+    .btn-purple:hover { background: var(--weka-purple-dark); }
+    .muted { color: #9ca3af; }
+    .badge { padding: 2px 8px; border-radius: 9999px; font-size: 12px; }
+  </style>
+  </head>
+  <body class="min-h-screen">
+    <header class="brand-grad border-b border-white/10">
+      <div class="max-w-6xl mx-auto px-4 py-6 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          {% if logo_b64 %}
+            <img src="data:image/png;base64,{{ logo_b64 }}" alt="WEKA App Store" class="w-12 h-12 rounded-sm object-contain bg-white/0" />
+          {% else %}
+            <div class="w-12 h-12 rounded-sm" style="background: var(--weka-purple);"></div>
+          {% endif %}
+          <a href="/" class="text-2xl font-semibold tracking-tight hover:underline">WEKA App Store</a>
+        </div>
+        <a href="/" class="text-sm text-white/80 hover:text-white">Back</a>
+      </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
+      <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        <div class="lg:col-span-2 space-y-6">
+          <div class="card rounded-lg p-6">
+            <h1 class="text-2xl font-semibold mb-2">OpenFold Protein Prediction</h1>
+            <div class="flex items-center gap-2 mb-3">
+              <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">Open Source</span>
+            </div>
+            <p class="muted">OpenFold is an open-source, AI-powered software tool that predicts the 3D structures of proteins from their amino acid sequences.</p>
+            {% if yaml_path %}
+            <div class="mt-3 text-xs muted">Manifest: {{ yaml_path }}</div>
+            {% endif %}
+          </div>
+
+          <div class="card rounded-lg p-6">
+            <h2 class="text-xl font-semibold mb-3">What this blueprint installs</h2>
+            <ul class="list-disc ml-6 space-y-2 text-sm">
+              <li>GPU Operator and required NVIDIA drivers</li>
+              <li>Inference components required for protein structure prediction</li>
+              <li>Observability stack (Prometheus + Grafana)</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="space-y-6">
+          <div class="card rounded-lg p-6">
+            <h2 class="text-lg font-semibold mb-4">Cluster Compatibility</h2>
+            <div class="space-y-3 text-sm">
+              <div class="flex items-center justify-between">
+                <div>CPU worker nodes</div>
+                <div class="flex items-center gap-2">
+                  <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need ≥ {{ requirements.cpu_nodes }}</span>
+                  {% if meets.cpu is none %}
+                    <span class="badge" style="background: #374151;">unknown</span>
+                  {% elif meets.cpu %}
+                    <span class="badge" style="background: #065f46; color: #d1fae5;">ok (have {{ status.cpu_nodes }})</span>
+                  {% else %}
+                    <span class="badge" style="background: #7f1d1d; color: #fee2e2;">insufficient (have {{ status.cpu_nodes }})</span>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="flex items-center justify-between">
+                <div>GPU worker nodes</div>
+                <div class="flex items-center gap-2">
+                  <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need ≥ {{ requirements.gpu_nodes }}</span>
+                  {% if meets.gpu is none %}
+                    <span class="badge" style="background: #374151;">unknown</span>
+                  {% elif meets.gpu %}
+                    <span class="badge" style="background: #065f46; color: #d1fae5;">ok (have {{ status.gpu_nodes }})</span>
+                  {% else %}
+                    <span class="badge" style="background: #7f1d1d; color: #fee2e2;">insufficient (have {{ status.gpu_nodes }})</span>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card rounded-lg p-6">
+            <h2 class="text-lg font-semibold mb-3">Configure</h2>
+            {% include 'partials_deploy_form.html' ignore missing %}
+            {% if not self %}{% endif %}
+            <form id="deploy-form" class="space-y-4">
+              <div>
+                <label class="block text-sm mb-1" for="namespace">Namespace</label>
+                <input id="namespace" name="namespace" placeholder="default" value="default" readonly
+                       class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400 cursor-not-allowed opacity-80" title="Namespace is managed from the main page" />
+                <div class="muted text-xs mt-1">Namespace is managed from the main page (Home).</div>
+              </div>
+
+              <div>
+                <label class="block text-sm mb-1" for="storageClass">Storage Class</label>
+                <select id="storageClass" name="storageClass"
+                        class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400">
+                  <option value="">Select a StorageClass...</option>
+                </select>
+                <div class="muted text-xs mt-1">Choose from available Kubernetes StorageClasses.</div>
+              </div>
+
+              <div>
+                <label class="block text-sm mb-1" for="vllmChatModel">vLLM Chat Model</label>
+                <input id="vllmChatModel" name="vllmChatModel" placeholder="e.g. meta-llama/Meta-Llama-3-8B-Instruct" 
+                       class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                <div class="muted text-xs mt-1">Enter the chat model identifier to use with vLLM.</div>
+              </div>
+
+              <div>
+                <label class="block text-sm mb-1" for="vllmEmbedModel">vLLM Embedding Model</label>
+                <input id="vllmEmbedModel" name="vllmEmbedModel" placeholder="e.g. intfloat/e5-mistral-7b-instruct" 
+                       class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                <div class="muted text-xs mt-1">Enter the embedding model identifier to use with vLLM.</div>
+              </div>
+
+              <button type="submit" class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium">Deploy Blueprint</button>
+              <div id="deploy-result" class="text-xs mt-2"></div>
+            </form>
+
+            <div id="progress" class="mt-4 hidden">
+              <h3 class="text-sm font-semibold mb-2">Installation Progress</h3>
+              <ul id="progress-list" class="space-y-1 text-sm"></ul>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="max-w-6xl mx-auto px-4 py-8 muted text-xs"></footer>
+
+    <script>
+      async function get(url) { const res = await fetch(url); return res.json(); }
+      function resolveNamespaceSync() { const saved = localStorage.getItem('selectedNamespace'); return saved && saved.trim() ? saved.trim() : null; }
+      async function syncNamespaceField() {
+        const nsInput = document.getElementById('namespace'); if (!nsInput) return 'default';
+        let ns = resolveNamespaceSync();
+        if (!ns) {
+          try { const data = await get('/auth-status'); ns = (data && data.details && data.details.namespace) ? String(data.details.namespace) : null; if (ns && !localStorage.getItem('selectedNamespace')) { localStorage.setItem('selectedNamespace', ns); } } catch (_) {}
+        }
+        if (!ns) ns = 'default'; nsInput.value = ns; return ns;
+      }
+      document.addEventListener('DOMContentLoaded', async () => {
+        await syncNamespaceField();
+        try { const data = await get('/storage-classes'); const sel = document.getElementById('storageClass'); if (sel && data && data.ok && Array.isArray(data.items)) { sel.innerHTML = '<option value="">Select a StorageClass...</option>' + data.items.map(n => `<option value="${n}">${n}</option>`).join(''); const saved = localStorage.getItem('selectedStorageClass'); if (saved && data.items.includes(saved)) sel.value = saved; } } catch (_) {}
+      });
+      const form = document.getElementById('deploy-form');
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const ns = (document.getElementById('namespace').value || (await syncNamespaceField()) || 'default');
+        const resEl = document.getElementById('deploy-result');
+        const progressEl = document.getElementById('progress');
+        const listEl = document.getElementById('progress-list');
+        resEl.textContent = 'Starting deployment...';
+        listEl.innerHTML = '';
+        progressEl.classList.remove('hidden');
+        const payload = new URLSearchParams();
+        payload.set('app_name', '{{ name }}');
+        payload.set('namespace', ns);
+        try {
+          const resp = await fetch(`/deploy-stream/{{ name }}?namespace=${encodeURIComponent(ns)}`);
+          const reader = resp.body.getReader();
+          const dec = new TextDecoder();
+          while (true) {
+            const { value, done } = await reader.read(); if (done) break; const chunk = dec.decode(value);
+            for (const line of chunk.split('\n')) {
+              if (!line.startsWith('data:')) continue; const jsonStr = line.substring(5).trim(); if (!jsonStr) continue;
+              try { const evt = JSON.parse(jsonStr); if (evt.message) { const li = document.createElement('li'); li.textContent = evt.message; listEl.appendChild(li); listEl.scrollTop = listEl.scrollHeight; } } catch (_) {}
+            }
+          }
+          resEl.textContent = 'Deployment stream finished.';
+        } catch (err) {
+          resEl.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        }
+      });
+    </script>
+  </body>
+  </html>
