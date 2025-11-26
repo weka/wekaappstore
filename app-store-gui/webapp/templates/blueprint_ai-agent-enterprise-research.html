@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Blueprint Details</title>
+  <title>AI Agent for Enterprise Research - Blueprint</title>
   {% if logo_b64 %}
     <link rel="icon" type="image/png" href="data:image/png;base64,{{ logo_b64 }}">
   {% endif %}
@@ -11,7 +11,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React + MUI via CDN to match main page -->
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@emotion/react@11.11.4/dist/emotion-react.umd.min.js" crossorigin></script>
@@ -47,32 +46,23 @@
     <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
       <div class="lg:col-span-2 space-y-6">
         <div class="card rounded-lg p-6">
-          <h1 class="text-2xl font-semibold mb-2">
-            {% if name == 'oss-rag' %}Open-Source RAG Blueprint{% else %}{{ name | capitalize }} Blueprint{% endif %}
-          </h1>
-          <p class="muted">The WEKA Open Source Retrieval-Augmented Generation (RAG) project is designed to combine the power of large language models (LLMs) with high-performance data retrieval, providing accurate, context-aware, and verifiable responses. At its core, RAG integrates two major processes — retrieval and generation. The retrieval component efficiently indexes and searches through large volumes of text or vectorized data (using tools such as FAISS), while the generation component uses a local or cloud-based LLM (e.g., Llama or similar) to produce natural language answers informed by the retrieved context</p>
-          <h1>Installation Instructions</h1>
-            <p class="muted">To install this blueprint use the Configure panel on the right to enter the StorageClass and LLM Models you wish to use. The LLM Model fields be default will pull from HuggingFace. A valid HF API key is required to be installed into the namespace you are deploying this blueprint into. The API Keys can be set in the settings menu.</p>
+          <h1 class="text-2xl font-semibold mb-2">AI Agent for Enterprise Research</h1>
+          <div class="flex items-center gap-2 mb-3">
+            <span class="badge" style="background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.25); color: #bfdbfe;">NVIDIA</span>
+          </div>
+          <p class="muted">This will build an AI Agent that conducts Research on your domain specific data summarising and conducting research.</p>
+          {% if yaml_path %}
+          <div class="mt-3 text-xs muted">Manifest: {{ yaml_path }}</div>
+          {% endif %}
         </div>
-
-        {% if oss_img_b64 %}
-        <div class="card rounded-lg p-3">
-          <img src="data:image/png;base64,{{ oss_img_b64 }}" alt="OSS RAG overview" class="w-full rounded-md" />
-        </div>
-        {% endif %}
 
         <div class="card rounded-lg p-6">
           <h2 class="text-xl font-semibold mb-3">What this blueprint installs</h2>
           <ul class="list-disc ml-6 space-y-2 text-sm">
-            <li>Monitoring powered by Prometheus and Grafana)</li>
-            <li>Prometheus Adapter for custom metrics</li>
-            <li>NVIDIA GPU Operator</li>
-            <li>Cert-Manager</li>
-            <li>Milvus Vector Database</li>
-            <li>vLLM Inference Servers for embedding and Chat</li>
-            <li>Open WebUI for end-user interface</li>
+            <li>Vector database and ingestion pipeline</li>
+            <li>LLM inference services and tools for autonomous research tasks</li>
+            <li>Monitoring components (Prometheus + Grafana)</li>
           </ul>
-          <div class="mt-3 text-xs muted">Manifest: {{ yaml_path }}</div>
         </div>
       </div>
 
@@ -103,18 +93,6 @@
                   <span class="badge" style="background: #065f46; color: #d1fae5;">ok (have {{ status.gpu_nodes }})</span>
                 {% else %}
                   <span class="badge" style="background: #7f1d1d; color: #fee2e2;">insufficient (have {{ status.gpu_nodes }})</span>
-                {% endif %}
-              </div>
-            </div>
-            <div class="flex items-center justify-between">
-              <div>NVIDIA GPU Operator</div>
-              <div>
-                {% if status.gpu_operator_installed is true %}
-                  <span class="badge" style="background: #065f46; color: #d1fae5;">installed</span>
-                {% elif status.gpu_operator_installed is false %}
-                  <span class="badge" style="background: #7f1d1d; color: #fee2e2;">not installed</span>
-                {% else %}
-                  <span class="badge" style="background: #374151;">unknown</span>
                 {% endif %}
               </div>
             </div>
@@ -167,54 +145,21 @@
     </section>
   </main>
 
-  <footer class="max-w-6xl mx-auto px-4 py-8 muted text-xs">
-  </footer>
+  <footer class="max-w-6xl mx-auto px-4 py-8 muted text-xs"></footer>
 
   <script>
     async function get(url) { const res = await fetch(url); return res.json(); }
-    function resolveNamespaceSync() {
-      const saved = localStorage.getItem('selectedNamespace');
-      return saved && saved.trim() ? saved.trim() : null;
-    }
+    function resolveNamespaceSync() { const saved = localStorage.getItem('selectedNamespace'); return saved && saved.trim() ? saved.trim() : null; }
     async function syncNamespaceField() {
-      const nsInput = document.getElementById('namespace');
-      if (!nsInput) return 'default';
-      // Try saved selection first
+      const nsInput = document.getElementById('namespace'); if (!nsInput) return 'default';
       let ns = resolveNamespaceSync();
-      if (!ns) {
-        try {
-          const data = await get('/auth-status');
-          ns = (data && data.details && data.details.namespace) ? String(data.details.namespace) : null;
-          if (ns) {
-            // If nothing saved, persist for cross-page usage
-            if (!localStorage.getItem('selectedNamespace')) {
-              localStorage.setItem('selectedNamespace', ns);
-            }
-          }
-        } catch (_) { /* ignore */ }
-      }
-      if (!ns) ns = 'default';
-      nsInput.value = ns;
-      return ns;
+      if (!ns) { try { const data = await get('/auth-status'); ns = (data && data.details && data.details.namespace) ? String(data.details.namespace) : null; if (ns && !localStorage.getItem('selectedNamespace')) { localStorage.setItem('selectedNamespace', ns); } } catch (_) {} }
+      if (!ns) ns = 'default'; nsInput.value = ns; return ns;
     }
-
-    // Initialize namespace on load
     document.addEventListener('DOMContentLoaded', async () => {
-      const ns = await syncNamespaceField();
-      // Populate storage classes
-      try {
-        const data = await get('/storage-classes');
-        const sel = document.getElementById('storageClass');
-        if (sel && data && data.ok && Array.isArray(data.items)) {
-          sel.innerHTML = '<option value="">Select a StorageClass...</option>' +
-            data.items.map(n => `<option value="${n}">${n}</option>`).join('');
-          // Try to auto-select a previously chosen value
-          const saved = localStorage.getItem('selectedStorageClass');
-          if (saved && data.items.includes(saved)) sel.value = saved;
-        }
-      } catch (_) { /* ignore */ }
+      await syncNamespaceField();
+      try { const data = await get('/storage-classes'); const sel = document.getElementById('storageClass'); if (sel && data && data.ok && Array.isArray(data.items)) { sel.innerHTML = '<option value="">Select a StorageClass...</option>' + data.items.map(n => `<option value="${n}">${n}</option>`).join(''); const saved = localStorage.getItem('selectedStorageClass'); if (saved && data.items.includes(saved)) sel.value = saved; } } catch (_) {}
     });
-
     const form = document.getElementById('deploy-form');
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -222,70 +167,24 @@
       const resEl = document.getElementById('deploy-result');
       const progressEl = document.getElementById('progress');
       const listEl = document.getElementById('progress-list');
-
-      // Reset UI
       resEl.textContent = 'Starting deployment...';
       listEl.innerHTML = '';
       progressEl.classList.remove('hidden');
-
-      const sc = (document.getElementById('storageClass').value || '').trim();
-      const chatModel = (document.getElementById('vllmChatModel').value || '').trim();
-      const embedModel = (document.getElementById('vllmEmbedModel').value || '').trim();
-      if (sc) localStorage.setItem('selectedStorageClass', sc);
-      const params = new URLSearchParams({ app_name: '{{ name }}', namespace: ns });
-      if (sc) params.append('storage_class', sc);
-      // Send new parameters (backend keeps backward-compatibility)
-      if (chatModel) params.append('vllm_chat_model', chatModel);
-      if (embedModel) params.append('vllm_embed_model', embedModel);
-      const url = `/deploy-stream?${params.toString()}`;
-      const es = new EventSource(url);
-
-      let currentIndex = -1;
-
-      es.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data);
-          if (msg.type === 'init') {
-            // Render items
-            listEl.innerHTML = '';
-            (msg.items || []).forEach((item, idx) => {
-              const li = document.createElement('li');
-              li.textContent = item;
-              li.className = 'px-3 py-2 rounded border border-white/10 bg-gray-800/40';
-              li.dataset.idx = idx;
-              listEl.appendChild(li);
-            });
-            resEl.textContent = 'Applying manifest to cluster...';
-          } else if (msg.type === 'progress') {
-            // Update highlight
-            if (currentIndex >= 0) {
-              const prev = listEl.querySelector(`li[data-idx="${currentIndex}"]`);
-              if (prev) prev.className = 'px-3 py-2 rounded border border-white/10 bg-gray-800/40';
-            }
-            currentIndex = msg.currentIndex ?? -1;
-            const cur = listEl.querySelector(`li[data-idx="${currentIndex}"]`);
-            if (cur) cur.className = 'px-3 py-2 rounded border border-yellow-400 bg-yellow-500/10 text-yellow-300';
-          } else if (msg.type === 'complete') {
-            // Mark all as done
-            listEl.querySelectorAll('li').forEach(li => {
-              li.className = 'px-3 py-2 rounded border border-green-500/60 bg-green-500/10 text-green-300';
-            });
-            resEl.textContent = 'Deployment submitted. Applied: ' + ((msg.result && msg.result.applied && msg.result.applied.join(', ')) || 'OK');
-            es.close();
-          } else if (msg.type === 'error') {
-            resEl.textContent = 'Error: ' + (msg.message || 'Unknown error');
-            es.close();
+      try {
+        const resp = await fetch(`/deploy-stream/{{ name }}?namespace=${encodeURIComponent(ns)}`);
+        const reader = resp.body.getReader();
+        const dec = new TextDecoder();
+        while (true) {
+          const { value, done } = await reader.read(); if (done) break; const chunk = dec.decode(value);
+          for (const line of chunk.split('\n')) {
+            if (!line.startsWith('data:')) continue; const jsonStr = line.substring(5).trim(); if (!jsonStr) continue;
+            try { const evt = JSON.parse(jsonStr); if (evt.message) { const li = document.createElement('li'); li.textContent = evt.message; listEl.appendChild(li); listEl.scrollTop = listEl.scrollHeight; } } catch (_) {}
           }
-        } catch (err) {
-          resEl.textContent = 'Stream parse error: ' + err;
-          es.close();
         }
-      };
-
-      es.onerror = () => {
-        resEl.textContent = 'Stream connection error.';
-        es.close();
-      };
+        resEl.textContent = 'Deployment stream finished.';
+      } catch (err) {
+        resEl.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+      }
     });
   </script>
 </body>

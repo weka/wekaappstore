@@ -1008,17 +1008,21 @@ async def list_storage_classes():
 
 @app.get("/blueprint/{name}", response_class=HTMLResponse)
 async def blueprint_detail(request: Request, name: str):
+    # Map known apps to their YAML manifests if available. Unknown names are allowed to render
+    # a template page (per-blueprint) even if there is no YAML yet.
     app_map = {
         "oss-rag": os.path.join(BLUEPRINTS_DIR, "oss-rag", "oss-rag-stack.yaml"),
         "nvidia-rag": os.path.join("Production Deployments", "nvidia-rag.yaml"),
         "nvidia-vss": os.path.join("Production Deployments", "nvidia-vss.yaml"),
         "cluster-init": os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml"),
+        # Wire OpenFold to its blueprint manifest folder so Deploy works
+        "openfold": os.path.join(BLUEPRINTS_DIR, "openfold-protein", "openfold-stack.yaml"),
+        # "ai-agent-enterprise-research": os.path.join("Production Deployments", "ai-agent-enterprise-research.yaml"),
     }
     yaml_path = app_map.get(name)
-    if not yaml_path:
-        return RedirectResponse(url="/", status_code=302)
     status = get_cluster_status()
-    reqs = infer_requirements_from_yaml(yaml_path)
+    # If there is no YAML mapped for this blueprint, use safe defaults
+    reqs = infer_requirements_from_yaml(yaml_path) if yaml_path else {"cpu_nodes": 1, "gpu_nodes": 0}
     meets = {
         "cpu": None if status.get('cpu_nodes') is None else status.get('cpu_nodes', 0) >= reqs.get('cpu_nodes', 0),
         "gpu": None if status.get('gpu_nodes') is None else status.get('gpu_nodes', 0) >= reqs.get('gpu_nodes', 0),
@@ -1033,7 +1037,17 @@ async def blueprint_detail(request: Request, name: str):
                     oss_img_b64 = base64.b64encode(f.read()).decode('ascii')
             except Exception:
                 oss_img_b64 = None
-    return templates.TemplateResponse("blueprint.html", {
+    # Choose a specific template if present (except for RAG pages which keep generic)
+    preferred = f"blueprint_{name}.html"
+    use_template = "blueprint.html"
+    try:
+        if name not in {"oss-rag", "nvidia-rag"}:
+            if os.path.exists(os.path.join(TEMPLATES_DIR, preferred)):
+                use_template = preferred
+    except Exception:
+        use_template = "blueprint.html"
+
+    return templates.TemplateResponse(use_template, {
         "request": request,
         "name": name,
         "yaml_path": yaml_path,
@@ -1053,6 +1067,8 @@ async def deploy(app_name: str = Form(...), namespace: str = Form("default")):
         "nvidia-rag": os.path.join("Production Deployments", "nvidia-rag.yaml"),
         "nvidia-vss": os.path.join("Production Deployments", "nvidia-vss.yaml"),
         "cluster-init": os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml"),
+        # OpenFold deployment mapping
+        "openfold": os.path.join(BLUEPRINTS_DIR, "openfold-protein", "openfold-stack.yaml"),
     }
     yaml_path = app_map.get(app_name)
     if not yaml_path:
@@ -1436,6 +1452,8 @@ async def deploy_stream(
         "nvidia-rag": os.path.join("Production Deployments", "nvidia-rag.yaml"),
         "nvidia-vss": os.path.join("Production Deployments", "nvidia-vss.yaml"),
         "cluster-init": os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml"),
+        # OpenFold deployment mapping
+        "openfold": os.path.join(BLUEPRINTS_DIR, "openfold-protein", "openfold-stack.yaml"),
     }
     yaml_path = app_map.get(app_name)
 
