@@ -35,7 +35,7 @@ spec:
               - { name: manifests, mountPath: /manifests }
       containers:
         - name: wekaappstoregui
-          image: wekachrisjen/weka-app-store-gui:v0.17
+          image: wekachrisjen/weka-app-store-gui:v0.18
           volumeMounts:
             - name: manifests
               mountPath: /app/manifests
@@ -49,6 +49,10 @@ spec:
           env:
             - name: UVICORN_WORKERS
               value: "1"
+            # Explicitly point the app to the mounted repo root. The app will
+            # also auto-detect an inner 'manifests/' directory if present.
+            - name: BLUEPRINTS_DIR
+              value: "/app/manifests"
             - name: GIT_SYNC_REPO
               value: "https://github.com/weka/warp-blueprints.git"
             - name: GIT_SYNC_BRANCH
