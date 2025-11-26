@@ -690,12 +690,18 @@ def apply_blueprint_content_with_namespace(content: str, namespace: str) -> Dict
         created = utils.create_from_dict(k8s_client, data=doc_with_ann, namespace=(doc_ns or None), verbose=False)
 
         def _to_tuples(created_any):
+            tuples: list[tuple] = []
             if isinstance(created_any, list):
-                return created_any
+                for item in created_any:
+                    if isinstance(item, tuple) and len(item) == 2:
+                        tuples.append(item)
+                    else:
+                        tuples.append((item, None))
             elif isinstance(created_any, tuple) and len(created_any) == 2:
-                return [created_any]
+                tuples = [created_any]
             else:
-                return [(created_any, None)]
+                tuples = [(created_any, None)]
+            return tuples
 
         tuples = _to_tuples(created)
         for obj, _ in tuples:
@@ -1407,7 +1413,16 @@ def get_blueprint_components(file_path: str) -> List[str]:
 
 
 @app.get("/deploy-stream")
-async def deploy_stream(request: Request, app_name: str, namespace: str = "default", storage_class: Optional[str] = None, vllm_model: Optional[str] = None):
+async def deploy_stream(
+    request: Request,
+    app_name: str,
+    namespace: str = "default",
+    storage_class: Optional[str] = None,
+    vllm_chat_model: Optional[str] = None,
+    vllm_embed_model: Optional[str] = None,
+    # Backward-compat param: previously used single vllm_model
+    vllm_model: Optional[str] = None,
+):
     """Server-Sent Events stream that emits deployment progress for a blueprint.
 
     Emits JSON events:
@@ -1432,6 +1447,18 @@ async def deploy_stream(request: Request, app_name: str, namespace: str = "defau
         return f"data: {json.dumps(payload)}\n\n"
 
     async def event_generator():
+        # Normalize incoming parameters: trim whitespace and convert empty strings to None
+        def _norm(val: Optional[str]) -> Optional[str]:
+            if isinstance(val, str):
+                v = val.strip()
+                return v if v else None
+            return val
+
+        norm_storage_class = _norm(storage_class)
+        norm_chat_model = _norm(vllm_chat_model)
+        norm_embed_model = _norm(vllm_embed_model)
+        norm_legacy_model = _norm(vllm_model)
+
         # Validate app
         if not yaml_path:
             yield sse_event({"type": "error", "message": "Unknown app"})
@@ -1462,10 +1489,17 @@ async def deploy_stream(request: Request, app_name: str, namespace: str = "defau
             template = Template(raw_tpl)
             # For cluster-init, avoid injecting a default namespace into the template to preserve file-defined namespaces
             render_ns = ("" if app_name == "cluster-init" else (namespace or "default"))
+            # Backward compatibility: if old vllm_model is provided but new chat model is empty,
+            # treat it as the chat model.
+            chat_model_var = norm_chat_model or norm_legacy_model or None
             rendered = template.render(
                 namespace=render_ns,
-                storage_class=storage_class,
-                vllm_model=vllm_model,
+                storage_class=norm_storage_class,
+                # New variables
+                vllm_chat_model=chat_model_var,
+                vllm_embed_model=norm_embed_model,
+                # Legacy variable kept for existing templates
+                vllm_model=chat_model_var,
             )
 
             # Apply manifest with namespace overrides using rendered content

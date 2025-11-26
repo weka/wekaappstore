@@ -139,10 +139,17 @@
             </div>
 
             <div>
-              <label class="block text-sm mb-1" for="vllmModel">vLLM Model</label>
-              <input id="vllmModel" name="vllmModel" placeholder="e.g. meta-llama/Meta-Llama-3-8B-Instruct" 
+              <label class="block text-sm mb-1" for="vllmChatModel">vLLM Chat Model</label>
+              <input id="vllmChatModel" name="vllmChatModel" placeholder="e.g. meta-llama/Meta-Llama-3-8B-Instruct" 
                      class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-              <div class="muted text-xs mt-1">Enter the model identifier to use with vLLM.</div>
+              <div class="muted text-xs mt-1">Enter the chat model identifier to use with vLLM.</div>
+            </div>
+
+            <div>
+              <label class="block text-sm mb-1" for="vllmEmbedModel">vLLM Embedding Model</label>
+              <input id="vllmEmbedModel" name="vllmEmbedModel" placeholder="e.g. intfloat/e5-mistral-7b-instruct" 
+                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+              <div class="muted text-xs mt-1">Enter the embedding model identifier to use with vLLM.</div>
             </div>
 
             <button type="submit" class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium">Deploy Blueprint</button>
@@ -220,11 +227,14 @@
       progressEl.classList.remove('hidden');
 
       const sc = (document.getElementById('storageClass').value || '').trim();
-      const model = (document.getElementById('vllmModel').value || '').trim();
+      const chatModel = (document.getElementById('vllmChatModel').value || '').trim();
+      const embedModel = (document.getElementById('vllmEmbedModel').value || '').trim();
       if (sc) localStorage.setItem('selectedStorageClass', sc);
       const params = new URLSearchParams({ app_name: '{{ name }}', namespace: ns });
       if (sc) params.append('storage_class', sc);
-      if (model) params.append('vllm_model', model);
+      // Send new parameters (backend keeps backward-compatibility)
+      if (chatModel) params.append('vllm_chat_model', chatModel);
+      if (embedModel) params.append('vllm_embed_model', embedModel);
       const url = `/deploy-stream?${params.toString()}`;
       const es = new EventSource(url);
 
