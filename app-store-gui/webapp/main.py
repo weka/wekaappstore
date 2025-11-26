@@ -25,8 +25,8 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 # Resolve BLUEPRINTS_DIR robustly with sane fallbacks
 # Priority:
 # 1) Explicit env BLUEPRINTS_DIR
-# 2) git-sync root+link (GIT_SYNC_ROOT/GIT_SYNC_LINK)
-# 3) /app/manifests (project image default)
+# 2) /app/manifests (project image default, subPath mounted to the repo root)
+# 3) git-sync root+link (GIT_SYNC_ROOT/GIT_SYNC_LINK)
 # 4) Project-relative manifests for local dev
 _default_git_sync_root = os.getenv("GIT_SYNC_ROOT", "/tmp/git-sync-root")
 _default_git_sync_link = os.getenv("GIT_SYNC_LINK", "manifests")
@@ -38,9 +38,11 @@ if _env_bp:
     _c = _env_bp.rstrip("/")
     _candidates.append(_c)
 # git-sync derived path
-_candidates.append(_default_blueprints_dir)
+## Prefer the image default mount first to avoid symlink/permission quirks
 # image default path
 _candidates.append("/app/manifests")
+# git-sync derived path (may be a symlink)
+_candidates.append(_default_blueprints_dir)
 # project-relative manifests (for local dev)
 _candidates.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "manifests"))
 
@@ -55,6 +57,16 @@ for _p in _candidates:
 if not BLUEPRINTS_DIR:
     # Fall back to first candidate even if it doesn't exist to keep behavior predictable
     BLUEPRINTS_DIR = _candidates[0] if _candidates else _default_blueprints_dir
+
+# If the selected directory itself contains a top-level 'manifests' directory
+# (common when the git repo root has a manifests/ folder), descend into it so
+# callers can consistently reference BLUEPRINTS_DIR/<blueprint>/...
+try:
+    _nested = os.path.join(BLUEPRINTS_DIR, "manifests")
+    if os.path.isdir(_nested):
+        BLUEPRINTS_DIR = _nested
+except Exception:
+    pass
 
 # Mount static if present (not strictly required since we use Tailwind CDN)
 if os.path.isdir(STATIC_DIR):
