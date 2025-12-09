@@ -1428,6 +1428,9 @@ def get_blueprint_components(file_path: str) -> List[str]:
     return items
 
 
+# Support both query-style and path-style app selection
+# e.g. /deploy-stream?app_name=openfold and /deploy-stream/openfold
+@app.get("/deploy-stream/{app_name}")
 @app.get("/deploy-stream")
 async def deploy_stream(
     request: Request,
