@@ -8,6 +8,7 @@ import yaml
 import base64
 import json
 import time
+import asyncio
 import copy
 import subprocess
 import shutil
@@ -1493,7 +1494,12 @@ async def deploy_stream(
             return
         # Initial items
         items = get_blueprint_components(yaml_path)
-        yield sse_event({"type": "init", "items": items})
+        yield sse_event({
+            "type": "init",
+            "items": items,
+            # compatibility for UIs expecting a message string
+            "message": f"Initializing {len(items)} components"
+        })
 
         # Stream a simple progress over the items while we submit the blueprint
         try:
@@ -1501,9 +1507,18 @@ async def deploy_stream(
                 # If client disconnected, stop
                 if await request.is_disconnected():
                     return
-                yield sse_event({"type": "progress", "currentIndex": i, "name": item})
+                yield sse_event({
+                    "type": "progress",
+                    "currentIndex": i,
+                    "name": item,
+                    "message": f"Applying {item} ({i+1}/{len(items)})"
+                })
                 # Small delay to allow UI to render progression
-                time.sleep(0.15)
+                try:
+                    await asyncio.sleep(0.15)
+                except Exception:
+                    # Fallback (shouldn't block event loop often)
+                    time.sleep(0.1)
 
             # Load and render blueprint YAML as Jinja2 template with provided variables
             if not os.path.isabs(yaml_path):
@@ -1532,15 +1547,26 @@ async def deploy_stream(
                 weka_cluster_filesystem=norm_weka_fs,
                 openfold_storage_capacity=norm_of_capacity,
                 deployment_name=norm_deploy_name,
+                # Some blueprints (e.g., OpenFold) may expect a `workflow` object; provide a safe default
+                workflow={},
             )
 
             # Apply manifest with namespace overrides using rendered content
             result = apply_blueprint_content_with_namespace(rendered, namespace=namespace)
-            yield sse_event({"type": "complete", "ok": True, "result": result})
+            yield sse_event({
+                "type": "complete",
+                "ok": True,
+                "result": result,
+                "message": "Deployment complete"
+            })
         except FileNotFoundError as e:
             yield sse_event({"type": "error", "message": str(e)})
         except ApiException as e:
-            yield sse_event({"type": "error", "message": f"Kubernetes API error: {e.reason}", "status": e.status})
+            yield sse_event({
+                "type": "error",
+                "message": f"Kubernetes API error: {e.reason}",
+                "status": e.status
+            })
         except Exception as e:
             yield sse_event({"type": "error", "message": str(e)})
 

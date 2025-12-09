@@ -291,17 +291,58 @@
         const depName = document.getElementById('deploymentName')?.value || '';
         if (depName) params.set('deployment_name', depName);
         try {
-          const resp = await fetch(`/deploy-stream/{{ name }}?${params.toString()}`);
-          const reader = resp.body.getReader();
-          const dec = new TextDecoder();
-          while (true) {
-            const { value, done } = await reader.read(); if (done) break; const chunk = dec.decode(value);
-            for (const line of chunk.split('\n')) {
-              if (!line.startsWith('data:')) continue; const jsonStr = line.substring(5).trim(); if (!jsonStr) continue;
-              try { const evt = JSON.parse(jsonStr); if (evt.message) { const li = document.createElement('li'); li.textContent = evt.message; listEl.appendChild(li); listEl.scrollTop = listEl.scrollHeight; } } catch (_) {}
+          const url = `/deploy-stream/{{ name }}?${params.toString()}`;
+          const es = new EventSource(url);
+          let currentIndex = -1;
+
+          es.onmessage = (ev) => {
+            try {
+              const msg = JSON.parse(ev.data);
+              if (msg.type === 'init') {
+                // Render items
+                listEl.innerHTML = '';
+                (msg.items || []).forEach((item, idx) => {
+                  const li = document.createElement('li');
+                  li.textContent = item;
+                  li.className = 'px-3 py-2 rounded border border-white/10 bg-gray-800/40';
+                  li.dataset.idx = idx;
+                  listEl.appendChild(li);
+                });
+                resEl.textContent = 'Applying manifest to cluster...';
+              } else if (msg.type === 'progress') {
+                if (currentIndex >= 0) {
+                  const prev = listEl.querySelector(`li[data-idx="${currentIndex}"]`);
+                  if (prev) prev.className = 'px-3 py-2 rounded border border-white/10 bg-gray-800/40';
+                }
+                currentIndex = msg.currentIndex ?? -1;
+                const cur = listEl.querySelector(`li[data-idx="${currentIndex}"]`);
+                if (cur) cur.className = 'px-3 py-2 rounded border border-yellow-400 bg-yellow-500/10 text-yellow-300';
+              } else if (msg.type === 'complete') {
+                listEl.querySelectorAll('li').forEach(li => {
+                  li.className = 'px-3 py-2 rounded border border-green-500/60 bg-green-500/10 text-green-300';
+                });
+                resEl.textContent = 'Deployment submitted.';
+                es.close();
+              } else if (msg.type === 'error') {
+                resEl.textContent = 'Error: ' + (msg.message || 'Unknown error');
+                es.close();
+              } else if (msg.message) {
+                // Backward-compat: append message lines if present
+                const li = document.createElement('li');
+                li.textContent = msg.message;
+                listEl.appendChild(li);
+                listEl.scrollTop = listEl.scrollHeight;
+              }
+            } catch (err) {
+              resEl.textContent = 'Stream parse error: ' + err;
+              es.close();
             }
-          }
-          resEl.textContent = 'Deployment stream finished.';
+          };
+
+          es.onerror = () => {
+            resEl.textContent = 'Stream connection error.';
+            es.close();
+          };
         } catch (err) {
           resEl.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
         }
