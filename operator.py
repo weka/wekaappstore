@@ -656,6 +656,13 @@ def handle_appstack_deployment(body, spec, name, namespace, status):
                 
                 # Decide CRD handling strategy (default Auto)
                 try:
+                    # Ensure repo is added before CRD discovery so `helm show crds <repo/chart>` can resolve
+                    if chart_repo and not chart_repo.startswith("oci://"):
+                        try:
+                            repo_name = helm_operator._extract_repo_name(chart_repo)
+                            helm_operator._add_repo(repo_name, chart_repo)
+                        except Exception as e:
+                            logging.debug(f"Skipping repo add prior to CRD discovery for component '{comp_name}': {e}")
                     skip_crds = should_skip_crds_for_component(helm_config, chart_ref, chart_version)
                     logging.info(f"CRD strategy for component '{comp_name}': crdsStrategy={helm_config.get('crdsStrategy', 'Auto')} -> skip_crds={skip_crds}")
                 except Exception as e:
@@ -847,6 +854,13 @@ def handle_helm_deployment(body, spec, name, namespace, status):
     helm_operator = HelmOperator()
     # Determine CRD strategy
     try:
+        # Ensure repo is added before CRD discovery so `helm show crds <repo/chart>` can resolve
+        if chart_repo and not chart_repo.startswith("oci://"):
+            try:
+                repo_name = helm_operator._extract_repo_name(chart_repo)
+                helm_operator._add_repo(repo_name, chart_repo)
+            except Exception as e:
+                logging.debug(f"Skipping repo add prior to CRD discovery for release '{release_name}': {e}")
         skip_crds = should_skip_crds_for_component(helm_chart_config, chart_ref, chart_version)
         logging.info(f"CRD strategy for release '{release_name}': crdsStrategy={helm_chart_config.get('crdsStrategy', 'Auto')} -> skip_crds={skip_crds}")
     except Exception as e:
