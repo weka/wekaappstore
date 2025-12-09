@@ -8,6 +8,16 @@ import os
 import time
 from datetime import datetime
 from typing import Dict, Any, Optional, List
+from functools import lru_cache
+
+try:
+    # Kubernetes client is optional at runtime but recommended
+    from kubernetes import client as k8s_client, config as k8s_config
+    from kubernetes.client import ApiException as K8sApiException
+except Exception:  # pragma: no cover - fallback if lib not present
+    k8s_client = None  # type: ignore
+    k8s_config = None  # type: ignore
+    K8sApiException = Exception  # type: ignore
 
 # Creating a new class to stand up a K8s pods
 # Note: This will use the lazy-loaded kr8s API
@@ -29,7 +39,8 @@ class HelmOperator:
     
     def install_or_upgrade(self, name: str, chart: str, values: Dict[str, Any], 
                           namespace: str, repository: Optional[str] = None,
-                          version: Optional[str] = None) -> tuple[bool, str]:
+                          version: Optional[str] = None,
+                          skip_crds: Optional[bool] = None) -> tuple[bool, str]:
         """
         Install or upgrade a Helm chart
         
@@ -52,9 +63,9 @@ class HelmOperator:
             
             # Check if release exists
             if self._release_exists(name, namespace):
-                return self._upgrade_chart(name, chart, values, namespace, version)
+                return self._upgrade_chart(name, chart, values, namespace, version, skip_crds)
             else:
-                return self._install_chart(name, chart, values, namespace, version)
+                return self._install_chart(name, chart, values, namespace, version, skip_crds)
         except Exception as e:
             error_msg = f"Helm operation failed: {str(e)}"
             self.logger.error(error_msg)
@@ -82,7 +93,8 @@ class HelmOperator:
             return False
     
     def _install_chart(self, name: str, chart: str, values: Dict[str, Any], 
-                      namespace: str, version: Optional[str] = None) -> tuple[bool, str]:
+                      namespace: str, version: Optional[str] = None,
+                      skip_crds: Optional[bool] = None) -> tuple[bool, str]:
         """Install a new Helm chart"""
         cmd = [
             "helm", "install", name, chart,
@@ -92,6 +104,8 @@ class HelmOperator:
         
         if version:
             cmd.extend(["--version", version])
+        if skip_crds:
+            cmd.append("--skip-crds")
         
         # Write values to temporary file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
@@ -123,7 +137,8 @@ class HelmOperator:
                 os.unlink(values_file)
     
     def _upgrade_chart(self, name: str, chart: str, values: Dict[str, Any], 
-                      namespace: str, version: Optional[str] = None) -> tuple[bool, str]:
+                      namespace: str, version: Optional[str] = None,
+                      skip_crds: Optional[bool] = None) -> tuple[bool, str]:
         """Upgrade an existing Helm chart"""
         cmd = [
             "helm", "upgrade", name, chart,
@@ -132,6 +147,8 @@ class HelmOperator:
         
         if version:
             cmd.extend(["--version", version])
+        if skip_crds:
+            cmd.append("--skip-crds")
         
         # Write values to temporary file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
@@ -230,6 +247,106 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
         else:
             result[key] = value
     return result
+
+
+# ===================== CRD Strategy Helpers =====================
+
+class HelmError(RuntimeError):
+    pass
+
+
+@lru_cache(maxsize=1)
+def _load_kube_config_once() -> bool:
+    """Attempt to load Kubernetes client config once.
+    Returns True if some config was loaded, False otherwise.
+    """
+    if not k8s_config:
+        return False
+    try:
+        k8s_config.load_incluster_config()
+        return True
+    except Exception:
+        try:
+            k8s_config.load_kube_config()
+            return True
+        except Exception:
+            return False
+
+
+@lru_cache(maxsize=128)
+def discover_chart_crds(chart_ref: str, version: Optional[str] = None) -> set[str]:
+    """Return the set of CRD names a chart would install using `helm show crds`.
+
+    If helm cannot show CRDs (no crds/ or error), returns empty set.
+    """
+    cmd = ["helm", "show", "crds", chart_ref]
+    if version:
+        cmd += ["--version", str(version)]
+
+    try:
+        out = subprocess.check_output(cmd, text=True)
+    except subprocess.CalledProcessError:
+        return set()
+    except Exception:
+        return set()
+
+    try:
+        crd_docs = list(yaml.safe_load_all(out))
+    except Exception:
+        crd_docs = []
+    names: set[str] = set()
+    for doc in crd_docs:
+        if not doc or not isinstance(doc, dict):
+            continue
+        if doc.get("kind") == "CustomResourceDefinition":
+            meta = doc.get("metadata", {}) or {}
+            name = meta.get("name")
+            if name:
+                names.add(str(name))
+    return names
+
+
+@lru_cache(maxsize=1)
+def list_existing_crds() -> set[str]:
+    """List CRD names currently installed in the cluster.
+    If kubernetes client/config is unavailable, returns empty set.
+    """
+    if not k8s_client:
+        return set()
+    _load_kube_config_once()
+    try:
+        api = k8s_client.ApiextensionsV1Api()
+        crds = api.list_custom_resource_definition().items
+        return {crd.metadata.name for crd in crds if getattr(crd, "metadata", None)}
+    except K8sApiException:
+        return set()
+    except Exception:
+        return set()
+
+
+def should_skip_crds_for_component(helm_cfg: Dict[str, Any], chart_ref: str, version: Optional[str]) -> bool:
+    """Decide whether to pass --skip-crds for a Helm installation.
+
+    Strategy options (case-insensitive):
+      - Install: never skip (always let Helm install CRDs)
+      - Skip: always skip (CRDs managed externally)
+      - Auto (default): if any CRDs from the chart already exist in cluster, skip
+    """
+    strategy = (helm_cfg.get("crdsStrategy", "Auto") or "Auto").lower()
+
+    if strategy == "install":
+        return False
+    if strategy == "skip":
+        return True
+
+    # Auto strategy
+    chart_crds = discover_chart_crds(chart_ref, version)
+    if not chart_crds:
+        # No CRDs in chart → nothing to skip at Helm level
+        return False
+
+    existing = list_existing_crds()
+    return bool(chart_crds & existing)
 
 
 def load_values_from_reference(kind: str, name: str, key: str, namespace: str) -> Dict[str, Any]:
@@ -537,6 +654,15 @@ def handle_appstack_deployment(body, spec, name, namespace, status):
                         )
                         merged_values = _deep_merge(merged_values, ref_values)
                 
+                # Decide CRD handling strategy (default Auto)
+                try:
+                    skip_crds = should_skip_crds_for_component(helm_config, chart_ref, chart_version)
+                    logging.info(f"CRD strategy for component '{comp_name}': crdsStrategy={helm_config.get('crdsStrategy', 'Auto')} -> skip_crds={skip_crds}")
+                except Exception as e:
+                    # Be conservative: don't skip if we couldn't decide
+                    skip_crds = False
+                    logging.warning(f"Failed to evaluate CRD strategy for component '{comp_name}': {e}. Proceeding without --skip-crds.")
+
                 # Install or upgrade
                 success, message = helm_operator.install_or_upgrade(
                     name=release_name,
@@ -544,7 +670,8 @@ def handle_appstack_deployment(body, spec, name, namespace, status):
                     values=merged_values,
                     namespace=target_namespace,
                     repository=chart_repo,
-                    version=chart_version
+                    version=chart_version,
+                    skip_crds=skip_crds
                 )
                 
                 if not success:
@@ -718,13 +845,21 @@ def handle_helm_deployment(body, spec, name, namespace, status):
     
     # Install or upgrade Helm chart
     helm_operator = HelmOperator()
+    # Determine CRD strategy
+    try:
+        skip_crds = should_skip_crds_for_component(helm_chart_config, chart_ref, chart_version)
+        logging.info(f"CRD strategy for release '{release_name}': crdsStrategy={helm_chart_config.get('crdsStrategy', 'Auto')} -> skip_crds={skip_crds}")
+    except Exception as e:
+        skip_crds = False
+        logging.warning(f"Failed to evaluate CRD strategy for release '{release_name}': {e}. Proceeding without --skip-crds.")
     success, message = helm_operator.install_or_upgrade(
         name=release_name,
         chart=chart_ref,
         values=merged_values,
         namespace=target_namespace,
         repository=chart_repo,
-        version=chart_version
+        version=chart_version,
+        skip_crds=skip_crds
     )
     
     if not success:
