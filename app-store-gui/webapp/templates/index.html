@@ -177,13 +177,15 @@
               title: 'Enterprise Search and Retrieval Augmented Generation (RAG)',
               desc: 'NVIDIA-optimized search and summary stack for high-performance enterprise search and summarization. This is based on NVIDIA NIM framework',
               href: '/blueprint/nvidia-rag',
-              tags: ['NVIDIA']
+              tags: ['NVIDIA'],
+              comingSoon: true
             },
             {
               title: 'Video Search and Summary',
               desc: 'Video search catalog and summarisation with NVIDIA NIM framework. With added customisation for NeuralMesh by WEKA to support high stream counts',
               href: '/blueprint/nvidia-vss',
-              tags: ['NVIDIA']
+              tags: ['NVIDIA'],
+              comingSoon: true
             },
             {
               title: 'Openfold Protein Prediction',
@@ -195,7 +197,8 @@
               title: 'AI Agent for Enterprise Research',
               desc: 'This will build an AI Agent that conducts Research on your domain specific data summarising and conducting research.',
               href: '/blueprint/ai-agent-enterprise-research',
-              tags: ['NVIDIA']
+              tags: ['NVIDIA'],
+              comingSoon: true
             }
           ];
 
@@ -205,7 +208,24 @@
               h(Box, { sx: { flexGrow: 1 } },
                 h(Grid, { container: true, spacing: 2.5, alignItems: 'stretch' },
                   items.map((it, idx) => h(Grid, { item: true, xs: 12, md: 4, key: idx },
-                    h(Card, { elevation: 0, sx: { display: 'flex', flexDirection: 'column', height: '100%', ':hover': { transform: 'translateY(-2px)', borderColor: 'primary.main', boxShadow: '0 10px 20px rgba(0,0,0,0.25)' } } },
+                    h(Card, { elevation: 0, sx: { position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', ':hover': { transform: 'translateY(-2px)', borderColor: 'primary.main', boxShadow: '0 10px 20px rgba(0,0,0,0.25)' } } },
+                      it.comingSoon && h(Box, { sx: {
+                        position: 'absolute',
+                        top: 36,
+                        right: -24,
+                        transform: 'rotate(45deg)',
+                        background: 'linear-gradient(90deg, #6b2fb3 0%, #a855f7 100%)',
+                        color: '#fff',
+                        px: 3,
+                        py: 0.5,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: 1,
+                        textTransform: 'uppercase',
+                        boxShadow: '0 6px 14px rgba(0,0,0,0.35)',
+                        borderRadius: 1,
+                        pointerEvents: 'none'
+                      } }, 'Coming Soon'),
                       h(CardActionArea, { component: 'a', href: it.href, sx: { flexGrow: 1, alignItems: 'stretch' } },
                         h(CardContent, { sx: { display: 'flex', flexDirection: 'column', flexGrow: 1 } },
                           h(Stack, { direction: 'row', spacing: 1, sx: { mb: 1 } },
@@ -216,7 +236,15 @@
                         )
                       ),
                       h(CardActions, { sx: { mt: 'auto', p: 2 } },
-                        h(Button, { variant: 'contained', color: 'primary', size: 'small', href: it.href }, 'Learn More & Install')
+                        it.comingSoon
+                          ? h(Button, {
+                              variant: 'contained',
+                              color: 'primary',
+                              size: 'small',
+                              disabled: true,
+                              sx: { pointerEvents: 'none', opacity: 0.8 }
+                            }, 'Learn More & Install')
+                          : h(Button, { variant: 'contained', color: 'primary', size: 'small', href: it.href }, 'Learn More & Install')
                       )
                     )
                   ))
