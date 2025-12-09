@@ -1547,8 +1547,6 @@ async def deploy_stream(
                 weka_cluster_filesystem=norm_weka_fs,
                 openfold_storage_capacity=norm_of_capacity,
                 deployment_name=norm_deploy_name,
-                # Some blueprints (e.g., OpenFold) may expect a `workflow` object; provide a safe default
-                workflow={},
             )
 
             # Apply manifest with namespace overrides using rendered content
