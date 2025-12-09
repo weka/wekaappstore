@@ -16,7 +16,7 @@ import platform
 
 from kubernetes import client, config, utils
 from kubernetes.client.rest import ApiException
-from jinja2 import Template
+from jinja2 import Environment
 
 app = FastAPI(title="WEKA App Store")
 
@@ -1529,7 +1529,10 @@ async def deploy_stream(
             with open(bp_path, 'r') as f:
                 raw_tpl = f.read()
 
-            template = Template(raw_tpl)
+            # Use custom Jinja2 delimiters for variables to avoid clashing with Argo's {{ }} placeholders
+            # Only change variable delimiters; keep block/comment delimiters default
+            env = Environment(variable_start_string='[[', variable_end_string=']]')
+            template = env.from_string(raw_tpl)
             # For cluster-init, avoid injecting a default namespace into the template to preserve file-defined namespaces
             render_ns = ("" if app_name == "cluster-init" else (namespace or "default"))
             # Backward compatibility: if old vllm_model is provided but new chat model is empty,
