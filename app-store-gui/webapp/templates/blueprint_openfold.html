@@ -25,6 +25,8 @@
     .btn-purple:hover { background: var(--weka-purple-dark); }
     .muted { color: #9ca3af; }
     .badge { padding: 2px 8px; border-radius: 9999px; font-size: 12px; }
+    /* Make permission badges smaller only within the Blueprint Permissions section */
+    .perm-card .badge { padding: 1px 6px; font-size: 10px; line-height: 1.2; }
   </style>
   </head>
   <body class="min-h-screen">
@@ -50,19 +52,125 @@
             <div class="flex items-center gap-2 mb-3">
               <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">Open Source</span>
             </div>
-            <p class="muted">OpenFold is an open-source, AI-powered software tool that predicts the 3D structures of proteins from their amino acid sequences.</p>
-            {% if yaml_path %}
-            <div class="mt-3 text-xs muted">Manifest: {{ yaml_path }}</div>
-            {% endif %}
+            <p class="muted text-sm leading-6">OpenFold 2 is an open-source protein structure prediction framework that builds on the ideas of AlphaFold but is optimized for transparency, reproducibility, and large-scale training in research environments. It provides modular, well-documented components so scientists can study how protein-folding models work internally, customize them, or train new variants on their own datasets. People use OpenFold 2 because it offers high-quality structure prediction while remaining fully open, hackable, and suitable for experimentation in academic and industry research.</p>
+            
+          </div>
+
+          <!-- Area 2: Installation Details -->
+          <div class="card rounded-lg p-6">
+            <h2 class="text-xl font-semibold mb-3">Installation Details</h2>
+            <div class="space-y-4 text-sm muted leading-6">
+              <p>
+                WEKA’s implementation of OpenFold 2 has been enhanced to take advantage of WEKA’s industry-leading, POSIX-backed filesystem. In this blueprint, Argo Workflow Manager is used to orchestrate and schedule OpenFold runs. The blueprint includes two Argo workflow templates: <span class="font-medium text-white">pipeline</span>, which runs the OpenFold MSA and inference tasks on one or more proteins, and <span class="font-medium text-white">bootstrap</span>, which installs the required UniRef50 and PDB70 databases into your configured Persistent Volume for use during MSA analysis.
+              </p>
+              <p>
+                Users may choose either to use the blueprint’s built-in database bootstrap process or to manually download and provide their own databases in the Persistent Volume.
+              </p>
+              <p>
+                This blueprint is designed to work with the WEKA NeuralMesh CSI driver for Kubernetes. To install this blueprint, you must have both the WEKA Operator and the CSI driver configured and connected to your WEKA NeuralMesh cluster.
+              </p>
+              <p>
+                A minimum of one NVIDIA GPU and four CPU-backed worker nodes is required to run the blueprint.
+              </p>
+              <p>
+                To deploy the blueprint, fill in the necessary details in the Configure panel. For the <span class="font-medium text-white">WEKA Cluster Filesystem</span> setting, you must specify the exact filesystem configured for use with your WEKA CSI driver. Selecting any other WEKA NeuralMesh filesystem will result in deployment failure.
+              </p>
+            </div>
+          </div>
+
+          <!-- Area 3: Blueprint Permissions -->
+          <div class="card rounded-lg p-6 perm-card">
+            <h2 class="text-xl font-semibold mb-4">Blueprint Permissions</h2>
+            <p class="text-sm muted mb-5">This blueprint uses a Service Account with the following roles. Permissions are scoped to the namespace where the blueprint is installed.</p>
+
+            <div class="grid md:grid-cols-2 gap-6 text-base md:text-lg leading-7">
+              <!-- Kubernetes -->
+              <div>
+                <h3 class="text-lg md:text-xl font-semibold mb-3">Kubernetes</h3>
+                <div class="space-y-4">
+                  <div>
+                    <div class="text-white font-semibold text-base md:text-lg mb-2">Pods / Logs</div>
+                    <div class="flex flex-wrap gap-1">
+                      <span class="badge" style="background:#374151;">GET</span>
+                      <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                      <span class="badge" style="background:#1e40af; color:#dbeafe;">UPDATE</span>
+                      <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                      <span class="badge" style="background:#374151;">LIST</span>
+                      <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="text-white font-semibold text-base md:text-lg mb-2">PVC &amp; ConfigMap</div>
+                    <div class="flex flex-wrap gap-1">
+                      <span class="badge" style="background:#374151;">GET</span>
+                      <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                      <span class="badge" style="background:#1e40af; color:#dbeafe;">UPDATE</span>
+                      <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                      <span class="badge" style="background:#374151;">LIST</span>
+                      <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Argo -->
+              <div>
+                <h3 class="text-lg md:text-xl font-semibold mb-3">Argo</h3>
+                <div class="space-y-4">
+                  <div>
+                    <div class="text-white font-semibold text-base md:text-lg mb-2">Workflow</div>
+                    <div class="flex flex-wrap gap-1">
+                      <span class="badge" style="background:#374151;">GET</span>
+                      <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                      <span class="badge" style="background:#1e40af; color:#dbeafe;">UPDATE</span>
+                      <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                      <span class="badge" style="background:#374151;">LIST</span>
+                      <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="text-white font-semibold text-base md:text-lg mb-2">Workflow Templates</div>
+                    <div class="flex flex-wrap gap-1">
+                      <span class="badge" style="background:#374151;">GET</span>
+                      <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                      <span class="badge" style="background:#1e40af; color:#dbeafe;">UPDATE</span>
+                      <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                      <span class="badge" style="background:#374151;">LIST</span>
+                      <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="text-white font-semibold text-base md:text-lg mb-2">CRONWorkflows</div>
+                    <div class="flex flex-wrap gap-1">
+                      <span class="badge" style="background:#374151;">GET</span>
+                      <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                      <span class="badge" style="background:#1e40af; color:#dbeafe;">UPDATE</span>
+                      <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                      <span class="badge" style="background:#374151;">LIST</span>
+                      <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="card rounded-lg p-6">
             <h2 class="text-xl font-semibold mb-3">What this blueprint installs</h2>
             <ul class="list-disc ml-6 space-y-2 text-sm">
-              <li>GPU Operator and required NVIDIA drivers</li>
-              <li>Inference components required for protein structure prediction</li>
-              <li>Observability stack (Prometheus + Grafana)</li>
+              <li>Openfold 2.1.1</li>
+              <li>Argo Workflows v0.41.8</li>
+              <li>WEKA Operator/CSI v1.8.7</li>
+              <li>Mol Star Viewer</li>
             </ul>
+            {% if yaml_path %}
+            <div class="mt-3 text-xs muted">Manifest: {{ yaml_path }}</div>
+            {% endif %}
           </div>
         </div>
 
@@ -104,35 +212,35 @@
             {% include 'partials_deploy_form.html' ignore missing %}
             {% if not self %}{% endif %}
             <form id="deploy-form" class="space-y-4">
+              <!-- Reordered fields as requested -->
+              <div>
+                <label class="block text-sm mb-1" for="deploymentName">Deployment Name</label>
+                <input id="deploymentName" name="deploymentName" placeholder="e.g. openfold-prod"
+                       class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                <div class="muted text-xs mt-1">Custom name to assign to this OpenFold deployment.</div>
+              </div>
+
               <div>
                 <label class="block text-sm mb-1" for="namespace">Namespace</label>
-                <input id="namespace" name="namespace" placeholder="default" value="default" readonly
-                       class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400 cursor-not-allowed opacity-80" title="Namespace is managed from the main page" />
-                <div class="muted text-xs mt-1">Namespace is managed from the main page (Home).</div>
-              </div>
-
-              <div>
-                <label class="block text-sm mb-1" for="storageClass">Storage Class</label>
-                <select id="storageClass" name="storageClass"
-                        class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400">
-                  <option value="">Select a StorageClass...</option>
-                </select>
-                <div class="muted text-xs mt-1">Choose from available Kubernetes StorageClasses.</div>
-              </div>
-
-              <div>
-                <label class="block text-sm mb-1" for="vllmChatModel">vLLM Chat Model</label>
-                <input id="vllmChatModel" name="vllmChatModel" placeholder="e.g. meta-llama/Meta-Llama-3-8B-Instruct" 
+                <input id="namespace" name="namespace" placeholder="default" value="default"
                        class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-                <div class="muted text-xs mt-1">Enter the chat model identifier to use with vLLM.</div>
+                <div class="muted text-xs mt-1">Set the Kubernetes namespace for this deployment.</div>
               </div>
 
               <div>
-                <label class="block text-sm mb-1" for="vllmEmbedModel">vLLM Embedding Model</label>
-                <input id="vllmEmbedModel" name="vllmEmbedModel" placeholder="e.g. intfloat/e5-mistral-7b-instruct" 
+                <label class="block text-sm mb-1" for="wekaClusterFilesystem">WEKA Cluster Filesystem</label>
+                <input id="wekaClusterFilesystem" name="wekaClusterFilesystem" placeholder="e.g. weka-fs01"
                        class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-                <div class="muted text-xs mt-1">Enter the embedding model identifier to use with vLLM.</div>
+                <div class="muted text-xs mt-1">Name or identifier of the WEKA cluster filesystem to use.</div>
               </div>
+
+              <div>
+                <label class="block text-sm mb-1" for="openfoldStorageCapacity">Openfold Storage Capacity</label>
+                <input id="openfoldStorageCapacity" name="openfoldStorageCapacity" placeholder="e.g. 500Gi"
+                       class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                <div class="muted text-xs mt-1">Requested capacity for OpenFold persistent storage (e.g., 100Gi, 1Ti).</div>
+              </div>
+
 
               <button type="submit" class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium">Deploy Blueprint</button>
               <div id="deploy-result" class="text-xs mt-2"></div>
@@ -162,7 +270,6 @@
       }
       document.addEventListener('DOMContentLoaded', async () => {
         await syncNamespaceField();
-        try { const data = await get('/storage-classes'); const sel = document.getElementById('storageClass'); if (sel && data && data.ok && Array.isArray(data.items)) { sel.innerHTML = '<option value="">Select a StorageClass...</option>' + data.items.map(n => `<option value="${n}">${n}</option>`).join(''); const saved = localStorage.getItem('selectedStorageClass'); if (saved && data.items.includes(saved)) sel.value = saved; } } catch (_) {}
       });
       const form = document.getElementById('deploy-form');
       form.addEventListener('submit', async (e) => {
@@ -174,11 +281,17 @@
         resEl.textContent = 'Starting deployment...';
         listEl.innerHTML = '';
         progressEl.classList.remove('hidden');
-        const payload = new URLSearchParams();
-        payload.set('app_name', '{{ name }}');
-        payload.set('namespace', ns);
+        const params = new URLSearchParams();
+        params.set('app_name', '{{ name }}');
+        params.set('namespace', ns);
+        const wekaFs = document.getElementById('wekaClusterFilesystem')?.value || '';
+        if (wekaFs) params.set('weka_cluster_filesystem', wekaFs);
+        const ofCap = document.getElementById('openfoldStorageCapacity')?.value || '';
+        if (ofCap) params.set('openfold_storage_capacity', ofCap);
+        const depName = document.getElementById('deploymentName')?.value || '';
+        if (depName) params.set('deployment_name', depName);
         try {
-          const resp = await fetch(`/deploy-stream/{{ name }}?namespace=${encodeURIComponent(ns)}`);
+          const resp = await fetch(`/deploy-stream/{{ name }}?${params.toString()}`);
           const reader = resp.body.getReader();
           const dec = new TextDecoder();
           while (true) {

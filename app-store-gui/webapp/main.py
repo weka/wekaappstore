@@ -1438,6 +1438,10 @@ async def deploy_stream(
     vllm_embed_model: Optional[str] = None,
     # Backward-compat param: previously used single vllm_model
     vllm_model: Optional[str] = None,
+    # New OpenFold-specific configurable parameters
+    weka_cluster_filesystem: Optional[str] = None,
+    openfold_storage_capacity: Optional[str] = None,
+    deployment_name: Optional[str] = None,
 ):
     """Server-Sent Events stream that emits deployment progress for a blueprint.
 
@@ -1476,6 +1480,9 @@ async def deploy_stream(
         norm_chat_model = _norm(vllm_chat_model)
         norm_embed_model = _norm(vllm_embed_model)
         norm_legacy_model = _norm(vllm_model)
+        norm_weka_fs = _norm(weka_cluster_filesystem)
+        norm_of_capacity = _norm(openfold_storage_capacity)
+        norm_deploy_name = _norm(deployment_name)
 
         # Validate app
         if not yaml_path:
@@ -1518,6 +1525,10 @@ async def deploy_stream(
                 vllm_embed_model=norm_embed_model,
                 # Legacy variable kept for existing templates
                 vllm_model=chat_model_var,
+                # OpenFold-specific variables
+                weka_cluster_filesystem=norm_weka_fs,
+                openfold_storage_capacity=norm_of_capacity,
+                deployment_name=norm_deploy_name,
             )
 
             # Apply manifest with namespace overrides using rendered content
