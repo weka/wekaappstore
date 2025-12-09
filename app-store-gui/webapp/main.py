@@ -816,6 +816,59 @@ async def save_huggingface_key(api_key: str = Form(...), namespace: str = Form("
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+@app.get("/api/blueprints")
+async def list_blueprints(namespace: str = Query("all", description="Namespace to list WekaAppStore CRs from; use 'all' for cluster-wide")):
+    """List Weka App Store custom resources (CRs).
+
+    CRD: group=warp.io, version=v1alpha1, plural=wekaappstores
+    Returns safe metadata only: name, namespace, creationTimestamp.
+    """
+    try:
+        load_kube_config()
+        co_api = client.CustomObjectsApi()
+        items = []
+        if (namespace or "").strip().lower() in ("all", "*"):
+            resp = co_api.list_cluster_custom_object(group="warp.io", version="v1alpha1", plural="wekaappstores")
+        else:
+            resp = co_api.list_namespaced_custom_object(group="warp.io", version="v1alpha1", plural="wekaappstores", namespace=namespace.strip())
+        for it in (resp or {}).get("items", []) or []:
+            md = (it or {}).get("metadata", {}) or {}
+            items.append({
+                "name": md.get("name"),
+                "namespace": md.get("namespace") or "default",
+                "creationTimestamp": md.get("creationTimestamp"),
+            })
+        return JSONResponse({"ok": True, "items": items})
+    except ApiException as ae:
+        # 404 if CRD not installed or no permission
+        return JSONResponse({"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/blueprints/{namespace}/{name}")
+async def delete_blueprint(namespace: str, name: str):
+    """Delete a Weka App Store CR instance by namespace and name."""
+    try:
+        load_kube_config()
+        co_api = client.CustomObjectsApi()
+        # Foreground deletion to ensure child resources are cleaned up by owner refs if any
+        body = client.V1DeleteOptions(propagation_policy="Foreground")
+        co_api.delete_namespaced_custom_object(
+            group="warp.io",
+            version="v1alpha1",
+            namespace=namespace,
+            plural="wekaappstores",
+            name=name,
+            body=body,
+        )
+        return JSONResponse({"ok": True})
+    except ApiException as ae:
+        return JSONResponse({"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.post("/api/secret/nvidia")
 async def save_nvidia_key(api_key: str = Form(...), namespace: str = Form("default")):
     try:

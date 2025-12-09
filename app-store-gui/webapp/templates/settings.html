@@ -256,8 +256,35 @@
 
     <!-- Section 5: WEKA CSI Driver Placeholder -->
     <section class="card rounded-lg p-5">
-      <h3 class="font-semibold mb-2">WEKA CSI Driver</h3>
-      <p class="muted text-sm">Placeholder for future configuration.</p>
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="font-semibold">Blueprint Uninstall</h3>
+          <p class="muted text-sm">View and remove Weka App Store blueprints (Custom Resources) installed in your cluster.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <select id="bp-scope" class="px-2 py-1 rounded-md bg-gray-800/70 border border-white/10 text-sm">
+            <option value="all" selected>All namespaces</option>
+            <option value="current">Current namespace</option>
+          </select>
+          <button id="bp-refresh" class="px-3 py-1.5 rounded-md text-sm font-medium border border-white/20 hover:bg-white/10">Refresh</button>
+        </div>
+      </div>
+
+      <div id="bp-list" class="overflow-x-auto">
+        <div id="bp-empty" class="muted text-sm">Loading...</div>
+        <table id="bp-table" class="min-w-full hidden">
+          <thead>
+            <tr class="text-left text-xs uppercase text-white/70">
+              <th class="py-2 pr-4">Namespace</th>
+              <th class="py-2 pr-4">Name</th>
+              <th class="py-2 pr-4">Created</th>
+              <th class="py-2 pr-4"></th>
+            </tr>
+          </thead>
+          <tbody id="bp-tbody" class="text-sm"></tbody>
+        </table>
+      </div>
+      <div id="bp-result" class="text-xs text-white/80 mt-3"></div>
     </section>
   </main>
 
@@ -268,6 +295,10 @@
     }
     async function get(url) {
       const res = await fetch(url);
+      return res.json();
+    }
+    async function del(url) {
+      const res = await fetch(url, { method: 'DELETE' });
       return res.json();
     }
 
@@ -464,6 +495,89 @@
         }
       });
     }
+
+    // -------- Blueprint Uninstall --------
+    function renderBlueprints(items) {
+      const emptyEl = document.getElementById('bp-empty');
+      const tableEl = document.getElementById('bp-table');
+      const tbody = document.getElementById('bp-tbody');
+      if (!Array.isArray(items) || items.length === 0) {
+        if (emptyEl) emptyEl.textContent = 'No blueprints found or insufficient RBAC.';
+        if (tableEl) tableEl.classList.add('hidden');
+        return;
+      }
+      if (emptyEl) emptyEl.textContent = '';
+      if (tableEl) tableEl.classList.remove('hidden');
+      tbody.innerHTML = '';
+      const sorted = items.slice().sort((a,b)=>{
+        const nsA = (a.namespace||'').localeCompare(b.namespace||'');
+        if (nsA !== 0) return nsA;
+        return (a.name||'').localeCompare(b.name||'');
+      });
+      for (const it of sorted) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="py-2 pr-4 font-mono">${it.namespace||'-'}</td>
+          <td class="py-2 pr-4 font-mono">${it.name||'-'}</td>
+          <td class="py-2 pr-4">${it.creationTimestamp ? new Date(it.creationTimestamp).toLocaleString() : '-'}</td>
+          <td class="py-2 pr-4 text-right">
+            <button class="px-3 py-1 rounded-md text-sm border border-red-400/40 text-red-300 hover:bg-red-500/10" data-ns="${it.namespace}" data-name="${it.name}">Delete</button>
+          </td>`;
+        tbody.appendChild(tr);
+      }
+      // wire delete buttons
+      tbody.querySelectorAll('button[data-ns][data-name]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const ns = btn.getAttribute('data-ns');
+          const name = btn.getAttribute('data-name');
+          if (!ns || !name) return;
+          if (!confirm(`Delete blueprint ${name} in namespace ${ns}? This cannot be undone.`)) return;
+          const out = document.getElementById('bp-result');
+          out.textContent = `Deleting ${name}...`;
+          try {
+            const data = await del(`/api/blueprints/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`);
+            if (data && data.ok) {
+              out.textContent = `Deleted ${name}. Refreshing...`;
+              await loadBlueprints();
+              out.textContent = 'Done.';
+            } else {
+              out.textContent = 'Error: ' + (data && data.error ? data.error : 'Unknown error');
+            }
+          } catch (err) {
+            out.textContent = 'Request failed: ' + err;
+          }
+        });
+      });
+    }
+
+    async function loadBlueprints() {
+      const scopeSel = document.getElementById('bp-scope');
+      const scope = scopeSel ? scopeSel.value : 'all';
+      const namespace = (scope === 'current') ? getSettingsNamespace() : 'all';
+      const emptyEl = document.getElementById('bp-empty');
+      if (emptyEl) emptyEl.textContent = 'Loading...';
+      try {
+        const data = await get(`/api/blueprints?namespace=${encodeURIComponent(namespace)}`);
+        if (data && data.ok) {
+          renderBlueprints(data.items || []);
+        } else {
+          if (emptyEl) emptyEl.textContent = data && data.error ? data.error : 'Failed to load blueprints';
+        }
+      } catch (e) {
+        if (emptyEl) emptyEl.textContent = 'Failed to load blueprints: ' + e;
+      }
+    }
+
+    const bpRefresh = document.getElementById('bp-refresh');
+    if (bpRefresh) {
+      bpRefresh.addEventListener('click', loadBlueprints);
+    }
+    const bpScope = document.getElementById('bp-scope');
+    if (bpScope) {
+      bpScope.addEventListener('change', loadBlueprints);
+    }
+    // initial load
+    loadBlueprints();
 
     // Un-initialize Cluster
     const uninitBtn = document.getElementById('uninit-cluster');

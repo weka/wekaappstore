@@ -43,6 +43,11 @@ spec:
                   releaseName:
                     type: string
                     description: "Custom Helm release name (optional, defaults to CR name)"
+                  crdsStrategy:
+                    type: string
+                    description: "How to handle CRDs contained in the chart: Auto (default) skips if CRDs already exist, Install always installs CRDs, Skip never installs CRDs"
+                    enum: ["Auto", "Install", "Skip"]
+                    default: "Auto"
               
               # Helm values configuration
               values:
@@ -120,6 +125,11 @@ spec:
                             releaseName:
                               type: string
                               description: "Custom Helm release name (optional, defaults to component name)"
+                            crdsStrategy:
+                              type: string
+                              description: "How to handle CRDs contained in the chart: Auto (default) skips if CRDs already exist, Install always installs CRDs, Skip never installs CRDs"
+                              enum: ["Auto", "Install", "Skip"]
+                              default: "Auto"
                         kubernetesManifest:
                           type: string
                           description: "Raw Kubernetes YAML manifest (alternative to Helm chart)"
