@@ -172,6 +172,9 @@ spec:
                               type: string
                               enum: ["pod", "deployment", "statefulset", "job", "custom"]
                               description: "Type of readiness check"
+                            name:
+                              type: string
+                              description: "Optional resource name to wait on (e.g., a specific deployment name). If set, selector/matchLabels are ignored."
                             selector:
                               type: string
                               description: "Label selector for readiness (kubectl-style). For multiple conditions, separate with commas (e.g., 'app.kubernetes.io/instance=prometheus-adapter,app.kubernetes.io/name=prometheus-adapter'). Use matchLabels for map-style."
@@ -180,6 +183,9 @@ spec:
                               description: "Kubernetes-style matchLabels map (alternative to selector)"
                               additionalProperties:
                                 type: string
+                            namespace:
+                              type: string
+                              description: "Optional namespace override for the readiness check (defaults to component/CR namespace)"
                             timeout:
                               type: integer
                               description: "Timeout in seconds (default: 300)"

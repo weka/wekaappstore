@@ -105,6 +105,49 @@ Notes:
 - Ensure the CRD exists if the operator manages custom resources:
   - kubectl get crd wekaappstores.warp.io
 
+## Readiness checks for components (pods or deployments)
+When using AppStack components, you can control how the operator waits for a component to become ready after installation. The operator supports waiting on either pods (default) or deployments using `kubectl wait` under the hood.
+
+Examples:
+
+- Wait for a specific deployment by name (recommended when you know the resource name):
+
+  appStack:
+    components:
+      - name: envoy-gateway
+        enabled: true
+        helmChart:
+          repository: oci://example.registry/charts
+          name: envoy-gateway
+          version: 1.2.3
+        readinessCheck:
+          type: deployment
+          name: envoy-gateway
+          namespace: envoy-gateway-system
+          timeout: 300
+
+- Wait for pods by label selector (default behavior if name is not provided):
+
+  appStack:
+    components:
+      - name: my-component
+        enabled: true
+        helmChart:
+          repository: https://example.com/helm
+          name: my-chart
+          version: 0.1.0
+        readinessCheck:
+          type: pod
+          matchLabels:
+            app.kubernetes.io/instance: my-component
+            app.kubernetes.io/name: my-chart
+          timeout: 300
+
+Notes:
+- If `readinessCheck.name` is set, the operator waits for `type/name` in the specified namespace (or the component targetNamespace if omitted).
+- If `name` is not set, the operator uses the selector (or matchLabels) to wait for the corresponding resource(s). For many Helm charts the operator auto-derives a good default selector when none is supplied.
+- Supported types: `pod`, `deployment`, `statefulset`, `job`.
+
 ## Publishing (maintainers)
 For maintainers who need to publish a new chart version to GitHub Pages under docs/:
 1) Bump version in weka-app-store-operator-chart/Chart.yaml

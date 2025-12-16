@@ -430,6 +430,8 @@ def wait_for_component_ready(component: Dict[str, Any], namespace: str, timeout:
         # Try a compound selector first (instance + name) which matches many Helm charts
         default_selector = f"app.kubernetes.io/instance={release_name},app.kubernetes.io/name={chart_name}"
 
+    # Determine whether we're targeting by name or selector
+    target_name = readiness_check.get('name')
     # Normalize selector: accept string, dict (matchLabels), or list
     raw_selector = readiness_check.get('selector')
     if raw_selector is None:
@@ -446,7 +448,8 @@ def wait_for_component_ready(component: Dict[str, Any], namespace: str, timeout:
     check_timeout = int(readiness_check.get('timeout', timeout))
     grace_period = int(readiness_check.get('gracePeriodSeconds', 5))
 
-    target_namespace = component.get('targetNamespace', namespace)
+    # Allow readinessCheck.namespace to override component/CR namespace
+    target_namespace = readiness_check.get('namespace') or component.get('targetNamespace', namespace)
 
     # Map check types to resources and conditions supported by kubectl wait
     type_to_wait = {
@@ -467,12 +470,21 @@ def wait_for_component_ready(component: Dict[str, Any], namespace: str, timeout:
         if grace_period > 0:
             time.sleep(grace_period)
 
-        cmd = [
-            'kubectl', 'wait', f"--for=condition={condition}", resource,
-            '-l', selector,
-            '-n', target_namespace,
-            f"--timeout={check_timeout}s"
-        ]
+        # Build kubectl wait command. If a specific name is provided, prefer resource/name
+        if target_name:
+            resource_ref = f"{resource}/{target_name}"
+            cmd = [
+                'kubectl', 'wait', f"--for=condition={condition}", resource_ref,
+                '-n', target_namespace,
+                f"--timeout={check_timeout}s"
+            ]
+        else:
+            cmd = [
+                'kubectl', 'wait', f"--for=condition={condition}", resource,
+                '-l', selector,
+                '-n', target_namespace,
+                f"--timeout={check_timeout}s"
+            ]
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=check_timeout + 15)
 
@@ -484,8 +496,8 @@ def wait_for_component_ready(component: Dict[str, Any], namespace: str, timeout:
         stdout_full = result.stdout or ''
         stderr = stderr_full.lower()
 
-        # If the selector matched nothing on the chosen resource type, try a deployment as a common fallback
-        if 'no matching resources' in stderr:
+        # If nothing matched: handle fallbacks only when we weren't explicitly given a name
+        if 'no matching resources' in stderr and not target_name:
             # First try switching resource to deployment with the same selector
             if resource != 'deployment':
                 logging.warning(

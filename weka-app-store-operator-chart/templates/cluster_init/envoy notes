@@ -1,0 +1,8 @@
+Add K8s Gatway CRDS
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+
+Install Envoy Gateway Helm Chart
+helm install eg oci://docker.io/envoyproxy/gateway-helm --version v1.5.6 -n envoy-gateway-system --create-namespace
+
+YAML apply ai-edge-gateway
+YAML apply blueprint HTTPRoute
