@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: install-gateway-api-crds
+  namespace: kube-system
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      serviceAccountName: gateway-api-crds-installer  # must have cluster-wide CRD perms
+      restartPolicy: OnFailure
+      containers:
+        - name: kubectl
+          image: docker.io/bitnami/kubectl:latest
+          env:
+            # Bump this URL to upgrade the CRD bundle version when desired
+            - name: GATEWAY_API_URL
+              value: "https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+
+              # List of core Gateway API CRDs to check
+              CRDS="\
+              gatewayclasses.gateway.networking.k8s.io \
+              gateways.gateway.networking.k8s.io \
+              httproutes.gateway.networking.k8s.io \
+              referencegrants.gateway.networking.k8s.io \
+              grpcroutes.gateway.networking.k8s.io \
+              tcproutes.gateway.networking.k8s.io \
+              tlsroutes.gateway.networking.k8s.io \
+              udproutes.gateway.networking.k8s.io"
+
+              echo "Checking for existing Gateway API CRDs..."
+              MISSING=0
+              for CRD in $CRDS; do
+                if ! kubectl get crd "$CRD" >/dev/null 2>&1; then
+                  echo "Missing: $CRD"
+              
+                  MISSING=1
+                else
+                  echo "Found:   $CRD"
+                fi
+              done
+
+              if [ "$MISSING" -eq 0 ]; then
+                echo "All Gateway API CRDs already exist. Skipping installation."
+                exit 0
+              fi
+
+              echo "Some CRDs are missing. Applying bundle: $GATEWAY_API_URL"
+              kubectl apply -f "$GATEWAY_API_URL"
+              echo "Gateway API CRDs installed/updated."
