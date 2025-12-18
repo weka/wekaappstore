@@ -46,7 +46,7 @@ spec:
       #NVIDIA GPU Operator
       - name: nvidia-operator
         description: "Certificate management for Kubernetes"
-        enabled: true
+        enabled: false
         dependsOn:
           - prometheus-adapter
         helmChart:
@@ -206,7 +206,6 @@ spec:
           kind: Gateway
           metadata:
             name: warp-edge-gateway
-            namespace: envoy-gateway-system
           spec:
             gatewayClassName: envoy-gateway-class
             listeners:
@@ -216,6 +215,7 @@ spec:
                 allowedRoutes:
                   namespaces:
                     from: All
+        targetNamespace: envoy-gateway-system
 
         # Sets up Envoy route for Grafana
       - name: envoy-route-grafana
@@ -231,13 +231,12 @@ spec:
           kind: HTTPRoute
           metadata:
             name: grafana-ui
-            namespace: monitoring
           spec:
             parentRefs:
               - name: warp-edge-gateway
                 namespace: envoy-gateway-system
             hostnames:
-              - grafana.example.com
+              - grafana-nfs.example.com
             rules:
               - matches:
                   - path:
@@ -246,11 +245,42 @@ spec:
                 backendRefs:
                   - name: kube-prometheus-stack-grafana
                     port: 80
+        targetNamespace: monitoring
+
+        # Sets up Envoy route for App Store GUI
+      - name: envoy-route-appstore-gui
+        description: "Envoy Route for WEKA App Store GUI"
+        enabled: true
+        dependsOn:
+            - envoy-ingress-controller
+            - kube-prom-stack
+            - prometheus-adapter
+        waitForReady: false
+        kubernetesManifest: |
+          apiVersion: gateway.networking.k8s.io/v1
+          kind: HTTPRoute
+          metadata:
+            name: wekaappstore-ui
+          spec:
+            parentRefs:
+              - name: warp-edge-gateway
+                namespace: envoy-gateway-system
+            hostnames:
+              - appstore-nfs.example.com
+            rules:
+              - matches:
+                  - path:
+                      type: PathPrefix
+                      value: /
+                backendRefs:
+                  - name: wekaappstoregui-svc
+                    port: 80
+        targetNamespace: wekaappstore
       
       # Install NVIDIA DCGM ServiceMonitor via operator manifests
       - name: nvidia-dcgm-servicemonitor
         description: "ServiceMonitor for NVIDIA DCGM exporter"
-        enabled: true
+        enabled: false
         dependsOn:
           - kube-prom-stack        # ensure Prometheus Operator (CRDs) is ready
           - nvidia-operator        # ensure DCGM exporter Service exists
@@ -261,7 +291,6 @@ spec:
           kind: ServiceMonitor
           metadata:
             name: dcgm-exporter
-            namespace: monitoring
             labels:
               release: kube-prom-stack
           spec:
@@ -276,6 +305,7 @@ spec:
                 path: /metrics
                 interval: 30s
                 honorLabels: true
+        targetNamespace: monitoring
 ---
 # ConfigMap for Prom-stack values
 apiVersion: v1

@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: weka-client-cluster-dev
+  namespace: default
+type: Opaque
+data:
+  org: Um9vdA==
+  username: Y3NpLW5mcw==
+  password: UGFzc3dvcmQxMjM=

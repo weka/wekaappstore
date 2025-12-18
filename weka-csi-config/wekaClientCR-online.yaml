@@ -1,0 +1,22 @@
+apiVersion: weka.weka.io/v1alpha1
+kind: WekaClient
+metadata:
+  name: warp-cluster-clients
+spec:
+  image: quay.io/weka.io/weka-in-container:4.4.10.150
+  imagePullSecret: quay-io-secret
+  #driversDistService: "https://weka-drivers-dist.weka-operator-system.svc.cluster.local:60002"
+  driversDistService: "https://drivers.weka.io"
+#  rawTolerations:
+#    - key: "nvidia.com/gpu"
+#      operator: "Equal"
+#      value: "true"
+#      effect: "NoSchedule"
+  port: 45001
+  agentPort: 45000
+  nodeSelector:
+    weka.io/supports-clients: "true"
+  wekaSecretRef: weka-client-cluster-dev
+  joinIpPorts: ["172.3.12.221:14000"]
+  network:
+    udpMode: true
