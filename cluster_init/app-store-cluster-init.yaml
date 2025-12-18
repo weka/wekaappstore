@@ -50,8 +50,9 @@ spec:
         dependsOn:
           - prometheus-adapter
         helmChart:
-          name: "https://nvidia.github.io/gpu-operator"
+          repository: "https://nvidia.github.io/gpu-operator"
           version: "v25.3.0"
+          name: "gpu-operator"
           releaseName: "gpu-operator"
         waitForReady: true
         readinessCheck:
@@ -62,20 +63,24 @@ spec:
         targetNamespace: gpu-operator
 
         # Service Account for CRD installer Checker
-      - name: gateway-api-crds-permissions
+      - name: gateway-api-crds-serviceaccount
         description: "Service Account for CRD installer Checker"
         enabled: true
-        waitForReady: true
-        readinessCheck:
-          type: job
-          timeout: 300
         kubernetesManifest: |
           apiVersion: v1
           kind: ServiceAccount
           metadata:
             name: gateway-api-crds-installer
             namespace: kube-system
-          ---
+        targetNamespace: kube-system
+
+        # Cluster Role Binding for CRD installer Checker
+      - name: gateway-api-crds-rolebinding
+        description: "Rolebinding for CRD installer Checker"
+        enabled: true
+        dependsOn:
+          - gateway-api-crds-serviceaccount
+        kubernetesManifest: |
           apiVersion: rbac.authorization.k8s.io/v1
           kind: ClusterRoleBinding
           metadata:
@@ -94,7 +99,7 @@ spec:
         description: "Install Kubernetes Gateway API CRDs via Job (skips if already present)"
         enabled: true
         dependsOn:
-          - gateway-api-crds-permissions
+          - gateway-api-crds-rolebinding
         waitForReady: true
         readinessCheck:
           type: job
@@ -104,7 +109,6 @@ spec:
           kind: Job
           metadata:
             name: install-gateway-api-crds
-            namespace: kube-system
           spec:
             backoffLimit: 1
             template:
@@ -113,7 +117,7 @@ spec:
                 restartPolicy: OnFailure
                 containers:
                   - name: kubectl
-                    image: bitnami/kubectl:1.30
+                    image: docker.io/bitnami/kubectl:latest
                     env:
                       # Bump this URL to upgrade the CRD bundle version when desired
                       - name: GATEWAY_API_URL
@@ -154,6 +158,8 @@ spec:
                         kubectl apply -f "$GATEWAY_API_URL"
                         echo "Gateway API CRDs installed/updated."
 
+        targetNamespace: kube-system
+
       # Envoy Ingress Gateway
       - name: envoy-ingress-controller
         description: "Envoy Gateway for Ingress and Routing"
@@ -161,9 +167,10 @@ spec:
         dependsOn:
           - gateway-api-crds-job
         helmChart:
-          name: "oci://docker.io/envoyproxy/gateway-helm"
+          repository: "oci://docker.io/envoyproxy"
+          name: "gateway-helm"
           version: "v1.5.6"
-          releaseName: "envoy-gateway"
+          releaseName: "gateway-helm"
         waitForReady: true
         readinessCheck:
           type: deployment
@@ -178,10 +185,7 @@ spec:
         enabled: true
         dependsOn:
             - envoy-ingress-controller
-        waitForReady: true
-        readinessCheck:
-          type: job
-          timeout: 300
+        waitForReady: false
         kubernetesManifest: |
           apiVersion: gateway.networking.k8s.io/v1
           kind: GatewayClass
@@ -196,10 +200,7 @@ spec:
         enabled: true
         dependsOn:
             - envoy-ingress-controller
-        waitForReady: true
-        readinessCheck:
-          type: job
-          timeout: 300
+        waitForReady: false
         kubernetesManifest: |
           apiVersion: gateway.networking.k8s.io/v1
           kind: Gateway
@@ -224,10 +225,7 @@ spec:
             - envoy-ingress-controller
             - kube-prom-stack
             - prometheus-adapter
-        waitForReady: true
-        readinessCheck:
-          type: job
-          timeout: 300
+        waitForReady: false
         kubernetesManifest: |
           apiVersion: gateway.networking.k8s.io/v1
           kind: HTTPRoute
@@ -256,6 +254,8 @@ spec:
         dependsOn:
           - kube-prom-stack        # ensure Prometheus Operator (CRDs) is ready
           - nvidia-operator        # ensure DCGM exporter Service exists
+          - prometheus-adapter
+          - envoy-ingress-controller
         kubernetesManifest: |
           apiVersion: monitoring.coreos.com/v1
           kind: ServiceMonitor
