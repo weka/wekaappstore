@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Welcome to WEKA App Store</title>
+  {% if logo_b64 %}
+    <link rel="icon" type="image/png" href="data:image/png;base64,{{ logo_b64 }}">
+  {% endif %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@emotion/react@11.11.4/dist/emotion-react.umd.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@emotion/styled@11.11.0/dist/emotion-styled.umd.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@mui/material@5.15.14/umd/material-ui.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    :root { --weka-purple: #6b2fb3; --weka-purple-dark: #552695; --weka-dark: #0B0C10; }
+    body { background: #0b0c10; color: #e5e7eb; font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; }
+    .brand-grad { background: linear-gradient(135deg, #0b0c10 0%, #111827 40%, #0b0c10 100%); }
+    .card { background: rgba(31, 41, 55, 0.55); border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(8px); }
+    .log-container { background-color: #111827; color: #d1d5db; font-family: 'Courier New', Courier, monospace; height: 300px; overflow-y: auto; padding: 12px; border-radius: 8px; font-size: 13px; border: 1px solid rgba(255,255,255,0.1); }
+    .log-entry { margin-bottom: 2px; border-left: 2px solid transparent; padding-left: 8px; white-space: pre-wrap; word-break: break-all; }
+    .log-info { border-left-color: #6b2fb3; }
+    .log-success { border-left-color: #10b981; color: #10b981; }
+    .log-error { border-left-color: #ef4444; color: #ef4444; }
+    .log-warn { border-left-color: #f59e0b; color: #fbbf24; }
+    .bg-orb { position: absolute; filter: blur(80px); opacity: 0.3; pointer-events: none; }
+    .orb-purple { background: radial-gradient(closest-side, rgba(107,47,179,0.5), transparent 70%); }
+    .orb-blue { background: radial-gradient(closest-side, rgba(59,130,246,0.2), transparent 70%); }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { 
+      ThemeProvider, createTheme, CssBaseline, Button, LinearProgress, 
+      Typography, Box, Container, Paper, List, ListItem, ListItemText, 
+      ListItemIcon, Divider, Alert, AlertTitle, Chip
+    } = MaterialUI;
+
+    const theme = createTheme({
+      palette: {
+        mode: 'dark',
+        primary: { main: '#6b2fb3' },
+        background: { default: '#0b0c10', paper: 'rgba(31, 41, 55, 0.7)' },
+      },
+      typography: {
+        fontFamily: "'Inter', sans-serif",
+      },
+      components: {
+        MuiCssBaseline: {
+          styleOverrides: {
+            body: {
+              scrollbarWidth: 'thin',
+              '&::-webkit-scrollbar': {
+                width: '6px',
+              },
+              '&::-webkit-scrollbar-track': {
+                background: '#0b0c10',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                background: '#374151',
+                borderRadius: '10px',
+              },
+              '&::-webkit-scrollbar-thumb:hover': {
+                background: '#4b5563',
+              },
+            },
+          },
+        },
+      },
+    });
+
+    function StatusIndicator({ label, status }) {
+      return (
+        <Box sx={% raw %}{{ display: 'flex', alignItems: 'center', gap: 1.5 }}{% endraw %}>
+          <Box sx={% raw %}{{ 
+            width: 10, 
+            height: 10, 
+            borderRadius: '50%', 
+            bgcolor: status === true ? '#10b981' : status === false ? '#ef4444' : '#6b7280',
+            boxShadow: status === true ? '0 0 8px #10b981' : status === false ? '0 0 8px #ef4444' : 'none',
+            flexShrink: 0
+          }}{% endraw %} />
+          <Typography variant="body2" sx={% raw %}{{ color: 'rgba(255,255,255,0.8)', fontWeight: 500, fontSize: '0.85rem' }}{% endraw %}>
+            {label}: {status === true ? 'Installed' : status === false ? 'Not Installed' : 'Checking...'}
+          </Typography>
+        </Box>
+      );
+    }
+
+    function WelcomeApp() {
+      const [initializing, setInitializing] = React.useState(false);
+      const [phase, setPhase] = React.useState('None');
+      const [statusMessage, setStatusMessage] = React.useState('');
+      const [logs, setLogs] = React.useState([]);
+      const [clusterName, setClusterName] = React.useState('Detecting...');
+      const [wekaOperatorInstalled, setWekaOperatorInstalled] = React.useState(null);
+      const [wekaCsiInstalled, setWekaCsiInstalled] = React.useState(null);
+      const [errorCount, setErrorCount] = React.useState(0);
+      const [failed, setFailed] = React.useState(false);
+      const [showProgress, setShowProgress] = React.useState(false);
+      const logContainerRef = React.useRef(null);
+
+      React.useEffect(() => {
+        fetch('/cluster-info')
+          .then(res => res.json())
+          .then(data => {
+            setClusterName(data.cluster_name);
+            setWekaOperatorInstalled(data.weka_operator_installed);
+            setWekaCsiInstalled(data.weka_csi_installed);
+          })
+          .catch(err => {
+            setClusterName('Kubernetes Cluster');
+            setWekaOperatorInstalled(false);
+            setWekaCsiInstalled(false);
+          });
+
+        // Check initial status
+        fetch('/cluster-status')
+          .then(res => res.json())
+          .then(status => {
+            if (status.exists) {
+              setPhase(status.phase);
+              setStatusMessage(status.message);
+              // If it's already in progress, completed or failed, show the progress box
+              if (status.phase !== 'None' && status.phase !== 'Pending') {
+                setShowProgress(true);
+              }
+              if (status.phase === 'Failed') {
+                setFailed(true);
+              }
+            }
+          });
+      }, []);
+
+      React.useEffect(() => {
+        if (initializing && !failed) {
+          const interval = setInterval(async () => {
+            try {
+              const response = await fetch('/cluster-status');
+              const status = await response.json();
+              
+              if (status.exists) {
+                setPhase(status.phase);
+                setStatusMessage(status.message || 'Initializing components...');
+                
+                if (status.phase === 'Ready') {
+                  setInitializing(false);
+                  clearInterval(interval);
+                  // Auto redirect after 2 seconds
+                  const targetUrl = status.redirect_url || '/';
+                  setTimeout(() => { window.location.href = targetUrl; }, 2000);
+                } else if (status.phase === 'Failed') {
+                  setErrorCount(prev => {
+                    const next = prev + 1;
+                    if (next >= 5) {
+                      setFailed(true);
+                      setInitializing(false);
+                      clearInterval(interval);
+                      setLogs(prevLogs => [...prevLogs, { text: "CRITICAL: Initialization failed 5 times. Stopping automatic retries.", type: 'error' }]);
+                    }
+                    return next;
+                  });
+                } else {
+                  // If it's something else (Installing, etc.), reset error count
+                  setErrorCount(0);
+                }
+              }
+            } catch (err) {
+              console.error('Status poll error:', err);
+              setErrorCount(prev => {
+                const next = prev + 1;
+                if (next >= 5) {
+                  setFailed(true);
+                  setInitializing(false);
+                  clearInterval(interval);
+                }
+                return next;
+              });
+            }
+          }, 3000);
+          return () => clearInterval(interval);
+        }
+      }, [initializing, failed]);
+
+      React.useEffect(() => {
+        if (logContainerRef.current) {
+          logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+        }
+      }, [logs]);
+
+      React.useEffect(() => {
+        let eventSource;
+        if (initializing && !failed) {
+          eventSource = new EventSource('/init-logs');
+          eventSource.onmessage = (event) => {
+            const data = event.data;
+            let type = 'info';
+            if (data.toLowerCase().includes('failed') || data.toLowerCase().includes('error')) {
+              type = 'error';
+              if (data.includes('Operator pod not found after 5 attempts')) {
+                setFailed(true);
+                setInitializing(false);
+              }
+            }
+            else if (data.toLowerCase().includes('ready') || data.toLowerCase().includes('success')) type = 'success';
+            else if (data.toLowerCase().includes('warning')) type = 'warn';
+            
+            setLogs(prev => [...prev, { text: data, type }]);
+          };
+          eventSource.onerror = () => {
+            // Browser handles reconnection automatically
+          };
+        }
+        return () => {
+          if (eventSource) eventSource.close();
+        };
+      }, [initializing, failed]);
+
+      const handleInitialize = async () => {
+        if (wekaOperatorInstalled !== true || wekaCsiInstalled !== true) {
+          setLogs(prev => [...prev, { text: "Error: you need to install the WEKA Operator and WEKA CSI driver first.", type: 'error' }]);
+          setStatusMessage("Prerequisites not met.");
+          setShowProgress(true);
+          setFailed(true);
+          setPhase('Failed');
+          return;
+        }
+        setInitializing(true);
+        setShowProgress(true);
+        setFailed(false);
+        setErrorCount(0);
+        try {
+          const response = await fetch('/init-cluster', { method: 'POST' });
+          const result = await response.json();
+          if (!result.ok) {
+            setLogs(prev => [...prev, { text: `Error: ${result.error}`, type: 'error' }]);
+            setInitializing(false);
+          }
+        } catch (err) {
+          setLogs(prev => [...prev, { text: `Network Error: ${err.message}`, type: 'error' }]);
+          setInitializing(false);
+        }
+      };
+
+      return (
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          <Box className="brand-grad min-h-screen relative flex flex-col">
+            <div className="bg-orb orb-purple w-[420px] h-[420px] rounded-full" style={% raw %}{{top:'-120px', left:'-120px', zIndex: 0}}{% endraw %}></div>
+            <div className="bg-orb orb-blue w-[520px] h-[520px] rounded-full" style={% raw %}{{bottom:'-160px', right:'-160px', zIndex: 0}}{% endraw %}></div>
+
+            <header className="fixed top-0 left-0 right-0 z-50 brand-grad border-b border-white/10 px-6 py-6 flex items-center gap-3">
+              { '{{ logo_b64 }}' !== '' && (
+                <img src={`data:image/png;base64,${'{{ logo_b64 }}'}`} alt="WEKA App Store" className="w-8 h-8 rounded-sm object-contain" />
+              )}
+              <Typography variant="h5" component="h1" sx={% raw %}{{ fontWeight: 600, tracking: 'tight' }}{% endraw %}>
+                WEKA App Store
+              </Typography>
+            </header>
+
+            <Container maxWidth="lg" sx={% raw %}{{ pt: 20, pb: 8, flexGrow: 1, position: 'relative', zIndex: 1 }}{% endraw %}>
+              <Box className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                <Box className="lg:col-span-7 space-y-6">
+                  <Typography variant="h3" sx={% raw %}{{ fontWeight: 600, lineHeight: 1.2 }}{% endraw %}>
+                    Initializing the <span className="bg-clip-text text-transparent" style={% raw %}{{backgroundImage: 'linear-gradient(90deg, var(--weka-purple) 0%, #a855f7 50%, #60a5fa 100%)'}}{% endraw %}>WEKA App Store</span>
+                  </Typography>
+                  
+                  <Typography variant="body1" sx={% raw %}{{ color: '#fff', fontWeight: 500, opacity: 0.9 }}{% endraw %}>
+                    Welcome to the WEKA App Store, your marketplace for discovering and deploying AI use cases on Kubernetes. The WEKA App Store leverages the performance of WEKA NeuralMesh storage to simplify and accelerate deployment. Follow the instructions below to initialize your Kubernetes cluster and get started.
+                  </Typography>
+
+                  <Typography className="muted" variant="body1">
+                    Before deploying AI blueprints, you must initialize your Kubernetes cluster to prepare it for the WEKA App Store. When you select Initialize, the WEKA App Store automatically installs the following required components:
+                  </Typography>
+
+                  <Box component="ul" className="muted space-y-2 list-disc pl-6">
+                    <li><Typography variant="body2">Prometheus and Grafana for monitoring</Typography></li>
+                    <li><Typography variant="body2">Envoy Ingress Controller</Typography></li>
+                    <li><Typography variant="body2">NVIDIA GPU Operator and GPU drivers</Typography></li>
+                  </Box>
+
+                  <Divider sx={% raw %}{{ borderColor: 'rgba(255,255,255,0.1)' }}{% endraw %} />
+
+                  <Box className="space-y-4">
+                    <Typography variant="h6" sx={% raw %}{{ fontWeight: 600 }}{% endraw %}>Prerequisites</Typography>
+                    
+                    <Typography className="muted" variant="body2">
+                      Before initializing the WEKA App Store, verify that your Kubernetes cluster is already connected WEKA NeuralMesh via WEKA Operator and WEKA CSI Driver.
+                    </Typography>
+                    <Typography className="muted" variant="body2">
+                      All workloads deployed through the WEKA App Store require:
+                    </Typography>
+                    <Box component="ul" className="muted space-y-1 list-disc pl-6 text-sm">
+                      <li>An active WEKA NeuralMesh connection.</li>
+                      <li>The ability for blueprints to add to your Kubernetes cluster WEKA CSI specific StorageClass.</li>
+                    </Box>
+                    <Typography className="muted" variant="body2" sx={% raw %}{{ mt: 2 }}{% endraw %}>
+                      If these prerequisites are not met, close this page and complete the required setup steps as documented at <a href="https://docs.weka.io/appendices/weka-csi-plugin" target="_blank" className="text-purple-400 hover:underline">docs.weka.io/appendices/weka-csi-plugin</a> and <a href="https://docs.weka.io/kubernetes/weka-operator-deployments" target="_blank" className="text-purple-400 hover:underline">docs.weka.io/kubernetes/weka-operator-deployments</a>
+                    </Typography>
+                  </Box>
+
+                  {!initializing && !phase.includes('Ready') && (
+                    <Box sx={% raw %}{{ mt: 6 }}{% endraw %}>
+                      <Button 
+                        variant="contained" 
+                        onClick={handleInitialize}
+                        disabled={initializing}
+                        sx={% raw %}{{ 
+                          bgcolor: 'var(--weka-purple)', 
+                          px: 6, py: 1.5, 
+                          '&:hover': { bgcolor: 'var(--weka-purple-dark)' },
+                          borderRadius: '8px',
+                          textTransform: 'none',
+                          fontWeight: 600
+                        }}{% endraw %}
+                      >
+                        Initialize Cluster
+                      </Button>
+                    </Box>
+                  )}
+                </Box>
+
+                <Box className="lg:col-span-5">
+                  <Paper className="card rounded-xl p-6 border-white/10" elevation={0}>
+                    <Box sx={% raw %}{{ 
+                      mb: 2, p: 2, 
+                      borderRadius: '10px', 
+                      background: 'linear-gradient(180deg, rgba(107, 47, 179, 0.15) 0%, rgba(107, 47, 179, 0.05) 100%)', 
+                      border: '1px solid rgba(107, 47, 179, 0.3)',
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      alignItems: 'center',
+                      textAlign: 'center',
+                      boxShadow: '0 4px 15px rgba(0,0,0,0.2)'
+                    }}{% endraw %}>
+                      <Typography variant="caption" sx={% raw %}{{ color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.12em', mb: 0.5, fontSize: '0.7rem' }}{% endraw %}>
+                        Target Cluster
+                      </Typography>
+                      <Typography variant="subtitle1" sx={% raw %}{{ color: '#fff', fontWeight: 600, wordBreak: 'break-all', fontSize: '1rem' }}{% endraw %}>
+                        {clusterName}
+                      </Typography>
+                    </Box>
+
+                    <Box sx={% raw %}{{ 
+                      mb: 4, p: 2, 
+                      bgcolor: 'rgba(255,255,255,0.03)', 
+                      borderRadius: '8px', 
+                      border: '1px solid rgba(255,255,255,0.05)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 1.5
+                    }}{% endraw %}>
+                      <StatusIndicator label="WEKA Operator" status={wekaOperatorInstalled} />
+                      <StatusIndicator label="WEKA CSI Driver" status={wekaCsiInstalled} />
+                    </Box>
+
+                    {showProgress || (phase !== 'None' && phase !== 'Pending') ? (
+                      <Box className="space-y-6">
+                        <Box sx={% raw %}{{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}{% endraw %}>
+                          <Typography variant="subtitle1" sx={% raw %}{{ fontWeight: 600 }}{% endraw %}>
+                            {phase === 'Ready' ? 'Initialization Complete' : phase === 'Failed' ? 'Initialization Failed' : 'Initializing...'}
+                          </Typography>
+                          <Typography variant="caption" sx={% raw %}{{ color: phase === 'Ready' ? '#10b981' : phase === 'Failed' ? '#ef4444' : '#f59e0b' }}{% endraw %}>
+                            {phase}
+                          </Typography>
+                        </Box>
+                        
+                        <LinearProgress 
+                          variant={phase === 'Ready' ? 'determinate' : 'indeterminate'} 
+                          value={phase === 'Ready' ? 100 : undefined}
+                          sx={% raw %}{{ height: 8, borderRadius: 4, bgcolor: 'rgba(255,255,255,0.1)' }}{% endraw %} 
+                        />
+                        
+                        <Typography variant="body2" className="muted italic">
+                          {statusMessage || 'Preparing environment...'}
+                        </Typography>
+
+                        <Box className="space-y-2">
+                          <Typography variant="caption" className="muted uppercase font-bold tracking-wider">Operator Logs</Typography>
+                          <Box className="log-container" ref={logContainerRef}>
+                            {logs.map((log, i) => (
+                              <div key={i} className={`log-entry log-${log.type}`}>{log.text}</div>
+                            ))}
+                          </Box>
+                        </Box>
+
+                        {phase === 'Ready' && (
+                          <Alert severity="success" variant="filled" sx={% raw %}{{ mt: 2 }}{% endraw %}>
+                            <AlertTitle>Success</AlertTitle>
+                            Cluster initialized. Redirecting to App Store...
+                          </Alert>
+                        )}
+
+                        {failed && (
+                          <Alert severity="error" variant="filled" sx={% raw %}{{ mt: 2 }}{% endraw %}>
+                            <AlertTitle>Initialization Failed</AlertTitle>
+                            {wekaOperatorInstalled !== true || wekaCsiInstalled !== true 
+                              ? "You need to install the WEKA Operator and WEKA CSI driver first."
+                              : "The process failed multiple times. Please check the logs and try again later."}
+                            <Button size="small" color="inherit" onClick={handleInitialize} sx={% raw %}{{ mt: 1, display: 'block' }}{% endraw %}>Retry</Button>
+                          </Alert>
+                        )}
+                      </Box>
+                    ) : (
+                      <Box sx={% raw %}{{ py: 4, textAlign: 'center' }}{% endraw %}>
+                        <Typography className="muted" variant="body2">
+                          Click "Initialize Cluster" to begin the setup process.
+                        </Typography>
+                      </Box>
+                    )}
+                  </Paper>
+                </Box>
+              </Box>
+            </Container>
+          </Box>
+        </ThemeProvider>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<WelcomeApp />);
+  </script>
+</body>
+</html>
