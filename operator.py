@@ -548,7 +548,7 @@ def wait_for_component_ready(component: Dict[str, Any], namespace: str, timeout:
         return False
 
 
-def handle_appstack_deployment(body, spec, name, namespace, status):
+def handle_appstack_deployment(body, spec, name, namespace, status, **kwargs):
     """Handle AppStack multi-component deployment with dependencies"""
     logging.info(f"Deploying AppStack {name}")
     
@@ -587,6 +587,17 @@ def handle_appstack_deployment(body, spec, name, namespace, status):
     helm_operator = HelmOperator()
     component_statuses = []
     failed = False
+    
+    # Update status to Installing
+    if 'patch' in kwargs:
+        kwargs['patch'].status['appStackPhase'] = 'Installing'
+        kwargs['patch'].status['conditions'] = [{
+            'type': 'Ready',
+            'status': 'False',
+            'reason': 'DeploymentStarted',
+            'message': f'Installing {len(ordered_components)} components',
+            'lastTransitionTime': datetime.utcnow().isoformat() + 'Z'
+        }]
     
     for component in ordered_components:
         comp_name = component['name']
@@ -773,7 +784,7 @@ def handle_appstack_deployment(body, spec, name, namespace, status):
         condition_reason = 'AllComponentsReady'
         condition_message = f'Successfully deployed {len(component_statuses)} components'
     
-    return {
+    result = {
         'appStackPhase': overall_phase,
         'componentStatus': component_statuses,
         'conditions': [{
@@ -784,31 +795,55 @@ def handle_appstack_deployment(body, spec, name, namespace, status):
             'lastTransitionTime': datetime.utcnow().isoformat() + 'Z'
         }]
     }
+    
+    # Explicitly update patch if provided
+    if 'patch' in kwargs:
+        kwargs['patch'].status.update(result)
+        
+    return result
 
 
 # Function to handle the creation of a new WarrpAppStore
 @kopf.on.create('warp.io', 'v1alpha1', 'wekaappstores')
-def create_warrpappstore_function(body, spec, name, namespace, status, **kwargs):
+def create_warrpappstore_function(body, spec, name, namespace, status, patch, **kwargs):
     logging.info(f"*** WarrpAppStore Created: {name}")
     
     # Check for AppStack deployment (multi-component)
     if 'appStack' in spec and spec['appStack']:
-        return handle_appstack_deployment(body, spec, name, namespace, status)
+        return handle_appstack_deployment(body, spec, name, namespace, status, patch=patch)
     # Check if Helm chart is specified (single component)
     elif 'helmChart' in spec and spec['helmChart']:
-        return handle_helm_deployment(body, spec, name, namespace, status)
+        return handle_helm_deployment(body, spec, name, namespace, status, patch=patch)
     # Fall back to legacy pod-based deployment
     elif 'image' in spec and 'binary' in spec:
-        return handle_pod_deployment(body, spec, name, namespace)
+        return handle_pod_deployment(body, spec, name, namespace, patch=patch)
     else:
         error_msg = "Either appStack, helmChart, or image+binary must be specified"
         logging.error(error_msg)
+        patch.status['conditions'] = [{
+            'type': 'Ready',
+            'status': 'False',
+            'reason': 'InvalidSpec',
+            'message': error_msg,
+            'lastTransitionTime': datetime.utcnow().isoformat() + 'Z'
+        }]
         raise kopf.PermanentError(error_msg)
 
 
-def handle_helm_deployment(body, spec, name, namespace, status):
+def handle_helm_deployment(body, spec, name, namespace, status, **kwargs):
     """Handle Helm-based deployment"""
     logging.info(f"Deploying {name} via Helm")
+    
+    # Update status to Installing
+    if 'patch' in kwargs:
+        kwargs['patch'].status['releaseStatus'] = 'Installing'
+        kwargs['patch'].status['conditions'] = [{
+            'type': 'Ready',
+            'status': 'False',
+            'reason': 'DeploymentStarted',
+            'message': f"Installing Helm chart for {name}",
+            'lastTransitionTime': datetime.utcnow().isoformat() + 'Z'
+        }]
     
     helm_chart_config = spec['helmChart']
     chart_repo = helm_chart_config.get('repository')
@@ -894,7 +929,7 @@ def handle_helm_deployment(body, spec, name, namespace, status):
     # Get release info and update status
     release_info = helm_operator.get_release_info(release_name, target_namespace)
     
-    return {
+    result = {
         'releaseName': release_name,
         'releaseStatus': release_info.get('info', {}).get('status') if release_info else 'deployed',
         'releaseVersion': release_info.get('version') if release_info else 1,
@@ -908,11 +943,27 @@ def handle_helm_deployment(body, spec, name, namespace, status):
             }
         ]
     }
+    
+    # Explicitly update patch if provided
+    if 'patch' in kwargs:
+        kwargs['patch'].status.update(result)
+        
+    return result
 
 
-def handle_pod_deployment(body, spec, name, namespace):
+def handle_pod_deployment(body, spec, name, namespace, **kwargs):
     """Handle legacy pod-based deployment"""
     logging.info(f"Deploying {name} via Pod (legacy mode)")
+    
+    # Update status to Installing
+    if 'patch' in kwargs:
+        kwargs['patch'].status['conditions'] = [{
+            'type': 'Ready',
+            'status': 'False',
+            'reason': 'DeploymentStarted',
+            'message': f"Creating pod for {name}",
+            'lastTransitionTime': datetime.utcnow().isoformat() + 'Z'
+        }]
     
     # Get the WarrpAppStore class with proper kr8s initialization
     Warrpappstore = get_warrpappstore_class()
@@ -941,7 +992,7 @@ def handle_pod_deployment(body, spec, name, namespace):
     pod.create()
     pod.set_owner(live_warrpappstore)
     
-    return {
+    result = {
         'conditions': [
             {
                 'type': 'Ready',
@@ -952,19 +1003,25 @@ def handle_pod_deployment(body, spec, name, namespace):
             }
         ]
     }
+    
+    # Explicitly update patch if provided
+    if 'patch' in kwargs:
+        kwargs['patch'].status.update(result)
+        
+    return result
 
 
 # Handle updates to WarrpAppStore resources
 @kopf.on.update('warp.io', 'v1alpha1', 'wekaappstores')
-def update_warrpappstore_function(body, spec, name, namespace, status, **kwargs):
+def update_warrpappstore_function(body, spec, name, namespace, status, patch, **kwargs):
     logging.info(f"*** WarrpAppStore Updated: {name}")
     
     # For AppStack deployments, re-deploy the entire stack
     if 'appStack' in spec and spec['appStack']:
-        return handle_appstack_deployment(body, spec, name, namespace, status)
+        return handle_appstack_deployment(body, spec, name, namespace, status, patch=patch)
     # For single Helm deployments, trigger upgrade
     elif 'helmChart' in spec and spec['helmChart']:
-        return handle_helm_deployment(body, spec, name, namespace, status)
+        return handle_helm_deployment(body, spec, name, namespace, status, patch=patch)
     else:
         logging.warning(f"Update not supported for pod-based deployments: {name}")
         return {}

@@ -36,14 +36,17 @@ class ClusterInitMiddleware(BaseHTTPMiddleware):
         if any(request.url.path.startswith(p) for p in exempt_paths):
             return await call_next(request)
         
+        # Check initialization status
+        initialized = await is_cluster_initialized()
+        
         # If it's the root path, we'll check and redirect if needed
         if request.url.path == "/":
-            if not await is_cluster_initialized():
+            if not initialized:
                 return RedirectResponse(url="/welcome")
             return await call_next(request)
 
         # For other paths, return 503 if not initialized
-        if not await is_cluster_initialized():
+        if not initialized:
             return JSONResponse(
                 status_code=503,
                 content={"detail": "Cluster initialization required", "init_required": True}
@@ -62,8 +65,28 @@ async def is_cluster_initialized():
             plural="wekaappstores",
             name="app-store-cluster-init"
         )
-        return cr.get("status", {}).get("appStackPhase") == "Ready"
-    except Exception:
+        status = cr.get("status", {})
+        phase = status.get("appStackPhase")
+        
+        # Consider the cluster initialized if the phase is 'Ready'
+        # We also log this for troubleshooting purposes
+        logger.info(f"Checking cluster initialization status: phase={phase}")
+        
+        if phase == "Ready":
+            return True
+            
+        # In some cases, if the operator is still processing but core components are up,
+        # we might want to allow access. However, for robustness, we stick to 'Ready'.
+        return False
+    except ApiException as e:
+        if e.status == 404:
+            logger.info("Cluster initialization CR 'app-store-cluster-init' not found. Welcome screen will be shown.")
+            return False
+        logger.error(f"Kubernetes API error checking initialization: {e}")
+        # On other API errors, we default to not-initialized to be safe
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error checking cluster initialization: {e}")
         return False
 
 app.add_middleware(ClusterInitMiddleware)
