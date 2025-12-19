@@ -1,5 +1,7 @@
-from fastapi import FastAPI, Request, Form, Query
+from fastapi import FastAPI, Request, Form, Query, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from typing import Optional, Dict, Any, List
@@ -13,12 +15,58 @@ import copy
 import subprocess
 import shutil
 import platform
+import logging
 
 from kubernetes import client, config, utils
 from kubernetes.client.rest import ApiException
 from jinja2 import Environment
 
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="WEKA App Store")
+
+class ClusterInitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Paths to exclude from blocking
+        exempt_paths = ["/healthz", "/readyz", "/static", "/welcome", "/init-cluster", "/init-logs", "/cluster-status", "/cluster-info"]
+        
+        # Allow exempt paths
+        if any(request.url.path.startswith(p) for p in exempt_paths):
+            return await call_next(request)
+        
+        # If it's the root path, we'll check and redirect if needed
+        if request.url.path == "/":
+            if not await is_cluster_initialized():
+                return RedirectResponse(url="/welcome")
+            return await call_next(request)
+
+        # For other paths, return 503 if not initialized
+        if not await is_cluster_initialized():
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Cluster initialization required", "init_required": True}
+            )
+        
+        return await call_next(request)
+
+async def is_cluster_initialized():
+    try:
+        load_kube_config()
+        custom_api = client.CustomObjectsApi()
+        cr = custom_api.get_namespaced_custom_object(
+            group="warp.io",
+            version="v1alpha1",
+            namespace="default",
+            plural="wekaappstores",
+            name="app-store-cluster-init"
+        )
+        return cr.get("status", {}).get("appStackPhase") == "Ready"
+    except Exception:
+        return False
+
+app.add_middleware(ClusterInitMiddleware)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
@@ -1293,6 +1341,249 @@ async def readyz():
         _last_ready_cache["resp"] = resp
         return JSONResponse(resp, status_code=503)
 
+
+@app.get("/cluster-info")
+async def get_cluster_info():
+    """Get information about the current Kubernetes cluster and required components."""
+    try:
+        load_kube_config()
+        # Try to get cluster name from the current context first
+        try:
+            contexts, active_context = config.list_kube_config_contexts()
+            cluster_name = active_context.get('context', {}).get('cluster', 'Unknown Cluster')
+        except Exception:
+            # Fallback for in-cluster: try to get it from something like a well-known configmap or just 'Kubernetes Cluster'
+            cluster_name = os.getenv("KUBERNETES_CLUSTER_NAME", "Kubernetes Cluster")
+
+        # Check for WEKA Operator CRDs
+        operator_crds = [
+            "wekapolicies.weka.weka.io",
+            "wekamanualoperations.weka.weka.io",
+            "wekacontainers.weka.weka.io",
+            "wekaclusters.weka.weka.io",
+            "wekaclients.weka.weka.io",
+            "driveclaims.weka.weka.io"
+        ]
+        
+        crd_status = True
+        try:
+            api_extensions = client.ApiextensionsV1Api()
+            crds = api_extensions.list_custom_resource_definition()
+            installed_crds = [crd.metadata.name for crd in crds.items]
+            for target_crd in operator_crds:
+                if target_crd not in installed_crds:
+                    crd_status = False
+                    break
+        except Exception:
+            crd_status = False
+
+        # Check for WEKA CSI Driver deployment
+        csi_status = False
+        try:
+            apps_v1 = client.AppsV1Api()
+            deployments = apps_v1.list_deployment_for_all_namespaces(field_selector="metadata.name=csi-wekafs-controller")
+            if deployments.items:
+                csi_status = True
+        except Exception:
+            csi_status = False
+            
+        return {
+            "cluster_name": cluster_name,
+            "weka_operator_installed": crd_status,
+            "weka_csi_installed": csi_status
+        }
+    except Exception as e:
+        return {
+            "cluster_name": "Kubernetes Cluster",
+            "weka_operator_installed": False,
+            "weka_csi_installed": False,
+            "error": str(e)
+        }
+
+@app.get("/welcome", response_class=HTMLResponse)
+async def welcome_screen(request: Request):
+    """Serve the welcome/initialization screen."""
+    return templates.TemplateResponse("welcome.html", {
+        "request": request,
+        "logo_b64": LOGO_B64,
+        "title": "Welcome to WEKA App Store"
+    })
+
+@app.get("/cluster-status")
+async def get_cluster_status():
+    """Get the current initialization status."""
+    try:
+        load_kube_config()
+        custom_api = client.CustomObjectsApi()
+        cr = custom_api.get_namespaced_custom_object(
+            group="warp.io",
+            version="v1alpha1",
+            namespace="default",
+            plural="wekaappstores",
+            name="app-store-cluster-init"
+        )
+        status = cr.get("status", {})
+        phase = status.get("appStackPhase", "Pending")
+        
+        # Get progress message from the first condition or most recent event
+        message = ""
+        conditions = status.get("conditions", [])
+        if conditions:
+            message = conditions[0].get("message", "")
+        
+        # If any component is currently installing, show that in the message
+        component_statuses = status.get("componentStatus", [])
+        for comp in component_statuses:
+            if comp.get("phase") == "Installing":
+                message = f"Installing {comp.get('name')}..."
+                break
+
+        # Extract redirect URL from HTTPRoute in the manifest if Ready
+        redirect_url = None
+        if phase == "Ready":
+            try:
+                # We can find the hostname in the app-store-cluster-init.yaml manifest
+                init_manifest_path = os.path.join(os.path.dirname(os.path.dirname(BASE_DIR)), "cluster_init", "app-store-cluster-init.yaml")
+                if not os.path.exists(init_manifest_path):
+                    init_manifest_path = "/app/cluster_init/app-store-cluster-init.yaml"
+                
+                if os.path.exists(init_manifest_path):
+                    with open(init_manifest_path, 'r') as f:
+                        manifest = yaml.safe_load(f)
+                        # The manifest is a list of appStack components or a single CR. 
+                        # In this case it's a single WekaAppStore CR.
+                        app_stack = manifest.get("spec", {}).get("appStack", [])
+                        for item in app_stack:
+                            if item.get("name") == "envoy-route-appstore-gui":
+                                route_manifest = yaml.safe_load(item.get("kubernetesManifest", ""))
+                                hostnames = route_manifest.get("spec", {}).get("hostnames", [])
+                                if hostnames:
+                                    redirect_url = f"http://{hostnames[0]}"
+                                    break
+            except Exception as e:
+                logging.error(f"Error extracting redirect URL: {e}")
+
+        return {
+            "exists": True,
+            "phase": phase,
+            "message": message,
+            "redirect_url": redirect_url
+        }
+    except ApiException as e:
+        if e.status == 404:
+            return {"exists": False, "phase": "None"}
+        return {"exists": False, "error": str(e)}
+    except Exception as e:
+        return {"exists": False, "error": str(e)}
+
+@app.post("/init-cluster")
+async def initialize_cluster():
+    """Trigger cluster initialization by applying the init CR."""
+    try:
+        # Load the init manifest
+        init_manifest_path = os.path.join(os.path.dirname(os.path.dirname(BASE_DIR)), "cluster_init", "app-store-cluster-init.yaml")
+        if not os.path.exists(init_manifest_path):
+            # Fallback for container environment
+            init_manifest_path = "/app/cluster_init/app-store-cluster-init.yaml"
+        
+        if not os.path.exists(init_manifest_path):
+            return JSONResponse({"ok": False, "error": f"Init manifest not found at {init_manifest_path}"}, status_code=404)
+
+        with open(init_manifest_path, 'r') as f:
+            manifest = yaml.safe_load(f)
+        
+        load_kube_config()
+        custom_api = client.CustomObjectsApi()
+        
+        # Check if it already exists
+        try:
+            custom_api.get_namespaced_custom_object(
+                group="warp.io",
+                version="v1alpha1",
+                namespace="default",
+                plural="wekaappstores",
+                name="app-store-cluster-init"
+            )
+            return JSONResponse({"ok": True, "message": "Cluster initialization already in progress or completed."})
+        except ApiException as e:
+            if e.status == 404:
+                # Create it
+                custom_api.create_namespaced_custom_object(
+                    group="warp.io",
+                    version="v1alpha1",
+                    namespace="default",
+                    plural="wekaappstores",
+                    body=manifest
+                )
+                return JSONResponse({"ok": True, "message": "Cluster initialization started."})
+            raise e
+            
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.get("/init-logs")
+async def stream_init_logs():
+    """Stream operator logs filtered for the initialization process."""
+    def log_generator():
+        try:
+            load_kube_config()
+            core_api = client.CoreV1Api()
+            
+            # Find the operator pod
+            # Use the chart name from the label (default is weka-app-store-operator-chart)
+            retry_count = 0
+            max_retries = 5
+            pods = None
+            
+            while retry_count < max_retries:
+                pods = core_api.list_namespaced_pod(
+                    namespace="default", # Or wherever the operator is deployed
+                    label_selector="app.kubernetes.io/name=weka-app-store-operator-chart"
+                )
+                
+                if not pods.items:
+                    # Fallback to a broader search if the exact chart name changed
+                    pods = core_api.list_namespaced_pod(
+                        namespace="default",
+                        label_selector="app.kubernetes.io/managed-by=Helm"
+                    )
+                    # Filter for something that looks like our operator if many things are managed by Helm
+                    pods.items = [p for p in pods.items if "operator" in p.metadata.name]
+
+                if pods.items:
+                    break
+                
+                retry_count += 1
+                if retry_count < max_retries:
+                    yield f"data: Error: Operator pod not found (attempt {retry_count}/{max_retries})\n\n"
+                    time.sleep(2)
+            
+            if not pods or not pods.items:
+                yield "data: Error: Operator pod not found after 5 attempts. Cancelling initialization monitoring.\n\n"
+                return
+
+            pod_name = pods.items[0].metadata.name
+            
+            # Stream logs using kubectl (or kubernetes client)
+            # We'll use a subprocess for easier streaming and filtering
+            cmd = ["kubectl", "logs", "-f", pod_name, "-n", "default", "--tail=100"]
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            
+            # Filter for relevant logs: 
+            # - logs containing "app-store-cluster-init"
+            # - logs from handle_appstack_deployment
+            # - logs from HelmOperator
+            for line in iter(process.stdout.readline, ""):
+                if any(x in line for x in ["app-store-cluster-init", "Deploying", "Installing", "Ready", "Failed", "Helm"]):
+                    yield f"data: {line}\n\n"
+                # Stop if process ended
+                if process.poll() is not None:
+                    break
+                    
+        except Exception as e:
+            yield f"data: Error: {str(e)}\n\n"
+
+    return StreamingResponse(log_generator(), media_type="text/event-stream")
 
 # Uvicorn entry point: `uvicorn webapp.main:app --reload`
 

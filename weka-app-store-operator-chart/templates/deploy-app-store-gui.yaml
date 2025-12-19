@@ -35,7 +35,7 @@ spec:
               - { name: manifests, mountPath: /manifests }
       containers:
         - name: wekaappstoregui
-          image: wekachrisjen/weka-app-store-gui:v0.27
+          image: wekachrisjen/weka-app-store-gui:v0.28
           volumeMounts:
             - name: manifests
               mountPath: /app/manifests
@@ -256,6 +256,10 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "watch", "create"]
+  # Core: allow reading pod logs for operator log streaming
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
   # Weka/Warrp CRs: allow managing the CR that the app submits
   - apiGroups: ["warp.io"]
     resources: ["wekaappstores"]
