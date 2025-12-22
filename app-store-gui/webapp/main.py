@@ -801,7 +801,8 @@ def infer_requirements_from_yaml(file_path: str) -> Dict[str, int]:
     req = {"cpu_nodes": 1, "gpu_nodes": 0}
     try:
         with open(file_path, 'r') as f:
-            data = yaml.safe_load(f)
+            docs = list(yaml.safe_load_all(f))
+        data = docs[0] if docs else {}
         spec = (data or {}).get('spec', {})
         comps = ((spec.get('appStack') or {}).get('components')) or []
         for c in comps:
@@ -1496,7 +1497,9 @@ async def get_cluster_status():
                 
                 if os.path.exists(init_manifest_path):
                     with open(init_manifest_path, 'r') as f:
-                        manifest = yaml.safe_load(f)
+                        docs = list(yaml.safe_load_all(f))
+                        # Use the first document which should be the WekaAppStore CR
+                        manifest = docs[0] if docs else {}
                         # The manifest is a list of appStack components or a single CR. 
                         # In this case it's a single WekaAppStore CR.
                         app_stack = manifest.get("spec", {}).get("appStack", [])
@@ -1527,42 +1530,18 @@ async def get_cluster_status():
 async def initialize_cluster():
     """Trigger cluster initialization by applying the init CR."""
     try:
-        # Load the init manifest
+        # Load the init manifest path
         init_manifest_path = os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml")
         
         if not os.path.exists(init_manifest_path):
             return JSONResponse({"ok": False, "error": f"Init manifest not found at {init_manifest_path}"}, status_code=404)
 
-        with open(init_manifest_path, 'r') as f:
-            manifest = yaml.safe_load(f)
-        
-        load_kube_config()
-        custom_api = client.CustomObjectsApi()
-        
-        # Check if it already exists
-        try:
-            custom_api.get_namespaced_custom_object(
-                group="warp.io",
-                version="v1alpha1",
-                namespace="default",
-                plural="wekaappstores",
-                name="app-store-cluster-init"
-            )
-            return JSONResponse({"ok": True, "message": "Cluster initialization already in progress or completed."})
-        except ApiException as e:
-            if e.status == 404:
-                # Create it
-                custom_api.create_namespaced_custom_object(
-                    group="warp.io",
-                    version="v1alpha1",
-                    namespace="default",
-                    plural="wekaappstores",
-                    body=manifest
-                )
-                return JSONResponse({"ok": True, "message": "Cluster initialization started."})
-            raise e
+        # Use the standard blueprint application method which handles multi-doc YAMLs and CRDs
+        result = apply_blueprint_with_namespace(init_manifest_path, namespace="")
+        return JSONResponse({"ok": True, "message": "Cluster initialization started.", "result": result})
             
     except Exception as e:
+        logger.error(f"Error in initialize_cluster: {e}")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 @app.get("/init-logs")
@@ -1803,7 +1782,8 @@ def get_blueprint_components(file_path: str) -> List[str]:
     items: List[str] = []
     try:
         with open(file_path, 'r') as f:
-            data = yaml.safe_load(f)
+            docs = list(yaml.safe_load_all(f))
+        data = docs[0] if docs else {}
         spec = (data or {}).get('spec', {})
         comps = ((spec.get('appStack') or {}).get('components')) or []
         for idx, c in enumerate(comps):
