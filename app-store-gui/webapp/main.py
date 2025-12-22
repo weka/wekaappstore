@@ -1588,21 +1588,38 @@ async def stream_init_logs():
             pod_name = pod_obj.metadata.name
             pod_namespace = pod_obj.metadata.namespace
             
-            # Stream logs using kubectl (or kubernetes client)
-            # We'll use a subprocess for easier streaming and filtering
-            cmd = ["kubectl", "logs", "-f", pod_name, "-n", pod_namespace, "--tail=100"]
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            
-            # Filter for relevant logs: 
-            # - logs containing "app-store-cluster-init"
-            # - logs from handle_appstack_deployment
-            # - logs from HelmOperator
-            for line in iter(process.stdout.readline, ""):
-                if any(x in line for x in ["app-store-cluster-init", "Deploying", "Installing", "Ready", "Failed", "Helm"]):
-                    yield f"data: {line}\n\n"
-                # Stop if process ended
-                if process.poll() is not None:
-                    break
+            # Stream logs using the kubernetes client
+            # We'll use read_namespaced_pod_log with follow=True for streaming
+            try:
+                # Use follow=True and _preload_content=False to get a streaming response
+                log_stream = core_api.read_namespaced_pod_log(
+                    name=pod_name,
+                    namespace=pod_namespace,
+                    follow=True,
+                    _preload_content=False,
+                    tail_lines=100
+                )
+                
+                # Filter for relevant logs: 
+                # - logs containing "app-store-cluster-init"
+                # - logs from handle_appstack_deployment
+                # - logs from HelmOperator
+                for line_bytes in log_stream:
+                    line = line_bytes.decode('utf-8', errors='replace')
+                    if any(x in line for x in ["app-store-cluster-init", "Deploying", "Installing", "Ready", "Failed", "Helm"]):
+                        yield f"data: {line}\n\n"
+                    
+                    # Small sleep to be nice to the event loop if needed, 
+                    # but log_stream is a generator that blocks/waits
+            except Exception as stream_err:
+                logger.error(f"Error streaming logs from pod {pod_name}: {stream_err}")
+                yield f"data: Error streaming logs: {str(stream_err)}\n\n"
+            finally:
+                if 'log_stream' in locals():
+                    try:
+                        log_stream.release_conn()
+                    except Exception:
+                        pass
                     
         except Exception as e:
             yield f"data: Error: {str(e)}\n\n"
