@@ -232,17 +232,39 @@
         setShowProgress(true);
         setFailed(false);
         setErrorCount(0);
-        try {
-          const response = await fetch('/init-cluster', { method: 'POST' });
-          const result = await response.json();
-          if (!result.ok) {
-            setLogs(prev => [...prev, { text: `Error: ${result.error}`, type: 'error' }]);
-            setInitializing(false);
+        setLogs([]);
+
+        // Use deploy-stream for consistency with other blueprints
+        const url = `/deploy-stream?app_name=cluster-init&namespace=`;
+        const es = new EventSource(url);
+
+        es.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'init') {
+              setLogs(prev => [...prev, { text: `Applying initialization manifest: ${msg.items?.length || 0} components identified.`, type: 'info' }]);
+            } else if (msg.type === 'progress') {
+              setLogs(prev => [...prev, { text: `Applying ${msg.name}...`, type: 'info' }]);
+              setStatusMessage(`Applying ${msg.name}...`);
+            } else if (msg.type === 'complete') {
+              setLogs(prev => [...prev, { text: "Manifest applied successfully. Waiting for operator to initialize components...", type: 'success' }]);
+              setStatusMessage("Waiting for operator...");
+              es.close();
+            } else if (msg.type === 'error') {
+              setLogs(prev => [...prev, { text: `Deployment Error: ${msg.message}`, type: 'error' }]);
+              setInitializing(false);
+              setFailed(true);
+              es.close();
+            }
+          } catch (err) {
+            console.error('SSE parse error:', err);
           }
-        } catch (err) {
-          setLogs(prev => [...prev, { text: `Network Error: ${err.message}`, type: 'error' }]);
-          setInitializing(false);
-        }
+        };
+
+        es.onerror = (err) => {
+          console.error('SSE connection error:', err);
+          es.close();
+        };
       };
 
       return (
