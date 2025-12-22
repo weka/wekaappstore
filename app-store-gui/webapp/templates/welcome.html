@@ -149,28 +149,24 @@
               if (status.exists) {
                 setPhase(status.phase);
                 setStatusMessage(status.message || 'Initializing components...');
-                
+                  
                 if (status.phase === 'Ready') {
                   setInitializing(false);
                   clearInterval(interval);
                   // Auto redirect after 2 seconds
                   const targetUrl = status.redirect_url || '/';
                   setTimeout(() => { window.location.href = targetUrl; }, 2000);
-                } else if (status.phase === 'Failed') {
-                  setErrorCount(prev => {
-                    const next = prev + 1;
-                    if (next >= 5) {
-                      setFailed(true);
-                      setInitializing(false);
-                      clearInterval(interval);
-                      setLogs(prevLogs => [...prevLogs, { text: "CRITICAL: Initialization failed 5 times. Stopping automatic retries.", type: 'error' }]);
-                    }
-                    return next;
-                  });
+                } else if (status.phase === 'Failed' || status.phase === 'Error') {
+                  setFailed(true);
+                  setInitializing(false);
+                  clearInterval(interval);
                 } else {
                   // If it's something else (Installing, etc.), reset error count
                   setErrorCount(0);
                 }
+              } else if (status.error) {
+                  setStatusMessage(`Error: ${status.error}`);
+                  throw new Error(status.error);
               }
             } catch (err) {
               console.error('Status poll error:', err);
@@ -365,17 +361,24 @@
                       <Box className="space-y-6">
                         <Box sx={% raw %}{{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}{% endraw %}>
                           <Typography variant="subtitle1" sx={% raw %}{{ fontWeight: 600 }}{% endraw %}>
-                            {phase === 'Ready' ? 'Initialization Complete' : phase === 'Failed' ? 'Initialization Failed' : 'Initializing...'}
+                            {(phase === 'Ready') ? 'Initialization Complete' : (phase === 'Failed' || failed) ? 'Error' : 'Initializing...'}
                           </Typography>
-                          <Typography variant="caption" sx={% raw %}{{ color: phase === 'Ready' ? '#10b981' : phase === 'Failed' ? '#ef4444' : '#f59e0b' }}{% endraw %}>
-                            {phase}
+                          <Typography variant="caption" sx={% raw %}{{ color: phase === 'Ready' ? '#10b981' : (phase === 'Failed' || failed) ? '#ef4444' : '#f59e0b' }}{% endraw %}>
+                            {(phase === 'Failed' || failed) ? 'Failed' : phase}
                           </Typography>
                         </Box>
                         
                         <LinearProgress 
-                          variant={phase === 'Ready' ? 'determinate' : 'indeterminate'} 
-                          value={phase === 'Ready' ? 100 : undefined}
-                          sx={% raw %}{{ height: 8, borderRadius: 4, bgcolor: 'rgba(255,255,255,0.1)' }}{% endraw %} 
+                          variant={(phase === 'Ready' || phase === 'Failed' || failed) ? 'determinate' : 'indeterminate'} 
+                          value={(phase === 'Ready' || phase === 'Failed' || failed) ? 100 : undefined}
+                          sx={% raw %}{{ 
+                            height: 8, 
+                            borderRadius: 4, 
+                            bgcolor: 'rgba(255,255,255,0.1)',
+                            '& .MuiLinearProgress-bar': {
+                              bgcolor: (phase === 'Failed' || failed) ? '#ef4444' : undefined
+                            }
+                          }}{% endraw %} 
                         />
                         
                         <Typography variant="body2" className="muted italic">

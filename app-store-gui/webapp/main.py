@@ -1452,23 +1452,47 @@ async def get_cluster_status():
         message = ""
         conditions = status.get("conditions", [])
         if conditions:
-            message = conditions[0].get("message", "")
+            # Sort conditions by last transition time if available
+            try:
+                sorted_conditions = sorted(conditions, key=lambda x: x.get('lastTransitionTime', ''), reverse=True)
+                message = sorted_conditions[0].get("message", "")
+            except Exception:
+                message = conditions[0].get("message", "")
         
-        # If any component is currently installing, show that in the message
+        # If any component is failed, report it in the message
         component_statuses = status.get("componentStatus", [])
+        has_failure = False
         for comp in component_statuses:
-            if comp.get("phase") == "Installing":
-                message = f"Installing {comp.get('name')}..."
+            if comp.get("phase") in ["Failed", "Error"]:
+                message = f"Error: {comp.get('name')} failed: {comp.get('message', 'Check logs')}"
+                phase = "Failed"
+                has_failure = True
                 break
+        
+        # Also check for Error state in conditions
+        if not has_failure:
+            for cond in conditions:
+                if cond.get("type") in ["Error", "Failed"] or cond.get("status") == "False" and cond.get("type") in ["Ready", "Initialized"]:
+                    if cond.get("reason") in ["Error", "Failed", "Degraded"]:
+                         phase = "Failed"
+                         message = f"Error: {cond.get('message', 'Initialization failed')}"
+                         break
+        
+        logger.info(f"Cluster status poll: phase={phase}, message={message}")
+        
+        # If not failed, check for installing
+        if phase != "Failed":
+            for comp in component_statuses:
+                if comp.get("phase") == "Installing":
+                    message = f"Installing {comp.get('name')}..."
+                    break
 
         # Extract redirect URL from HTTPRoute in the manifest if Ready
         redirect_url = None
         if phase == "Ready":
             try:
                 # We can find the hostname in the app-store-cluster-init.yaml manifest
-                init_manifest_path = os.path.join(os.path.dirname(os.path.dirname(BASE_DIR)), "cluster_init", "app-store-cluster-init.yaml")
-                if not os.path.exists(init_manifest_path):
-                    init_manifest_path = "/app/cluster_init/app-store-cluster-init.yaml"
+                init_manifest_path = os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml")
                 
                 if os.path.exists(init_manifest_path):
                     with open(init_manifest_path, 'r') as f:
@@ -1504,10 +1528,7 @@ async def initialize_cluster():
     """Trigger cluster initialization by applying the init CR."""
     try:
         # Load the init manifest
-        init_manifest_path = os.path.join(os.path.dirname(os.path.dirname(BASE_DIR)), "cluster_init", "app-store-cluster-init.yaml")
-        if not os.path.exists(init_manifest_path):
-            # Fallback for container environment
-            init_manifest_path = "/app/cluster_init/app-store-cluster-init.yaml"
+        init_manifest_path = os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml")
         
         if not os.path.exists(init_manifest_path):
             return JSONResponse({"ok": False, "error": f"Init manifest not found at {init_manifest_path}"}, status_code=404)
