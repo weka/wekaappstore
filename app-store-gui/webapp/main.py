@@ -1559,15 +1559,14 @@ async def stream_init_logs():
             pods = None
             
             while retry_count < max_retries:
-                pods = core_api.list_namespaced_pod(
-                    namespace="default", # Or wherever the operator is deployed
+                # Search in all namespaces for the operator pod
+                pods = core_api.list_pod_for_all_namespaces(
                     label_selector="app.kubernetes.io/name=weka-app-store-operator-chart"
                 )
                 
                 if not pods.items:
-                    # Fallback to a broader search if the exact chart name changed
-                    pods = core_api.list_namespaced_pod(
-                        namespace="default",
+                    # Fallback to a broader search across all namespaces if the exact chart name changed
+                    pods = core_api.list_pod_for_all_namespaces(
                         label_selector="app.kubernetes.io/managed-by=Helm"
                     )
                     # Filter for something that looks like our operator if many things are managed by Helm
@@ -1578,18 +1577,20 @@ async def stream_init_logs():
                 
                 retry_count += 1
                 if retry_count < max_retries:
-                    yield f"data: Error: Operator pod not found (attempt {retry_count}/{max_retries})\n\n"
+                    yield f"data: Error: Operator pod not found in any namespace (attempt {retry_count}/{max_retries})\n\n"
                     time.sleep(2)
             
             if not pods or not pods.items:
                 yield "data: Error: Operator pod not found after 5 attempts. Cancelling initialization monitoring.\n\n"
                 return
 
-            pod_name = pods.items[0].metadata.name
+            pod_obj = pods.items[0]
+            pod_name = pod_obj.metadata.name
+            pod_namespace = pod_obj.metadata.namespace
             
             # Stream logs using kubectl (or kubernetes client)
             # We'll use a subprocess for easier streaming and filtering
-            cmd = ["kubectl", "logs", "-f", pod_name, "-n", "default", "--tail=100"]
+            cmd = ["kubectl", "logs", "-f", pod_name, "-n", pod_namespace, "--tail=100"]
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             
             # Filter for relevant logs: 
