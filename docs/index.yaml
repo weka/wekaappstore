@@ -3,7 +3,17 @@ entries:
   weka-app-store-operator-chart:
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.331321+11:00"
+    created: "2025-12-22T14:23:23.829695+11:00"
+    description: A Helm chart to install the Weka App Store Operator and its web GUI
+    digest: 789c54c95a81e81a6cfb05978f7570ad7a06391b8d356fa9ca2262c017af66d7
+    name: weka-app-store-operator-chart
+    type: application
+    urls:
+    - https://weka.github.io/wekaappstore/weka-app-store-operator-chart-0.1.53.tgz
+    version: 0.1.53
+  - apiVersion: v2
+    appVersion: 1.16.0
+    created: "2025-12-22T14:23:23.828949+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 01c5a34b672ffe9ff1bcbd8458dfc4d98a068821f034fe583ff11c84730caaa4
     name: weka-app-store-operator-chart
@@ -13,7 +23,7 @@ entries:
     version: 0.1.52
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.330781+11:00"
+    created: "2025-12-22T14:23:23.828087+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 569f3ef4364e4a7d56b31582a065bdaa5585dacaefe686688f7767422adcc87f
     name: weka-app-store-operator-chart
@@ -23,7 +33,7 @@ entries:
     version: 0.1.51
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.330054+11:00"
+    created: "2025-12-22T14:23:23.827342+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 3d84ca954e411229dfd99988a042081cea1a750499a174a7f73d2816270139e6
     name: weka-app-store-operator-chart
@@ -33,7 +43,7 @@ entries:
     version: 0.1.50
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.329239+11:00"
+    created: "2025-12-22T14:23:23.82644+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 84d5cc21caef6933ef93815d09a8fe7d4317c26b207c9f4f5fe71124b86856bd
     name: weka-app-store-operator-chart
@@ -43,7 +53,7 @@ entries:
     version: 0.1.49
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.328414+11:00"
+    created: "2025-12-22T14:23:23.825487+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 0ed2ccd61b91585023932511cd6c4a2ab0bd4f81207c3f801d4093f821174166
     name: weka-app-store-operator-chart
@@ -53,7 +63,7 @@ entries:
     version: 0.1.48
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.327658+11:00"
+    created: "2025-12-22T14:23:23.824622+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 2ee8683502617b2dd25a37da07dc29c69497e5f6fddcd77dae955444191e0dee
     name: weka-app-store-operator-chart
@@ -63,7 +73,7 @@ entries:
     version: 0.1.47
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.326602+11:00"
+    created: "2025-12-22T14:23:23.823224+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: f583465de7970cc68c1c226a45b87429877a4b16676c636746ef820514024386
     name: weka-app-store-operator-chart
@@ -73,7 +83,7 @@ entries:
     version: 0.1.46
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.325749+11:00"
+    created: "2025-12-22T14:23:23.822441+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: d121eb5b64b2cd26cee73cb560903eb81c3c6255b0b86a1fd782de227ba10796
     name: weka-app-store-operator-chart
@@ -83,7 +93,7 @@ entries:
     version: 0.1.45
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.324733+11:00"
+    created: "2025-12-22T14:23:23.8215+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: f8bc1ad5fbb9728d078684b1f46e2235bc5f7e72c01125e8f06c4641aebe71b0
     name: weka-app-store-operator-chart
@@ -93,7 +103,7 @@ entries:
     version: 0.1.44
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.323856+11:00"
+    created: "2025-12-22T14:23:23.820565+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 7235ebfc07ef8eb41ba8bf4d01cdcdc9ffb3749a21695576c9c3cb9dc52709e4
     name: weka-app-store-operator-chart
@@ -103,7 +113,7 @@ entries:
     version: 0.1.43
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.322996+11:00"
+    created: "2025-12-22T14:23:23.819734+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: fa94f5d69fa80e9dcf0205bbaf78e2a11e5f7b5491c7571fb49689aaf17eb503
     name: weka-app-store-operator-chart
@@ -113,7 +123,7 @@ entries:
     version: 0.1.42
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.32194+11:00"
+    created: "2025-12-22T14:23:23.818726+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: d36d7b3b5ef09ad8a8beeca64c7ae34789c78924505486535af17fbfa9f6dcc1
     name: weka-app-store-operator-chart
@@ -123,7 +133,7 @@ entries:
     version: 0.1.41
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.321032+11:00"
+    created: "2025-12-22T14:23:23.817882+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 596d62defc5a0469708c762f963350a76772ecaf471758595204ef34867d227c
     name: weka-app-store-operator-chart
@@ -133,7 +143,7 @@ entries:
     version: 0.1.40
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.319351+11:00"
+    created: "2025-12-22T14:23:23.816545+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: dc6e8891e4b7e8a57bf162959efdc04e5d84aa6db602734ed01df0e7f8fdedb1
     name: weka-app-store-operator-chart
@@ -143,7 +153,7 @@ entries:
     version: 0.1.39
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.318588+11:00"
+    created: "2025-12-22T14:23:23.815278+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 3de591d9802d7d2079405a1c8912ebab86744e2dc063561d9feb8d54d34ed2e4
     name: weka-app-store-operator-chart
@@ -153,7 +163,7 @@ entries:
     version: 0.1.38
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.31771+11:00"
+    created: "2025-12-22T14:23:23.814474+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: dae54422c708a05b544da0c2d8d5188855bb4d6bb1e29eb9d1126520343f1edc
     name: weka-app-store-operator-chart
@@ -163,7 +173,7 @@ entries:
     version: 0.1.37
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.316945+11:00"
+    created: "2025-12-22T14:23:23.813674+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 313ed86a8366d1f36b68405ae31e751a8e2f1073e5852c41f2ceb82ae5c3a55b
     name: weka-app-store-operator-chart
@@ -173,7 +183,7 @@ entries:
     version: 0.1.36
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.316226+11:00"
+    created: "2025-12-22T14:23:23.812958+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: f79b441bee0c5b781630fa06f0c0a826b168c80101c88c4d8d0dd3afde11a653
     name: weka-app-store-operator-chart
@@ -183,7 +193,7 @@ entries:
     version: 0.1.35
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.315449+11:00"
+    created: "2025-12-22T14:23:23.812111+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: c8b2811463eb170241bcc127da75850303b167682fc7b6bc3f2c011d311b0e0b
     name: weka-app-store-operator-chart
@@ -193,7 +203,7 @@ entries:
     version: 0.1.34
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.314508+11:00"
+    created: "2025-12-22T14:23:23.811128+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: d57a5a6d1c568bc54504135e6818f948268f8431c6c12fdf58cbdfefef8d9ebd
     name: weka-app-store-operator-chart
@@ -203,7 +213,7 @@ entries:
     version: 0.1.33
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.313726+11:00"
+    created: "2025-12-22T14:23:23.810231+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 433395bbe6690bc4ca2ae246d847272006e80e4fd89cd4c812fe658b917c81f0
     name: weka-app-store-operator-chart
@@ -213,7 +223,7 @@ entries:
     version: 0.1.32
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.312472+11:00"
+    created: "2025-12-22T14:23:23.809276+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: bc476b5cbf393b1197814cd7199f316fbdea1c4a0f719bf86cdb5e782df55d33
     name: weka-app-store-operator-chart
@@ -223,7 +233,7 @@ entries:
     version: 0.1.31
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.311715+11:00"
+    created: "2025-12-22T14:23:23.807749+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: bf9bda209dfc99c08516c3dbf2adc1b9923c2dec55c37f6e961fa88bd76a9cb1
     name: weka-app-store-operator-chart
@@ -233,7 +243,7 @@ entries:
     version: 0.1.30
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.310324+11:00"
+    created: "2025-12-22T14:23:23.806448+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 2134cb7d2c7451c8972ba9ae256dd3abf2463274540430df204e894deda01c04
     name: weka-app-store-operator-chart
@@ -243,7 +253,7 @@ entries:
     version: 0.1.29
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.309564+11:00"
+    created: "2025-12-22T14:23:23.805608+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 7afa141f51e72e1b789d1bfbe6555fe598af9bf967a033c863e12d3e442e2c6a
     name: weka-app-store-operator-chart
@@ -253,7 +263,7 @@ entries:
     version: 0.1.28
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.308649+11:00"
+    created: "2025-12-22T14:23:23.804363+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: dd4b89c65c4ce5fa5ec3df087d413d42c99318e094a7d831d436d48a6fc32e5d
     name: weka-app-store-operator-chart
@@ -263,7 +273,7 @@ entries:
     version: 0.1.27
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.307765+11:00"
+    created: "2025-12-22T14:23:23.803539+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: a192a8fe96c667922e2137c825b9afded7196e08b5535128bc00b1f14be25c60
     name: weka-app-store-operator-chart
@@ -273,7 +283,7 @@ entries:
     version: 0.1.26
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.30694+11:00"
+    created: "2025-12-22T14:23:23.802725+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: f950caad4a4fbea5871228a5ffd87bfc64bca16a26b73d6ed364f8ee7170d089
     name: weka-app-store-operator-chart
@@ -283,7 +293,7 @@ entries:
     version: 0.1.25
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.305527+11:00"
+    created: "2025-12-22T14:23:23.801852+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: b9d2ae1edf9b6a64793901506b0f8c99ae96b2f0e063621199b5836554f2f811
     name: weka-app-store-operator-chart
@@ -293,7 +303,7 @@ entries:
     version: 0.1.24
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.304541+11:00"
+    created: "2025-12-22T14:23:23.80097+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 0734a77e6ff088dc850265e42c0852587a622648aa4e22593a85498edb2b70a4
     name: weka-app-store-operator-chart
@@ -303,7 +313,7 @@ entries:
     version: 0.1.23
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.303801+11:00"
+    created: "2025-12-22T14:23:23.799493+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 9fb0d447962b23b0dd3b422e569a9feff458821c8dd4fa0f1dbf9da310cafd36
     name: weka-app-store-operator-chart
@@ -313,7 +323,7 @@ entries:
     version: 0.1.22
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.303027+11:00"
+    created: "2025-12-22T14:23:23.798466+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 1ee0effdaeea65d98415a7910f96473d46d75bf054f5434fa430acebf5857037
     name: weka-app-store-operator-chart
@@ -323,7 +333,7 @@ entries:
     version: 0.1.21
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.302239+11:00"
+    created: "2025-12-22T14:23:23.797759+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: d9b89e4706138b36a533c830ffd3eb8a6e4d531973435f67df2553f48bde0e6f
     name: weka-app-store-operator-chart
@@ -333,7 +343,7 @@ entries:
     version: 0.1.20
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.300928+11:00"
+    created: "2025-12-22T14:23:23.796496+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 59ce9bd6c23d5e76f35b433ac9277715aae9c5af201cad6fa2e6e31980b1cc99
     name: weka-app-store-operator-chart
@@ -343,7 +353,7 @@ entries:
     version: 0.1.19
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.300089+11:00"
+    created: "2025-12-22T14:23:23.795676+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 345a06e64df3e36c9ec6ff4ac254df9a9ba517bfcd0160db02dc8b056bfa8015
     name: weka-app-store-operator-chart
@@ -353,7 +363,7 @@ entries:
     version: 0.1.18
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.299295+11:00"
+    created: "2025-12-22T14:23:23.794915+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: a977d439cdfaad3e688237be9313f6f73917b32adce7dcb2c2512e2ddcaaa0ef
     name: weka-app-store-operator-chart
@@ -363,7 +373,7 @@ entries:
     version: 0.1.17
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.298034+11:00"
+    created: "2025-12-22T14:23:23.794018+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 508a1f567d9d02fd507e9a07cff115a840df444632e390786a9b38b5d5e0dcc7
     name: weka-app-store-operator-chart
@@ -373,7 +383,7 @@ entries:
     version: 0.1.16
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.297188+11:00"
+    created: "2025-12-22T14:23:23.793148+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: f6955e6a5f9000e2849f1035eb76a106388d4e399babb52e77e2faa9590a7419
     name: weka-app-store-operator-chart
@@ -383,7 +393,7 @@ entries:
     version: 0.1.15
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.296308+11:00"
+    created: "2025-12-22T14:23:23.792326+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: cf8ecffc15dd4c667f2824117ae8cc5899dd3ef633c795603938d26538d5e7d9
     name: weka-app-store-operator-chart
@@ -393,7 +403,7 @@ entries:
     version: 0.1.14
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.29549+11:00"
+    created: "2025-12-22T14:23:23.790594+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 269ea09c84095cdd9bea7686b9fb2d3aec2ca47e7a014432ff9933641dd6e056
     name: weka-app-store-operator-chart
@@ -403,7 +413,7 @@ entries:
     version: 0.1.13
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.294706+11:00"
+    created: "2025-12-22T14:23:23.789565+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: f39f71f71573d1ff9c72de5849c7918fc75a7a470575165fef86e5d632343f31
     name: weka-app-store-operator-chart
@@ -413,7 +423,7 @@ entries:
     version: 0.1.12
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.293902+11:00"
+    created: "2025-12-22T14:23:23.788621+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: fb5918e37a8303841a25733e2d6109343128de5a3b527cd77f56bea77a684808
     name: weka-app-store-operator-chart
@@ -423,7 +433,7 @@ entries:
     version: 0.1.11
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.293138+11:00"
+    created: "2025-12-22T14:23:23.788022+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: e7a1d505a3b374deca07bacfc6071843a7ec718e24a27ccb8666c9cf726e6999
     name: weka-app-store-operator-chart
@@ -433,7 +443,7 @@ entries:
     version: 0.1.10
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.334232+11:00"
+    created: "2025-12-22T14:23:23.832793+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: cb7bf66e260ce905f4c1c28f9f8292bb99366a75669ce95f761b0108b6d4cae1
     name: weka-app-store-operator-chart
@@ -443,7 +453,7 @@ entries:
     version: 0.1.9
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.333621+11:00"
+    created: "2025-12-22T14:23:23.832086+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 7e02b62569276bdef1a6ca4ba430d0dd7054913510c86bc4cea0df5c11bd71fb
     name: weka-app-store-operator-chart
@@ -453,7 +463,7 @@ entries:
     version: 0.1.8
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.332941+11:00"
+    created: "2025-12-22T14:23:23.831361+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 3e44bd209c7f2345474da70e78c0cb4b3350147a3c866d2a3d9bfce2a0696389
     name: weka-app-store-operator-chart
@@ -463,7 +473,7 @@ entries:
     version: 0.1.7
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.332158+11:00"
+    created: "2025-12-22T14:23:23.830369+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 73c34f274eefb5a59392443d294180448cbd63ea91291ccbe993160d917d4aea
     name: weka-app-store-operator-chart
@@ -473,7 +483,7 @@ entries:
     version: 0.1.6
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.320193+11:00"
+    created: "2025-12-22T14:23:23.817022+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: aa4e9840031d1471805880152ef8efb9d72c8c3764e9ad25d63722d43c7c4d91
     name: weka-app-store-operator-chart
@@ -483,7 +493,7 @@ entries:
     version: 0.1.4
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.310799+11:00"
+    created: "2025-12-22T14:23:23.806934+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 6c33e8658f36777aa5ca318e609ed9d337659f41c57cfaa1f2bc6c653915a988
     name: weka-app-store-operator-chart
@@ -493,7 +503,7 @@ entries:
     version: 0.1.3
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.301432+11:00"
+    created: "2025-12-22T14:23:23.796946+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: db7067d612e48060cea2ed206f630d1b44d7719f3a6faf161421945971f7c0ff
     name: weka-app-store-operator-chart
@@ -503,7 +513,7 @@ entries:
     version: 0.1.2
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.292413+11:00"
+    created: "2025-12-22T14:23:23.786335+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: 76bf08503453907d5e0509c053fb10365fd95aacfc7442a03f9d30a1ba28288b
     name: weka-app-store-operator-chart
@@ -513,7 +523,7 @@ entries:
     version: 0.1.1
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-12-22T14:12:51.291187+11:00"
+    created: "2025-12-22T14:23:23.785893+11:00"
     description: A Helm chart to install the Weka App Store Operator and its web GUI
     digest: e6fef37c8e73a5b7563cfde06b3c233913363f2ff0d0c4d286c26285fe403be8
     name: weka-app-store-operator-chart
@@ -521,4 +531,4 @@ entries:
     urls:
     - https://weka.github.io/wekaappstore/weka-app-store-operator-chart-0.1.0.tgz
     version: 0.1.0
-generated: "2025-12-22T14:12:51.290337+11:00"
+generated: "2025-12-22T14:23:23.785077+11:00"

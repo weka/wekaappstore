@@ -30,7 +30,7 @@ app = FastAPI(title="WEKA App Store")
 class ClusterInitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Paths to exclude from blocking
-        exempt_paths = ["/healthz", "/readyz", "/static", "/welcome", "/init-cluster", "/init-logs", "/cluster-status", "/cluster-info"]
+        exempt_paths = ["/healthz", "/readyz", "/static", "/welcome", "/init-cluster", "/init-logs", "/cluster-status", "/cluster-info","/deploy-stream"]
         
         # Allow exempt paths
         if any(request.url.path.startswith(p) for p in exempt_paths):
