@@ -1,0 +1,451 @@
+apiVersion: warp.io/v1alpha1
+kind: WekaAppStore
+metadata:
+  name: app-store-cluster-init
+  namespace: default
+spec:
+  appStack:
+    components:
+      - name: kube-prom-stack
+        description: "Prometheus and Grafana monitoring stack"
+        enabled: true
+        dependsOn:
+          - prometheus-adapter
+        helmChart:
+          name: "https://prometheus-community.github.io/helm-charts"
+          releaseName: "kube-prometheus-stack"
+        valuesFiles:
+          - kind: ConfigMap
+            name: prom-stack-config
+            key: prom-stack_values.yaml
+        waitForReady: true
+        readinessCheck:
+          type: pod
+          selector: "app.kubernetes.io/instance=kube-prometheus-stack,app.kubernetes.io/name=grafana"
+          timeout: 300
+        targetNamespace: monitoring
+
+        # Install Prometheus Adapter for Kubernetes metrics APIs
+      - name: prometheus-adapter
+        description: "Prometheus Adapter for Kubernetes metrics APIs"
+        enabled: true
+        helmChart:
+          name: "https://prometheus-community.github.io/helm-charts"
+          releaseName: "prometheus-adapter"
+        valuesFiles:
+          - kind: ConfigMap
+            name: prometheus-adapter-config
+            key: prometheus-adapter_values.yaml
+        waitForReady: true
+        readinessCheck:
+          type: pod
+          selector: "app.kubernetes.io/instance=prometheus-adapter,app.kubernetes.io/name=prometheus-adapter"
+          timeout: 300
+        targetNamespace: monitoring
+
+      #NVIDIA GPU Operator
+      - name: nvidia-operator
+        description: "Certificate management for Kubernetes"
+        enabled: false
+        dependsOn:
+          - prometheus-adapter
+        helmChart:
+          repository: "https://nvidia.github.io/gpu-operator"
+          version: "v25.3.0"
+          name: "gpu-operator"
+          releaseName: "gpu-operator"
+        waitForReady: true
+        readinessCheck:
+          type: deployment
+          name: gpu-operator
+          namespace: gpu-operator
+          timeout: 300
+        targetNamespace: gpu-operator
+
+        # Service Account for CRD installer Checker
+      - name: gateway-api-crds-serviceaccount
+        description: "Service Account for CRD installer Checker"
+        enabled: true
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: gateway-api-crds-installer
+            namespace: kube-system
+        targetNamespace: kube-system
+
+        # Cluster Role Binding for CRD installer Checker
+      - name: gateway-api-crds-rolebinding
+        description: "Rolebinding for CRD installer Checker"
+        enabled: true
+        dependsOn:
+          - gateway-api-crds-serviceaccount
+        kubernetesManifest: |
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: gateway-api-crds-installer-admin
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: cluster-admin
+          subjects:
+            - kind: ServiceAccount
+              name: gateway-api-crds-installer
+              namespace: kube-system
+
+        # Check to see if the CRDs exist
+      - name: gateway-api-crds-job
+        description: "Install Kubernetes Gateway API CRDs via Job (skips if already present)"
+        enabled: true
+        dependsOn:
+          - gateway-api-crds-rolebinding
+        waitForReady: true
+        readinessCheck:
+          type: job
+          timeout: 300
+        kubernetesManifest: |
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: install-gateway-api-crds
+          spec:
+            backoffLimit: 1
+            template:
+              spec:
+                serviceAccountName: gateway-api-crds-installer  # must have cluster-wide CRD perms
+                restartPolicy: OnFailure
+                containers:
+                  - name: kubectl
+                    image: docker.io/bitnami/kubectl:latest
+                    env:
+                      # Bump this URL to upgrade the CRD bundle version when desired
+                      - name: GATEWAY_API_URL
+                        value: "https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml"
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        set -euo pipefail
+
+                        # List of core Gateway API CRDs to check
+                        CRDS="\
+                        gatewayclasses.gateway.networking.k8s.io \
+                        gateways.gateway.networking.k8s.io \
+                        httproutes.gateway.networking.k8s.io \
+                        referencegrants.gateway.networking.k8s.io \
+                        grpcroutes.gateway.networking.k8s.io \
+                        tcproutes.gateway.networking.k8s.io \
+                        tlsroutes.gateway.networking.k8s.io \
+                        udproutes.gateway.networking.k8s.io"
+
+                        echo "Checking for existing Gateway API CRDs..."
+                        MISSING=0
+                        for CRD in $CRDS; do
+                          if ! kubectl get crd "$CRD" >/dev/null 2>&1; then
+                            echo "Missing: $CRD"
+                            MISSING=1
+                          else
+                            echo "Found:   $CRD"
+                          fi
+                        done
+
+                        if [ "$MISSING" -eq 0 ]; then
+                          echo "All Gateway API CRDs already exist. Skipping installation."
+                          exit 0
+                        fi
+
+                        echo "Some CRDs are missing. Applying bundle: $GATEWAY_API_URL"
+                        kubectl apply -f "$GATEWAY_API_URL"
+                        echo "Gateway API CRDs installed/updated."
+
+        targetNamespace: kube-system
+
+      # Envoy Ingress Gateway
+      - name: envoy-ingress-controller
+        description: "Envoy Gateway for Ingress and Routing"
+        enabled: true
+        dependsOn:
+          - gateway-api-crds-job
+        helmChart:
+          repository: "oci://docker.io/envoyproxy"
+          name: "gateway-helm"
+          version: "v1.5.6"
+          releaseName: "gateway-helm"
+        waitForReady: true
+        readinessCheck:
+          type: deployment
+          name: envoy-gateway
+          namespace: envoy-gateway-system
+          timeout: 300
+        targetNamespace: envoy-gateway-system
+
+        # Sets up Envoy inside Kubernetes Cluster
+      - name: envoy-gateway-class
+        description: "Envoy Gateway Class"
+        enabled: true
+        dependsOn:
+            - envoy-ingress-controller
+        waitForReady: false
+        kubernetesManifest: |
+          apiVersion: gateway.networking.k8s.io/v1
+          kind: GatewayClass
+          metadata:
+            name: envoy-gateway-class
+          spec:
+            controllerName: gateway.envoyproxy.io/gatewayclass-controller
+
+        # Sets up Envoy inside Kubernetes Cluster
+      - name: envoy-edge-gateway
+        description: "Envoy Edge Gateway on Port 80"
+        enabled: true
+        dependsOn:
+            - envoy-ingress-controller
+        waitForReady: false
+        kubernetesManifest: |
+          apiVersion: gateway.networking.k8s.io/v1
+          kind: Gateway
+          metadata:
+            name: warp-edge-gateway
+          spec:
+            gatewayClassName: envoy-gateway-class
+            listeners:
+              - name: http
+                protocol: HTTP
+                port: 80
+                allowedRoutes:
+                  namespaces:
+                    from: All
+        targetNamespace: envoy-gateway-system
+
+        # Sets up Envoy route for Grafana
+      - name: envoy-route-grafana
+        description: "Envoy Route for Grafana"
+        enabled: true
+        dependsOn:
+            - envoy-ingress-controller
+            - kube-prom-stack
+            - prometheus-adapter
+        waitForReady: false
+        kubernetesManifest: |
+          apiVersion: gateway.networking.k8s.io/v1
+          kind: HTTPRoute
+          metadata:
+            name: grafana-ui
+          spec:
+            parentRefs:
+              - name: warp-edge-gateway
+                namespace: envoy-gateway-system
+            hostnames:
+              - grafana-nfs.example.com
+            rules:
+              - matches:
+                  - path:
+                      type: PathPrefix
+                      value: /
+                backendRefs:
+                  - name: kube-prometheus-stack-grafana
+                    port: 80
+        targetNamespace: monitoring
+
+        # Sets up Envoy route for App Store GUI
+      - name: envoy-route-appstore-gui
+        description: "Envoy Route for WEKA App Store GUI"
+        enabled: true
+        dependsOn:
+            - envoy-ingress-controller
+            - kube-prom-stack
+            - prometheus-adapter
+        waitForReady: false
+        kubernetesManifest: |
+          apiVersion: gateway.networking.k8s.io/v1
+          kind: HTTPRoute
+          metadata:
+            name: wekaappstore-ui
+          spec:
+            parentRefs:
+              - name: warp-edge-gateway
+                namespace: envoy-gateway-system
+            hostnames:
+              - appstore-nfs.example.com
+            rules:
+              - matches:
+                  - path:
+                      type: PathPrefix
+                      value: /
+                backendRefs:
+                  - name: wekaappstoregui-svc
+                    port: 80
+        targetNamespace: wekaappstore
+
+      # Install NVIDIA DCGM ServiceMonitor via operator manifests
+      - name: nvidia-dcgm-servicemonitor
+        description: "ServiceMonitor for NVIDIA DCGM exporter"
+        enabled: false
+        dependsOn:
+          - kube-prom-stack        # ensure Prometheus Operator (CRDs) is ready
+          - nvidia-operator        # ensure DCGM exporter Service exists
+          - prometheus-adapter
+          - envoy-ingress-controller
+        kubernetesManifest: |
+          apiVersion: monitoring.coreos.com/v1
+          kind: ServiceMonitor
+          metadata:
+            name: dcgm-exporter
+            labels:
+              release: kube-prom-stack
+          spec:
+            namespaceSelector:
+              matchNames:
+                - gpu-operator
+            selector:
+              matchLabels:
+                app: nvidia-dcgm-exporter
+            endpoints:
+              - port: gpu-metrics
+                path: /metrics
+                interval: 30s
+                honorLabels: true
+        targetNamespace: monitoring
+---
+# ConfigMap for Prom-stack values
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prom-stack-config
+  namespace: monitoring
+data:
+  prom-stack_values.yaml: |
+    ## Create default rules for monitoring the cluster
+    #
+    # Disable `etcd` and `kubeScheduler` rules (managed by DOKS, so metrics are not accessible)
+    defaultRules:
+      create: true
+      rules:
+        etcd: false
+        kubeScheduler: false
+
+    ## Component scraping kube scheduler
+    ##
+    # Disabled because it's being managed by DOKS, so it's not accessible
+    kubeScheduler:
+      enabled: false
+
+    ## Component scraping etcd
+    ##
+    # Disabled because it's being managed by DOKS, so it's not accessible
+    kubeEtcd:
+      enabled: false
+
+    alertmanager:
+      ## Deploy alertmanager
+      ##
+      enabled: true
+      # config:
+      #   global:
+      #     resolve_timeout: 5m
+      #     slack_api_url: "<YOUR_SLACK_APP_INCOMING_WEBHOOK_URL_HERE>"
+      #   route:
+      #     receiver: "slack-notifications"
+      #     repeat_interval: 12h
+      #     routes:
+      #       - receiver: "slack-notifications"
+      #   receivers:
+      #     - name: "slack-notifications"
+      #       slack_configs:
+      #         - channel: "#<YOUR_SLACK_CHANNEL_NAME_HERE>"
+      #           send_resolved: true
+      #           title: "{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}"
+      #           text: "{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}"
+
+    ## Using default values from https://github.com/grafana/helm-charts/blob/main/charts/grafana/values.yaml
+    ##
+    grafana:
+      enabled: true
+      adminPassword: prom-operator # Please change the default password in production !!!
+      # persistence / affinity omitted for brevity
+
+    ## Manages Prometheus and Alertmanager components
+    ##
+    prometheusOperator:
+      enabled: true
+
+    ## Cluster-wide node & kubelet metrics
+    ##
+    nodeExporter:
+      enabled: true
+
+    kubelet:
+      enabled: true
+      serviceMonitor:
+        enabled: true
+        # Enable cAdvisor metrics if your chart supports this flag
+        # cAdvisor: true
+
+    ## Deploy a Prometheus instance
+    ##
+    prometheus:
+      enabled: true
+
+      ## IMPORTANT: enable cluster-wide monitoring
+      prometheusSpec:
+        # Allow Prometheus to discover ServiceMonitors/PodMonitors in ALL namespaces
+        serviceMonitorNamespaceSelector: {}
+        podMonitorNamespaceSelector: {}
+
+        # Do not restrict by labels – pick up all ServiceMonitors/PodMonitors
+        serviceMonitorSelector: {}
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelector: {}
+        podMonitorSelectorNilUsesHelmValues: false
+---
+# ConfigMap for Prometheus Adaptor values
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-adapter-config
+  namespace: monitoring
+data:
+  prometheus-adapter_values.yaml: |
+    loglevel: 1
+
+    prometheus:
+      url: http://kube-prom-stack-kube-prome-prometheus.monitoring.svc
+      port: 9090
+
+    rules:
+      default: true
+      custom:
+
+      # Example metric to export for HPA
+      - seriesQuery: '{__name__=~"^vllm:num_requests_waiting$"}'
+        resources:
+          overrides:
+            namespace:
+              resource: "namespace"
+        name:
+          matches: ""
+          as: "vllm_num_requests_waiting"
+        metricsQuery: sum by(namespace) (vllm:num_requests_waiting)
+
+      # Export num_incoming_requests_total by model name
+      - seriesQuery: '{__name__=~"^vllm:num_incoming_requests_total$"}'
+        resources:
+          overrides:
+            namespace:
+              resource: "namespace"
+        name:
+          matches: ""
+          as: "vllm_num_incoming_requests_total"
+        metricsQuery: sum by(namespace, model) (vllm:num_incoming_requests_total)
+---
+#apiVersion: storage.k8s.io/v1
+#kind: StorageClass
+#metadata:
+#  name: default
+#  annotations:
+#    storageclass.kubernetes.io/is-default-class: "true"
+#provisioner: kubernetes.io/aws-ebs
+#reclaimPolicy: Delete
+#volumeBindingMode: WaitForFirstConsumer #This was changed to address the multi AZ nature of EKS
+#parameters:
+#  type: gp3
