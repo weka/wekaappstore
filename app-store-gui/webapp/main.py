@@ -37,7 +37,8 @@ class ClusterInitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         
         # Check initialization status
-        initialized = await is_cluster_initialized()
+        # We check in all namespaces to find any initialization CR
+        initialized = await is_cluster_initialized_anywhere()
         
         # If it's the root path, we'll check and redirect if needed
         if request.url.path == "/":
@@ -54,14 +55,40 @@ class ClusterInitMiddleware(BaseHTTPMiddleware):
         
         return await call_next(request)
 
-async def is_cluster_initialized():
+async def is_cluster_initialized_anywhere():
+    """Check if the cluster is initialized by looking for the CR in any namespace."""
+    try:
+        load_kube_config()
+        custom_api = client.CustomObjectsApi()
+        # list_cluster_custom_object is for cluster-scoped resources, 
+        # but wekaappstores are namespaced. So we use list_namespaced_custom_object across all namespaces if possible,
+        # or just list_cluster_custom_object if it works for namespaced too? 
+        # Actually, list_cluster_custom_object works for namespaced resources if you want to see all of them.
+        crs = custom_api.list_cluster_custom_object(
+            group="warp.io",
+            version="v1alpha1",
+            plural="wekaappstores"
+        )
+        for cr in crs.get("items", []):
+            if cr.get("metadata", {}).get("name") == "app-store-cluster-init":
+                status = cr.get("status", {})
+                phase = status.get("appStackPhase")
+                if phase == "Ready":
+                    return True
+        return False
+    except Exception as e:
+        logger.error(f"Error checking cluster initialization across all namespaces: {e}")
+        # Fallback to checking default namespace as a safety measure
+        return await is_cluster_initialized(namespace="default")
+
+async def is_cluster_initialized(namespace: str = "default"):
     try:
         load_kube_config()
         custom_api = client.CustomObjectsApi()
         cr = custom_api.get_namespaced_custom_object(
             group="warp.io",
             version="v1alpha1",
-            namespace="default",
+            namespace=namespace,
             plural="wekaappstores",
             name="app-store-cluster-init"
         )
@@ -102,7 +129,7 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 # 3) git-sync root+link (GIT_SYNC_ROOT/GIT_SYNC_LINK)
 # 4) Project-relative manifests for local dev
 _default_git_sync_root = os.getenv("GIT_SYNC_ROOT", "/tmp/git-sync-root")
-_default_git_sync_link = os.getenv("GIT_SYNC_LINK", "manifests")
+_default_git_sync_link = os.getenv("GIT_SYNC_LINK", "../../manifests")
 _default_blueprints_dir = os.path.join(_default_git_sync_root, _default_git_sync_link)
 
 _candidates = []
@@ -117,7 +144,7 @@ _candidates.append("/app/manifests")
 # git-sync derived path (may be a symlink)
 _candidates.append(_default_blueprints_dir)
 # project-relative manifests (for local dev)
-_candidates.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "manifests"))
+_candidates.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "../../manifests"))
 
 BLUEPRINTS_DIR = None
 for _p in _candidates:
@@ -135,7 +162,7 @@ if not BLUEPRINTS_DIR:
 # (common when the git repo root has a manifests/ folder), descend into it so
 # callers can consistently reference BLUEPRINTS_DIR/<blueprint>/...
 try:
-    _nested = os.path.join(BLUEPRINTS_DIR, "manifests")
+    _nested = os.path.join(BLUEPRINTS_DIR, "../../manifests")
     if os.path.isdir(_nested):
         BLUEPRINTS_DIR = _nested
 except Exception:
@@ -558,6 +585,86 @@ def apply_yaml(file_path: str, namespace: Optional[str] = None) -> Dict[str, Any
     return {"applied": applied_kinds}
 
 
+from functools import lru_cache
+
+# A pragmatic list for built-in cluster-scoped kinds you’re likely to have in init bundles.
+CLUSTER_SCOPED_KINDS = {
+    "Namespace",
+    "Node",
+    "PersistentVolume",
+    "CustomResourceDefinition",
+    "ClusterRole",
+    "ClusterRoleBinding",
+    "StorageClass",
+    "MutatingWebhookConfiguration",
+    "ValidatingWebhookConfiguration",
+    "APIService",
+    "PriorityClass",
+    "PodSecurityPolicy",  # legacy clusters
+    "RuntimeClass",
+    "CSIDriver",
+    "CSINode",
+    "CertificateSigningRequest",
+}
+
+def _kind(doc: dict) -> str:
+    return str((doc or {}).get("kind") or "")
+
+def _api_version(doc: dict) -> str:
+    return str((doc or {}).get("apiVersion") or "")
+
+def _metadata(doc: dict) -> dict:
+    md = (doc or {}).get("metadata")
+    return md if isinstance(md, dict) else {}
+
+def is_builtin_cluster_scoped(doc: dict) -> bool:
+    return _kind(doc) in CLUSTER_SCOPED_KINDS
+
+@lru_cache(maxsize=256)
+def crd_scope_for(group: str, plural: str) -> str:
+    """
+    Returns 'Namespaced' or 'Cluster' based on the CRD spec.scope.
+    """
+    try:
+        load_kube_config()
+        ext = client.ApiextensionsV1Api()
+        crd_name = f"{plural}.{group}"
+        crd = ext.read_custom_resource_definition(crd_name)
+        return str(crd.spec.scope or "Namespaced")
+    except Exception:
+        # Fallback to Namespaced if CRD not found or other error
+        return "Namespaced"
+
+def is_cluster_scoped(doc: dict) -> bool:
+    """
+    Check if a resource is cluster-scoped.
+    Built-in kinds are checked against CLUSTER_SCOPED_KINDS.
+    For CRDs, we check the scope dynamically via Apiextensions API.
+    """
+    if _kind(doc) in CLUSTER_SCOPED_KINDS:
+        return True
+    
+    api_version = _api_version(doc)
+    if "/" in api_version:
+        group = api_version.split("/", 1)[0]
+        kind = _kind(doc)
+        # Naive pluralization for CRD lookup
+        plural = kind.lower() + "s"
+        if lower_kind := kind.lower():
+             if lower_kind == "warrpappstore":
+                 plural = "warrpappstores"
+             elif lower_kind == "wekaappstore":
+                 plural = "wekaappstores"
+        
+        if crd_scope_for(group, plural) == "Cluster":
+            return True
+            
+    return False
+
+def _doc_id(doc: dict) -> str:
+    md = (doc or {}).get("metadata") or {}
+    return f"{doc.get('apiVersion')} {doc.get('kind')} {md.get('namespace','<cluster>')}/{md.get('name')}"
+
 def apply_blueprint_with_namespace(file_path: str, namespace: str) -> Dict[str, Any]:
     """Load a blueprint YAML and override namespaces before applying.
 
@@ -583,18 +690,22 @@ def apply_blueprint_with_namespace(file_path: str, namespace: str) -> Dict[str, 
     with open(file_path, "r") as f:
         docs = list(yaml.safe_load_all(f))
 
-    for doc in docs:
+    for idx, doc in enumerate(docs):
         if not isinstance(doc, dict):
             # Skip non-dict docs
             continue
 
+        # Decide if this object is cluster-scoped
+        is_cluster_scoped_resource = is_cluster_scoped(doc)
+        
         # Ensure metadata exists
         md = doc.setdefault("metadata", {}) if isinstance(doc, dict) else {}
 
-        # If namespace override provided, set it on the document (namespaced kinds)
-        if isinstance(md, dict) and namespace:
+        # If it's namespaced and an override namespace was provided, set it.
+        # Otherwise, use what's in the document or None.
+        if isinstance(md, dict) and namespace and not is_cluster_scoped_resource:
             md["namespace"] = namespace
-
+        
         # Override targetNamespace per component only when user provided namespace
         try:
             spec = doc.get("spec") or {}
@@ -612,77 +723,119 @@ def apply_blueprint_with_namespace(file_path: str, namespace: str) -> Dict[str, 
         kind = str(doc.get("kind") or "")
 
         # Resolve effective namespace for this document
-        # Priority: provided `namespace` (if non-empty) -> document metadata.namespace -> None
-        doc_ns = namespace if namespace else (md.get("namespace") if isinstance(md, dict) else None)
+        # If cluster-scoped, namespace should be None for the apply call
+        if is_cluster_scoped_resource:
+            doc_ns = None
+        else:
+            # Priority: provided `namespace` (if non-empty) -> document metadata.namespace -> None
+            doc_ns = namespace if namespace else (md.get("namespace") if isinstance(md, dict) else None)
 
-        if api_version.startswith("warrp.io/") or kind == "WarrpAppStore" or api_version.startswith("warp.io/") or kind == "WekaAppStore":
-            # Handle WARRP/WARP CRs via CustomObjectsApi to avoid missing generated client classes
-            try:
-                group, version = api_version.split("/", 1)
-            except ValueError:
-                # Fallback defaults per known kinds
-                if kind == "WekaAppStore":
-                    group, version = "warp.io", "v1alpha1"
-                else:
-                    group, version = "warrp.io", (api_version or "v1alpha1")
-            # Explicit plural mapping for known CRDs; fallback to naive pluralization
-            lower_kind = (kind or "CustomResource").lower()
-            if lower_kind == "warrpappstore":
-                plural = "warrpappstores"
-            elif lower_kind == "wekaappstore":
-                plural = "wekaappstores"
-            else:
-                plural = lower_kind + "s"
-            name = (md or {}).get("name")
-            if not name:
-                raise ValueError("CustomResource document missing metadata.name")
-            # For namespaced CRs, ensure we have a valid namespace. Default to 'default' if absent.
-            cr_ns = doc_ns or "default"
-            # Make sure target namespace exists
-            ensure_namespace_exists(cr_ns)
-            body = _with_last_applied_annotation(doc)
-            try:
-                # Try create first
-                co_api.create_namespaced_custom_object(group=group, version=version, namespace=cr_ns, plural=plural, body=body)
-            except ApiException as ae:
-                if ae.status == 409:
-                    # Already exists -> patch to update without requiring resourceVersion
-                    co_api.patch_namespaced_custom_object(group=group, version=version, namespace=cr_ns, plural=plural, name=name, body=body)
-                else:
-                    raise
-            applied_kinds.append(kind or "CustomResource")
-            continue
-
-        # For non-CR documents: ensure namespace exists if we have one to use
-        if doc_ns:
-            ensure_namespace_exists(doc_ns)
-
-        # Fallback: use utils for built-in or known kinds
-        doc_with_ann = _with_last_applied_annotation(doc)
-        created = utils.create_from_dict(k8s_client, data=doc_with_ann, namespace=(doc_ns or None), verbose=False)
-        # Normalize the return to a list of (obj, resp) tuples
-        def _to_tuples(created_any):
-            tuples = []
-            if created_any is None:
-                return []
-            if isinstance(created_any, list):
-                for item in created_any:
-                    if isinstance(item, tuple) and len(item) == 2:
-                        tuples.append(item)
+        logger.info("APPLY doc[%d]: %s", idx, _doc_id(doc))
+        try:
+            if api_version.startswith("warrp.io/") or kind == "WarrpAppStore" or api_version.startswith("warp.io/") or kind == "WekaAppStore":
+                # Handle WARRP/WARP CRs via CustomObjectsApi to avoid missing generated client classes
+                try:
+                    group, version = api_version.split("/", 1)
+                except ValueError:
+                    # Fallback defaults per known kinds
+                    if kind == "WekaAppStore":
+                        group, version = "warp.io", "v1alpha1"
                     else:
-                        tuples.append((item, None))
-            elif isinstance(created_any, tuple) and len(created_any) == 2:
-                tuples = [created_any]
-            else:
-                tuples = [(created_any, None)]
-            return tuples
+                        group, version = "warrp.io", (api_version or "v1alpha1")
+                # Explicit plural mapping for known CRDs; fallback to naive pluralization
+                lower_kind = (kind or "CustomResource").lower()
+                if lower_kind == "warrpappstore":
+                    plural = "warrpappstores"
+                elif lower_kind == "wekaappstore":
+                    plural = "wekaappstores"
+                else:
+                    plural = lower_kind + "s"
+                
+                # For CRDs, we check their scope dynamically if not in the built-in list
+                if not is_cluster_scoped_resource:
+                    if crd_scope_for(group, plural) == "Cluster":
+                        is_cluster_scoped_resource = True
+                        doc_ns = None
 
-        tuples = _to_tuples(created)
-        for obj, _ in tuples:
-            try:
-                applied_kinds.append(obj.kind)
-            except Exception:
-                applied_kinds.append(str(obj))
+                name = (md or {}).get("name")
+                if not name:
+                    raise ValueError("CustomResource document missing metadata.name")
+                
+                body = _with_last_applied_annotation(doc)
+                
+                if is_cluster_scoped_resource:
+                    try:
+                        co_api.create_cluster_custom_object(group=group, version=version, plural=plural, body=body)
+                    except ApiException as ae:
+                        if ae.status == 409:
+                            co_api.patch_cluster_custom_object(
+                                group=group, version=version, plural=plural, name=name, body=body,
+                                _content_type="application/merge-patch+json"
+                            )
+                        else:
+                            raise
+                else:
+                    # For namespaced CRs, ensure we have a valid namespace. Default to 'default' if absent.
+                    cr_ns = doc_ns or "default"
+                    # Make sure target namespace exists
+                    ensure_namespace_exists(cr_ns)
+                    try:
+                        co_api.create_namespaced_custom_object(group=group, version=version, namespace=cr_ns, plural=plural, body=body)
+                    except ApiException as ae:
+                        if ae.status == 409:
+                            co_api.patch_namespaced_custom_object(
+                                group=group, version=version, namespace=cr_ns, plural=plural, name=name, body=body,
+                                _content_type="application/merge-patch+json"
+                            )
+                        else:
+                            raise
+                    
+                applied_kinds.append(kind or "CustomResource")
+                continue
+
+            # For non-CR documents: ensure namespace exists if we have one to use
+            if doc_ns:
+                ensure_namespace_exists(doc_ns)
+
+            # Fallback: use utils for built-in or known kinds
+            doc_with_ann = _with_last_applied_annotation(doc)
+            
+            # Only pass a namespace if the object is namespaced.
+            ns_for_apply = None if is_cluster_scoped_resource else (doc_ns or None)
+            
+            created = utils.create_from_dict(k8s_client, data=doc_with_ann, namespace=ns_for_apply, verbose=False)
+            # Normalize the return to a list of (obj, resp) tuples
+            def _to_tuples(created_any):
+                tuples = []
+                if created_any is None:
+                    return []
+                if isinstance(created_any, list):
+                    for item in created_any:
+                        if isinstance(item, tuple) and len(item) == 2:
+                            tuples.append(item)
+                        else:
+                            tuples.append((item, None))
+                elif isinstance(created_any, tuple) and len(created_any) == 2:
+                    tuples = [created_any]
+                else:
+                    tuples = [(created_any, None)]
+                return tuples
+
+            tuples = _to_tuples(created)
+            for obj, _ in tuples:
+                try:
+                    applied_kinds.append(obj.kind)
+                except Exception:
+                    applied_kinds.append(str(obj))
+        except ApiException as ae:
+            logger.error(
+                "APPLY FAILED doc[%d]: %s status=%s reason=%s body=%s",
+                idx, _doc_id(doc), ae.status, ae.reason, getattr(ae, "body", None)
+            )
+            raise
+        except Exception as e:
+            logger.exception("APPLY FAILED doc[%d]: %s err=%s", idx, _doc_id(doc), e)
+            raise
 
     return {"applied": applied_kinds}
 
@@ -700,13 +853,18 @@ def apply_blueprint_content_with_namespace(content: str, namespace: str) -> Dict
 
     docs = list(yaml.safe_load_all(content))
 
-    for doc in docs:
+    for idx, doc in enumerate(docs):
         if not isinstance(doc, dict):
             continue
 
+        # Decide if this object is cluster-scoped
+        is_cluster_scoped_resource = is_cluster_scoped(doc)
+
         md = doc.setdefault("metadata", {}) if isinstance(doc, dict) else {}
 
-        if isinstance(md, dict) and namespace:
+        # If it's namespaced and an override namespace was provided, set it.
+        # Otherwise, use what's in the document or None.
+        if isinstance(md, dict) and namespace and not is_cluster_scoped_resource:
             md["namespace"] = namespace
 
         try:
@@ -722,65 +880,111 @@ def apply_blueprint_content_with_namespace(content: str, namespace: str) -> Dict
         api_version = str(doc.get("apiVersion") or "")
         kind = str(doc.get("kind") or "")
 
-        doc_ns = namespace if namespace else (md.get("namespace") if isinstance(md, dict) else None)
+        # Resolve effective namespace for this document
+        # If cluster-scoped, namespace should be None for the apply call
+        if is_cluster_scoped_resource:
+            doc_ns = None
+        else:
+            # Priority: provided `namespace` (if non-empty) -> document metadata.namespace -> None
+            doc_ns = namespace if namespace else (md.get("namespace") if isinstance(md, dict) else None)
 
-        if api_version.startswith("warrp.io/") or kind == "WarrpAppStore" or api_version.startswith("warp.io/") or kind == "WekaAppStore":
-            try:
-                group, version = api_version.split("/", 1)
-            except ValueError:
-                if kind == "WekaAppStore":
-                    group, version = "warp.io", "v1alpha1"
-                else:
-                    group, version = "warrp.io", (api_version or "v1alpha1")
-            lower_kind = (kind or "CustomResource").lower()
-            if lower_kind == "warrpappstore":
-                plural = "warrpappstores"
-            elif lower_kind == "wekaappstore":
-                plural = "wekaappstores"
-            else:
-                plural = lower_kind + "s"
-            name = (md or {}).get("name")
-            if not name:
-                raise ValueError("CustomResource document missing metadata.name")
-            cr_ns = doc_ns or "default"
-            ensure_namespace_exists(cr_ns)
-            body = _with_last_applied_annotation(doc)
-            try:
-                co_api.create_namespaced_custom_object(group=group, version=version, namespace=cr_ns, plural=plural, body=body)
-            except ApiException as ae:
-                if ae.status == 409:
-                    co_api.patch_namespaced_custom_object(group=group, version=version, namespace=cr_ns, plural=plural, name=name, body=body)
-                else:
-                    raise
-            applied_kinds.append(kind or "CustomResource")
-            continue
-
-        if doc_ns:
-            ensure_namespace_exists(doc_ns)
-
-        doc_with_ann = _with_last_applied_annotation(doc)
-        created = utils.create_from_dict(k8s_client, data=doc_with_ann, namespace=(doc_ns or None), verbose=False)
-
-        def _to_tuples(created_any):
-            tuples: list[tuple] = []
-            if isinstance(created_any, list):
-                for item in created_any:
-                    if isinstance(item, tuple) and len(item) == 2:
-                        tuples.append(item)
+        logger.info("APPLY doc[%d]: %s", idx, _doc_id(doc))
+        try:
+            if api_version.startswith("warrp.io/") or kind == "WarrpAppStore" or api_version.startswith("warp.io/") or kind == "WekaAppStore":
+                try:
+                    group, version = api_version.split("/", 1)
+                except ValueError:
+                    if kind == "WekaAppStore":
+                        group, version = "warp.io", "v1alpha1"
                     else:
-                        tuples.append((item, None))
-            elif isinstance(created_any, tuple) and len(created_any) == 2:
-                tuples = [created_any]
-            else:
-                tuples = [(created_any, None)]
-            return tuples
-
-        tuples = _to_tuples(created)
-        for obj, _ in tuples:
-            try:
-                applied_kinds.append(obj.kind)
-            except Exception:
-                applied_kinds.append(str(obj))
+                        group, version = "warrp.io", (api_version or "v1alpha1")
+                lower_kind = (kind or "CustomResource").lower()
+                if lower_kind == "warrpappstore":
+                    plural = "warrpappstores"
+                elif lower_kind == "wekaappstore":
+                    plural = "wekaappstores"
+                else:
+                    plural = lower_kind + "s"
+    
+                # For CRDs, we check their scope dynamically if not in the built-in list
+                if not is_cluster_scoped_resource:
+                    if crd_scope_for(group, plural) == "Cluster":
+                        is_cluster_scoped_resource = True
+                        doc_ns = None
+    
+                name = (md or {}).get("name")
+                if not name:
+                    raise ValueError("CustomResource document missing metadata.name")
+                
+                body = _with_last_applied_annotation(doc)
+                
+                if is_cluster_scoped_resource:
+                    try:
+                        co_api.create_cluster_custom_object(group=group, version=version, plural=plural, body=body)
+                    except ApiException as ae:
+                        if ae.status == 409:
+                            co_api.patch_cluster_custom_object(
+                                group=group, version=version, plural=plural, name=name, body=body,
+                                _content_type="application/merge-patch+json"
+                            )
+                        else:
+                            raise
+                else:
+                    cr_ns = doc_ns or "default"
+                    ensure_namespace_exists(cr_ns)
+                    try:
+                        co_api.create_namespaced_custom_object(group=group, version=version, namespace=cr_ns, plural=plural, body=body)
+                    except ApiException as ae:
+                        if ae.status == 409:
+                            co_api.patch_namespaced_custom_object(
+                                group=group, version=version, namespace=cr_ns, plural=plural, name=name, body=body,
+                                _content_type="application/merge-patch+json"
+                            )
+                        else:
+                            raise
+                
+                applied_kinds.append(kind or "CustomResource")
+                continue
+    
+            if doc_ns:
+                ensure_namespace_exists(doc_ns)
+    
+            doc_with_ann = _with_last_applied_annotation(doc)
+    
+            # Only pass a namespace if the object is namespaced.
+            ns_for_apply = None if is_cluster_scoped_resource else (doc_ns or None)
+    
+            created = utils.create_from_dict(k8s_client, data=doc_with_ann, namespace=ns_for_apply, verbose=False)
+    
+            def _to_tuples(created_any):
+                tuples: list[tuple] = []
+                if isinstance(created_any, list):
+                    for item in created_any:
+                        if isinstance(item, tuple) and len(item) == 2:
+                            tuples.append(item)
+                        else:
+                            tuples.append((item, None))
+                elif isinstance(created_any, tuple) and len(created_any) == 2:
+                    tuples = [created_any]
+                else:
+                    tuples = [(created_any, None)]
+                return tuples
+    
+            tuples = _to_tuples(created)
+            for obj, _ in tuples:
+                try:
+                    applied_kinds.append(obj.kind)
+                except Exception:
+                    applied_kinds.append(str(obj))
+        except ApiException as ae:
+            logger.error(
+                "APPLY FAILED doc[%d]: %s status=%s reason=%s body=%s",
+                idx, _doc_id(doc), ae.status, ae.reason, getattr(ae, "body", None)
+            )
+            raise
+        except Exception as e:
+            logger.exception("APPLY FAILED doc[%d]: %s err=%s", idx, _doc_id(doc), e)
+            raise
 
     return {"applied": applied_kinds}
 
@@ -1434,15 +1638,18 @@ async def welcome_screen(request: Request):
     })
 
 @app.get("/cluster-status")
-async def get_cluster_status():
+async def get_cluster_status_endpoint(namespace: str = "default"):
     """Get the current initialization status."""
     try:
         load_kube_config()
         custom_api = client.CustomObjectsApi()
+        
+        # If we don't know the namespace, we might need to find where the CR is
+        # But for now, we'll respect the namespace parameter, defaulting to 'default'
         cr = custom_api.get_namespaced_custom_object(
             group="warp.io",
             version="v1alpha1",
-            namespace="default",
+            namespace=namespace,
             plural="wekaappstores",
             name="app-store-cluster-init"
         )
@@ -1527,7 +1734,7 @@ async def get_cluster_status():
         return {"exists": False, "error": str(e)}
 
 @app.post("/init-cluster")
-async def initialize_cluster():
+async def initialize_cluster(namespace: str = "default"):
     """Trigger cluster initialization by applying the init CR."""
     try:
         # Load the init manifest path
@@ -1537,7 +1744,8 @@ async def initialize_cluster():
             return JSONResponse({"ok": False, "error": f"Init manifest not found at {init_manifest_path}"}, status_code=404)
 
         # Use the standard blueprint application method which handles multi-doc YAMLs and CRDs
-        result = apply_blueprint_with_namespace(init_manifest_path, namespace="")
+        # We pass the namespace to override the default 'default' namespace if requested
+        result = apply_blueprint_with_namespace(init_manifest_path, namespace=namespace)
         return JSONResponse({"ok": True, "message": "Cluster initialization started.", "result": result})
             
     except Exception as e:
@@ -1646,7 +1854,7 @@ async def sync_blueprints(request: Request):
         branch = os.environ.get("GIT_SYNC_BRANCH", "main")
         # Default root to a writable path to avoid permission issues when running as non-root
         root = os.environ.get("GIT_SYNC_ROOT", "/tmp/git-sync-root")
-        link = os.environ.get("GIT_SYNC_LINK", "manifests")
+        link = os.environ.get("GIT_SYNC_LINK", "../../manifests")
         if not repo:
             return JSONResponse({"ok": False, "error": "GIT_SYNC_REPO not set"}, status_code=400)
 
@@ -1851,9 +2059,9 @@ async def deploy_stream(
     }
     yaml_path = app_map.get(app_name)
 
-    # For cluster-init, preserve namespaces defined in the YAML (do not override)
-    if app_name == "cluster-init":
-        namespace = ""
+    # For cluster-init, use provided namespace but default to "default" if empty
+    if app_name == "cluster-init" and not namespace:
+        namespace = "default"
 
     def sse_event(payload: Dict[str, Any]) -> str:
         return f"data: {json.dumps(payload)}\n\n"
@@ -1893,6 +2101,7 @@ async def deploy_stream(
                 # If client disconnected, stop
                 if await request.is_disconnected():
                     return
+                logger.info("Deploy-stream progress: %s (%d/%d)", item, i+1, len(items))
                 yield sse_event({
                     "type": "progress",
                     "currentIndex": i,
@@ -1919,8 +2128,10 @@ async def deploy_stream(
             # Only change variable delimiters; keep block/comment delimiters default
             env = Environment(variable_start_string='[[', variable_end_string=']]')
             template = env.from_string(raw_tpl)
-            # For cluster-init, avoid injecting a default namespace into the template to preserve file-defined namespaces
-            render_ns = ("" if app_name == "cluster-init" else (namespace or "default"))
+            
+            # For cluster-init, we use the provided namespace (defaulting to 'default')
+            render_ns = namespace or "default"
+            
             # Backward compatibility: if old vllm_model is provided but new chat model is empty,
             # treat it as the chat model.
             chat_model_var = norm_chat_model or norm_legacy_model or None
@@ -1939,7 +2150,12 @@ async def deploy_stream(
             )
 
             # Apply manifest with namespace overrides using rendered content
-            result = apply_blueprint_content_with_namespace(rendered, namespace=namespace)
+            logger.info(
+                "Deploy-stream start: app=%s namespace=%s blueprint=%s items=%d",
+                app_name, namespace, bp_path, len(items)
+            )
+            ns_for_apply = "" if app_name == "cluster-init" else namespace
+            result = apply_blueprint_content_with_namespace(rendered, namespace=ns_for_apply)
             yield sse_event({
                 "type": "complete",
                 "ok": True,

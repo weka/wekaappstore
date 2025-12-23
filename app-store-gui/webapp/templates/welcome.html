@@ -40,7 +40,8 @@
     const { 
       ThemeProvider, createTheme, CssBaseline, Button, LinearProgress, 
       Typography, Box, Container, Paper, List, ListItem, ListItemText, 
-      ListItemIcon, Divider, Alert, AlertTitle, Chip
+      ListItemIcon, Divider, Alert, AlertTitle, Chip, FormControl, 
+      InputLabel, Select, MenuItem
     } = MaterialUI;
 
     const theme = createTheme({
@@ -105,9 +106,12 @@
       const [errorCount, setErrorCount] = React.useState(0);
       const [failed, setFailed] = React.useState(false);
       const [showProgress, setShowProgress] = React.useState(false);
+      const [namespaces, setNamespaces] = React.useState(['default']);
+      const [selectedNamespace, setSelectedNamespace] = React.useState('default');
       const logContainerRef = React.useRef(null);
 
       React.useEffect(() => {
+        // Fetch cluster info
         fetch('/cluster-info')
           .then(res => res.json())
           .then(data => {
@@ -121,8 +125,33 @@
             setWekaCsiInstalled(false);
           });
 
+        // Fetch namespaces
+        fetch('/api/namespaces')
+          .then(res => res.json())
+          .then(data => {
+            if (data.ok && data.items) {
+              setNamespaces(data.items);
+              // Try to restore from localStorage or auth-status
+              const saved = localStorage.getItem('selectedNamespace');
+              if (saved && data.items.includes(saved)) {
+                setSelectedNamespace(saved);
+              } else {
+                fetch('/auth-status')
+                  .then(res => res.json())
+                  .then(auth => {
+                    if (auth.authenticated && auth.details?.namespace) {
+                      if (data.items.includes(auth.details.namespace)) {
+                        setSelectedNamespace(auth.details.namespace);
+                      }
+                    }
+                  }).catch(() => {});
+              }
+            }
+          })
+          .catch(err => console.error('Failed to fetch namespaces:', err));
+
         // Check initial status
-        fetch('/cluster-status')
+        fetch(`/cluster-status?namespace=${selectedNamespace}`)
           .then(res => res.json())
           .then(status => {
             if (status.exists) {
@@ -143,7 +172,7 @@
         if (initializing && !failed) {
           const interval = setInterval(async () => {
             try {
-              const response = await fetch('/cluster-status');
+              const response = await fetch(`/cluster-status?namespace=${selectedNamespace}`);
               const status = await response.json();
               
               if (status.exists) {
@@ -183,7 +212,7 @@
           }, 3000);
           return () => clearInterval(interval);
         }
-      }, [initializing, failed]);
+      }, [initializing, failed, selectedNamespace]);
 
       React.useEffect(() => {
         if (logContainerRef.current) {
@@ -235,7 +264,7 @@
         setLogs([]);
 
         // Use deploy-stream for consistency with other blueprints
-        const url = `/deploy-stream?app_name=cluster-init&namespace=`;
+        const url = `/deploy-stream?app_name=cluster-init&namespace=${selectedNamespace}`;
         const es = new EventSource(url);
 
         es.onmessage = (ev) => {
@@ -325,7 +354,24 @@
                   </Box>
 
                   {!initializing && !phase.includes('Ready') && (
-                    <Box sx={% raw %}{{ mt: 6 }}{% endraw %}>
+                    <Box sx={% raw %}{{ mt: 6, display: 'flex', alignItems: 'center', gap: 2 }}{% endraw %}>
+                      <FormControl size="small" sx={% raw %}{{ minWidth: 200 }}{% endraw %}>
+                        <InputLabel id="namespace-select-label">Namespace</InputLabel>
+                        <Select
+                          labelId="namespace-select-label"
+                          id="namespace-select"
+                          value={selectedNamespace}
+                          label="Namespace"
+                          onChange={(e) => {
+                            setSelectedNamespace(e.target.value);
+                            localStorage.setItem('selectedNamespace', e.target.value);
+                          }}
+                        >
+                          {namespaces.map((ns) => (
+                            <MenuItem key={ns} value={ns}>{ns}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
                       <Button 
                         variant="contained" 
                         onClick={handleInitialize}
@@ -336,7 +382,8 @@
                           '&:hover': { bgcolor: 'var(--weka-purple-dark)' },
                           borderRadius: '8px',
                           textTransform: 'none',
-                          fontWeight: 600
+                          fontWeight: 600,
+                          height: '40px'
                         }}{% endraw %}
                       >
                         Initialize Cluster
