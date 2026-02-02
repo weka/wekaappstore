@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y curl tar ca-certificates && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Installing kopf and other dependencies for the operator to function
-COPY requirements.txt .
+COPY ../operator_module/requirements.txt .
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
@@ -23,8 +23,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 WORKDIR /app
 
 # Copy your operator code into the container
-COPY operator.py .
+COPY ../operator_module/main.py .
 
 # Use the kopf run command to execute the operator
 # Default to watching all namespaces so the image behaves correctly even without the Helm overrides.
-CMD ["kopf", "run", "--all-namespaces", "--verbose", "/app/operator.py"]
+CMD ["kopf", "run", "--all-namespaces", "--verbose", "/app/operator_module/main.py"]
