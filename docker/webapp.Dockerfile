@@ -22,11 +22,11 @@ RUN chmod 0755 "$GIT_SYNC_BIN" && \
 WORKDIR /app
 
 # install deps first for better caching
-COPY requirements.txt .
+COPY ../app-store-gui/requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # copy source
-COPY webapp ./app
+COPY ../app-store-gui/webapp ./app
 
 # create a non-root user
 RUN useradd -u 10001 -m appuser
