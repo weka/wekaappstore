@@ -162,7 +162,7 @@ if not BLUEPRINTS_DIR:
 # (common when the git repo root has a manifests/ folder), descend into it so
 # callers can consistently reference BLUEPRINTS_DIR/<blueprint>/...
 try:
-    _nested = os.path.join(BLUEPRINTS_DIR, "../../manifests")
+    _nested = os.path.join(BLUEPRINTS_DIR, "manifests")
     if os.path.isdir(_nested):
         BLUEPRINTS_DIR = _nested
 except Exception:
@@ -1024,8 +1024,8 @@ def infer_requirements_from_yaml(file_path: str) -> Dict[str, int]:
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    status = get_cluster_status()
-    auth = get_auth_status()
+    status = await asyncio.to_thread(get_cluster_status)
+    auth = await asyncio.to_thread(get_auth_status)
     return templates.TemplateResponse("index.html", {
         "request": request,
         "status": status,
@@ -1036,8 +1036,8 @@ async def index(request: Request):
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
-    auth = get_auth_status()
-    status = get_cluster_status()
+    auth = await asyncio.to_thread(get_auth_status)
+    status = await asyncio.to_thread(get_cluster_status)
     # Use detected namespace if available, else default
     detected_ns = (auth.get("details", {}) or {}).get("namespace") if isinstance(auth, dict) else None
     return templates.TemplateResponse("settings.html", {

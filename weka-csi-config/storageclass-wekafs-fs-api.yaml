@@ -9,7 +9,7 @@ allowVolumeExpansion: true
 parameters:
 
   volumeType: dir/v1
-  filesystemName: nfscsi
+  filesystemName: default
   capacityEnforcement: HARD
 
   # Optional: set ownership / permissions on the root of each volume

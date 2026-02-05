@@ -163,14 +163,7 @@
           <h3 class="font-semibold">Cluster Status</h3>
           <p class="muted text-sm">Overview of the connected Kubernetes cluster.</p>
         </div>
-        <div class="flex items-center gap-2">
-          <button id="init-cluster" class="btn-purple px-4 py-2 rounded-md text-sm font-medium">Initialize Cluster</button>
-          {% set dot_class = 'bg-green-500' if status.app_store_cluster_init_present is true else ('bg-red-500' if status.app_store_cluster_init_present is false else 'bg-gray-500') %}
-          <span class="status-dot {{ dot_class }}" title="Cluster Init Status"></span>
-          <button id="uninit-cluster" class="px-4 py-2 rounded-md text-sm font-medium border border-white/20 hover:bg-white/10">Un-initialize</button>
-        </div>
       </div>
-      <div id="init-result" class="text-xs text-white/80 mb-2"></div>
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div class="card rounded-lg p-5">
           <div class="muted text-xs">CPU Worker Nodes</div>
@@ -470,32 +463,6 @@
     refreshAuthStatus();
     setInterval(refreshAuthStatus, 10000);
 
-    // Initialize Cluster direct deploy (moved from Home)
-    const initBtn = document.getElementById('init-cluster');
-    if (initBtn) {
-      initBtn.addEventListener('click', async () => {
-        const resEl = document.getElementById('init-result');
-        resEl.textContent = 'Submitting cluster initialization...';
-        initBtn.disabled = true;
-        try {
-          const fd = new FormData();
-          fd.append('app_name', 'cluster-init');
-          fd.append('namespace', 'default'); // ignored by backend for cluster-init
-          const data = await post('/deploy', fd);
-          if (data.ok) {
-            const applied = (data.result && data.result.applied) ? data.result.applied.join(', ') : 'OK';
-            resEl.textContent = 'Initialize submitted. Applied: ' + applied + '. Reload the page to refresh status.';
-          } else {
-            resEl.textContent = 'Error: ' + (data.error || 'Unknown error');
-          }
-        } catch (e) {
-          resEl.textContent = 'Request failed: ' + e;
-        } finally {
-          initBtn.disabled = false;
-        }
-      });
-    }
-
     // -------- Blueprint Uninstall --------
     function renderBlueprints(items) {
       const emptyEl = document.getElementById('bp-empty');
@@ -578,28 +545,6 @@
     }
     // initial load
     loadBlueprints();
-
-    // Un-initialize Cluster
-    const uninitBtn = document.getElementById('uninit-cluster');
-    if (uninitBtn) {
-      uninitBtn.addEventListener('click', async () => {
-        const resEl = document.getElementById('init-result');
-        resEl.textContent = 'Submitting un-initialize...';
-        uninitBtn.disabled = true;
-        try {
-          const data = await post('/uninit-cluster');
-          if (data.ok) {
-            resEl.textContent = 'Un-initialize submitted. ' + (data.result ? JSON.stringify(data.result) : 'OK') + '. Reload the page to refresh status.';
-          } else {
-            resEl.textContent = 'Error: ' + (data.error || 'Unknown error');
-          }
-        } catch (e) {
-          resEl.textContent = 'Request failed: ' + e;
-        } finally {
-          uninitBtn.disabled = false;
-        }
-      });
-    }
   </script>
 </body>
 </html>
