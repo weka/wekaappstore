@@ -96,7 +96,12 @@ Plans:
   3. Calling any inspection tool with mocked K8s/WEKA backends produces agent-readable output with no nested domain model structures
   4. All tool descriptions start with when and why to call the tool and include sequencing guidance
   5. All server logging goes to stderr; stdout carries only MCP protocol frames
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — MCP server scaffold, test harness, and inspection tools (inspect_cluster + inspect_weka)
+- [ ] 06-02-PLAN.md — Blueprint catalog tools (list_blueprints + get_blueprint)
+- [ ] 06-03-PLAN.md — CRD schema tool (get_crd_schema) and cross-tool integration validation
 
 ### Phase 7: Validation, Apply, and Status Tools
 **Goal**: The remaining 3 tools are callable, the apply approval gate is enforced in tool code (not just SKILL.md), the validator works against the WekaAppStore CRD contract, and the mock harness exercises the complete inspect-validate-apply chain
@@ -144,7 +149,7 @@ v2.0 phases execute in numeric order: 6 → 7 → 8 → 9
 | 3. Conversational Planning Sessions | v1.0 | 4/4 | Complete | 2026-03-20 |
 | 4. Review, Approval, And Apply Gating | v1.0 | -/- | Complete | 2026-03-20 |
 | 5. Maintainer Draft Authoring And Test Hardening | v1.0 | -/- | Complete | 2026-03-20 |
-| 6. MCP Scaffold and Read-Only Tools | v2.0 | 0/TBD | Not started | - |
+| 6. MCP Scaffold and Read-Only Tools | v2.0 | 0/3 | Planning complete | - |
 | 7. Validation, Apply, and Status Tools | v2.0 | 0/TBD | Not started | - |
 | 8. SKILL.md, Agent Context, and Cleanup | v2.0 | 0/TBD | Not started | - |
 | 9. Deployment and Registration | v2.0 | 0/TBD | Not started | - |
