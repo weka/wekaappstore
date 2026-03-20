@@ -40,6 +40,7 @@ def test_invalid_plan_variants_cover_deterministic_validation_failures(
         "malformed_components",
         "missing_blueprint_family",
         "missing_deployment_method",
+        "session_lifecycle_marker",
         "unsupported_blueprint_family",
         "unsupported_crds_strategy",
         "unsupported_readiness_check_type",
@@ -57,6 +58,7 @@ def test_invalid_plan_variants_cover_deterministic_validation_failures(
     assert "helm_chart" in invalid_plan_payloads["both_deployment_methods"]["components"][1]
     assert invalid_plan_payloads["malformed_components"]["components"] == "vector-db"
     assert "chat_session" in invalid_plan_payloads["unsupported_top_level_field"]
+    assert invalid_plan_payloads["session_lifecycle_marker"]["session_status"] == "abandoned"
     assert (
         invalid_plan_payloads["unsupported_readiness_check_type"]["components"][0]["readiness_check"]["type"]
         == "service"
@@ -177,6 +179,12 @@ def test_validator_returns_explicit_normalization_warnings_for_safe_defaults(
             "unsupported_field",
             "chat_session",
             "unsupported field 'chat_session' is not part of the Phase 1 structured plan contract",
+        ),
+        (
+            "session_lifecycle_marker",
+            "unsupported_field",
+            "session_status",
+            "unsupported field 'session_status' is not part of the Phase 1 structured plan contract",
         ),
         (
             "unsupported_readiness_check_type",

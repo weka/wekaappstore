@@ -231,6 +231,9 @@ def invalid_plan_payloads(valid_plan_payload: dict) -> dict[str, dict]:
     unsupported_top_level_field = deepcopy(valid_plan_payload)
     unsupported_top_level_field["chat_session"] = {"id": "session-123"}
 
+    session_lifecycle_marker = deepcopy(valid_plan_payload)
+    session_lifecycle_marker["session_status"] = "abandoned"
+
     unsupported_readiness_check_type = deepcopy(valid_plan_payload)
     unsupported_readiness_check_type["components"][0]["readiness_check"]["type"] = "service"
 
@@ -257,6 +260,7 @@ def invalid_plan_payloads(valid_plan_payload: dict) -> dict[str, dict]:
         "both_deployment_methods": both_deployment_methods,
         "malformed_components": malformed_components,
         "unsupported_top_level_field": unsupported_top_level_field,
+        "session_lifecycle_marker": session_lifecycle_marker,
         "unsupported_readiness_check_type": unsupported_readiness_check_type,
         "invalid_values_file_kind": invalid_values_file_kind,
         "unsupported_crds_strategy": unsupported_crds_strategy,
