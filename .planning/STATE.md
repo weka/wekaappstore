@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-last_updated: "2026-03-20T02:38:41Z"
+last_updated: "2026-03-20T03:10:26Z"
 progress:
   total_phases: 5
   completed_phases: 2
-  total_plans: 8
-  completed_plans: 8
+  total_plans: 12
+  completed_plans: 9
 ---
 
 # STATE.md
 
 **Initialized:** 2026-03-20
-**Current status:** Phase 2 complete
+**Current status:** Phase 3 plan 01 complete
 
 ## Project Reference
 
@@ -29,16 +29,16 @@ See: `.planning/PROJECT.md` (updated 2026-03-20)
 |-------|------|--------|
 | 1 | Plan Contract And YAML Translation | Complete |
 | 2 | Cluster And WEKA Inspection Signals | Complete |
-| 3 | Conversational Planning Sessions | Pending |
+| 3 | Conversational Planning Sessions | In Progress |
 | 4 | Review, Approval, And Apply Gating | Pending |
 | 5 | Maintainer Draft Authoring And Test Hardening | Pending |
 
 ## Current Execution Position
 
 - Current phase: `03-conversational-planning-sessions`
-- Current plan: `not started`
-- Completed plans this phase: `n/a`
-- Last completed plan: `02-04`
+- Current plan: `03-02`
+- Completed plans this phase: `03-01`
+- Last completed plan: `03-01`
 
 ## Decisions
 
@@ -55,13 +55,17 @@ See: `.planning/PROJECT.md` (updated 2026-03-20)
 - [Phase 02]: Restrict the planner tool surface to explicit inspection intents and append audit metadata for every inspection call.
 - [Phase 02]: Merge cluster and WEKA inspection domains into one correlation-scoped planner snapshot so fit reasoning shares stable provenance.
 - [Phase 02]: Classify preview and apply failures by explicit stages instead of ad hoc error strings so later UI flows can surface deterministic diagnostics.
+- [Phase 03]: Represent restart as a replacement session linked to the original so audit history stays intact.
+- [Phase 03]: Keep the initial planning-session seam file-backed with injected clocks and ID factories for deterministic pytest coverage.
 
 ## Recent Progress
 
+- Completed `03-01-PLAN.md` and wrote `.planning/phases/03-conversational-planning-sessions/03-01-SUMMARY.md`.
 - Completed `02-02-PLAN.md` and wrote `.planning/phases/02-cluster-and-weka-inspection-signals/02-02-SUMMARY.md`.
 - Completed `02-03-PLAN.md` and wrote `.planning/phases/02-cluster-and-weka-inspection-signals/02-03-SUMMARY.md`.
 - Completed `02-04-PLAN.md` and wrote `.planning/phases/02-cluster-and-weka-inspection-signals/02-04-SUMMARY.md`.
 - Integrated bounded inspection snapshots into planner fit findings and stage-classified preview/apply diagnostics with deterministic mocked coverage.
+- Added backend-owned planning-session models, a replayable local session store, and deterministic restart or abandon lifecycle tests for Phase 3.
 
 ## Latest Completed Setup
 
@@ -74,8 +78,8 @@ See: `.planning/PROJECT.md` (updated 2026-03-20)
 
 ## Next Action
 
-- Plan and execute Phase 3 conversational planning work on top of the new Phase 2 inspection and fit-finding seam.
-- Preserve the Phase 2 bounded-tool and correlation diagnostics patterns while adding chat-session behavior.
+- Execute `03-02-PLAN.md` to build chat-facing session routes and planner orchestration on top of the new replayable session seam.
+- Preserve the Phase 2 bounded-tool and correlation diagnostics patterns while adding turn-by-turn chat behavior.
 
 ---
-*Last updated: 2026-03-20 after completing 02-04-PLAN.md*
+*Last updated: 2026-03-20 after completing 03-01-PLAN.md*

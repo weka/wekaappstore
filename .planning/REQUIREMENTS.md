@@ -10,8 +10,8 @@
 - [ ] **CHAT-01**: User can start a NemoClaw planning session from the WEKA App Store UI.
 - [ ] **CHAT-02**: User can submit a free-text install request in a chat-style interface.
 - [ ] **CHAT-03**: User can answer follow-up questions from NemoClaw within the same planning session.
-- [ ] **CHAT-04**: User can see prior prompts, agent responses, and unanswered follow-up questions for the current session.
-- [ ] **CHAT-05**: User can restart or abandon a draft planning session without applying changes.
+- [x] **CHAT-04**: User can see prior prompts, agent responses, and unanswered follow-up questions for the current session.
+- [x] **CHAT-05**: User can restart or abandon a draft planning session without applying changes.
 
 ### Cluster Inspection
 
@@ -86,8 +86,8 @@
 | CHAT-01 | Phase 3 | Pending |
 | CHAT-02 | Phase 3 | Pending |
 | CHAT-03 | Phase 3 | Pending |
-| CHAT-04 | Phase 3 | Pending |
-| CHAT-05 | Phase 3 | Pending |
+| CHAT-04 | Phase 3 | Complete |
+| CHAT-05 | Phase 3 | Complete |
 | CLSTR-01 | Phase 2 | Complete |
 | CLSTR-02 | Phase 2 | Complete |
 | CLSTR-03 | Phase 2 | Complete |
@@ -124,4 +124,4 @@
 
 ---
 *Requirements defined: 2026-03-20*
-*Last updated: 2026-03-20 after completing Phase 1 plan execution*
+*Last updated: 2026-03-20 after completing Phase 3 plan 03-01*
