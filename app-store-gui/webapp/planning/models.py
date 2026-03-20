@@ -25,6 +25,10 @@ SUPPORTED_INSPECTION_DOMAIN_STATUSES = frozenset(
 SUPPORTED_FAILURE_STAGES = frozenset(
     {"inspection", "validation", "yaml_generation", "apply_handoff"}
 )
+SUPPORTED_PLANNING_SESSION_STATUSES = frozenset({"active", "restarted", "abandoned"})
+SUPPORTED_PLANNING_TURN_ROLES = frozenset({"user", "assistant", "system"})
+SUPPORTED_PLANNING_FOLLOW_UP_STATUSES = frozenset({"pending", "answered", "dismissed"})
+SUPPORTED_PLANNING_DRAFT_STATUSES = frozenset({"draft", "validated", "blocked", "abandoned"})
 
 
 @dataclass(slots=True)
@@ -237,6 +241,99 @@ class ValidationResult:
             "warnings": [warning.to_dict() for warning in self.warnings],
             "errors": [error.to_dict() for error in self.errors],
         }
+
+
+@dataclass(slots=True)
+class PlanningSessionTurn:
+    turn_id: str
+    role: str
+    message: str
+    created_at: str
+    revision_number: Optional[int] = None
+    question_id: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class PlanningSessionFollowUp:
+    question_id: str
+    question: str
+    field_path: Optional[str] = None
+    blocking: bool = False
+    install_critical: bool = False
+    status: str = "pending"
+    asked_at: Optional[str] = None
+    answered_at: Optional[str] = None
+    answer: Optional[str] = None
+    revision_number: Optional[int] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class PlanningSessionDraftRevision:
+    revision_number: int
+    created_at: str
+    summary: str
+    status: str = "draft"
+    structured_plan: Optional[Dict[str, Any]] = None
+    fit_findings: Optional[Dict[str, Any]] = None
+    unanswered_question_ids: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class PlanningSession:
+    session_id: str
+    status: str
+    created_at: str
+    updated_at: str
+    request_summary: Optional[str] = None
+    turns: List[PlanningSessionTurn] = field(default_factory=list)
+    follow_ups: List[PlanningSessionFollowUp] = field(default_factory=list)
+    draft_revisions: List[PlanningSessionDraftRevision] = field(default_factory=list)
+    restart_count: int = 0
+    restarted_from_session_id: Optional[str] = None
+    replacement_session_id: Optional[str] = None
+    abandoned_at: Optional[str] = None
+    last_activity_at: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "status": self.status,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "request_summary": self.request_summary,
+            "turns": [turn.to_dict() for turn in self.turns],
+            "follow_ups": [follow_up.to_dict() for follow_up in self.follow_ups],
+            "draft_revisions": [revision.to_dict() for revision in self.draft_revisions],
+            "restart_count": self.restart_count,
+            "restarted_from_session_id": self.restarted_from_session_id,
+            "replacement_session_id": self.replacement_session_id,
+            "abandoned_at": self.abandoned_at,
+            "last_activity_at": self.last_activity_at,
+            "metadata": dict(self.metadata),
+        }
+
+    @property
+    def unanswered_follow_ups(self) -> List[PlanningSessionFollowUp]:
+        return [follow_up for follow_up in self.follow_ups if follow_up.status == "pending"]
+
+    @property
+    def latest_revision(self) -> Optional[PlanningSessionDraftRevision]:
+        if not self.draft_revisions:
+            return None
+        return self.draft_revisions[-1]
 
 
 def clone_mapping(value: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
