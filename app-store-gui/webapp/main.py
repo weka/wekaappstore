@@ -490,12 +490,27 @@ def build_structured_plan_preview(
 ) -> Dict[str, Any]:
     correlation_id = correlation_id or _new_correlation_id()
     working_payload = copy.deepcopy(payload)
+    resolved_fit_findings = None
     if inspection_snapshot is not None:
-        working_payload["fit_findings"] = build_fit_findings_from_inspection(
-            inspection_snapshot=inspection_snapshot,
-            required_domains=required_domains,
-            correlation_id=correlation_id,
-        )
+        try:
+            resolved_fit_findings = build_fit_findings_from_inspection(
+                inspection_snapshot=inspection_snapshot,
+                required_domains=required_domains,
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:
+            return {
+                "valid": False,
+                "errors": [build_stage_error("inspection", exc, correlation_id=correlation_id)],
+                "warnings": [],
+                "compiled_document": None,
+                "yaml": None,
+                "correlation_id": correlation_id,
+                "failure_stage": "inspection",
+                "inspection_snapshot": inspection_snapshot,
+                "fit_findings": None,
+            }
+        working_payload["fit_findings"] = resolved_fit_findings
 
     validation = validate_structured_plan(working_payload)
     if not validation.valid or validation.plan is None:
@@ -508,6 +523,7 @@ def build_structured_plan_preview(
             "correlation_id": correlation_id,
             "failure_stage": "validation",
             "inspection_snapshot": inspection_snapshot,
+            "fit_findings": resolved_fit_findings,
         }
 
     try:
@@ -523,6 +539,7 @@ def build_structured_plan_preview(
             "correlation_id": correlation_id,
             "failure_stage": "yaml_generation",
             "inspection_snapshot": inspection_snapshot,
+            "fit_findings": resolved_fit_findings,
         }
     return {
         "valid": True,
@@ -533,6 +550,7 @@ def build_structured_plan_preview(
         "correlation_id": correlation_id,
         "failure_stage": None,
         "inspection_snapshot": inspection_snapshot,
+        "fit_findings": resolved_fit_findings,
     }
 
 

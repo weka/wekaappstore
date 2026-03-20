@@ -22,6 +22,9 @@ SUPPORTED_FIT_STATUSES = frozenset({"assumed-fit", "fit", "blocked"})
 SUPPORTED_INSPECTION_DOMAIN_STATUSES = frozenset(
     {"complete", "partial", "unavailable", "not-required"}
 )
+SUPPORTED_FAILURE_STAGES = frozenset(
+    {"inspection", "validation", "yaml_generation", "apply_handoff"}
+)
 
 
 @dataclass(slots=True)
@@ -179,6 +182,17 @@ class FitFindings:
                 None if self.inspection_snapshot is None else self.inspection_snapshot.to_dict()
             ),
         }
+
+
+@dataclass(slots=True)
+class StageFailure:
+    stage: str
+    message: str
+    correlation_id: Optional[str] = None
+    code: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Optional[str]]:
+        return asdict(self)
 
 
 @dataclass(slots=True)

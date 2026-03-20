@@ -17,6 +17,7 @@ from .models import (
     NormalizationWarning,
     PlanValidationError,
     ReadinessCheckPlan,
+    StageFailure,
     StructuredPlan,
     UnresolvedQuestion,
     ValidationResult,
@@ -37,6 +38,14 @@ from .apply_gateway import (
     apply_yaml_documents_with_namespace,
     apply_yaml_file_with_namespace,
 )
+from .inspection_tools import (
+    SUPPORTED_FAILURE_STAGES,
+    SUPPORTED_INSPECTION_INTENTS,
+    PlanningInspectionTools,
+    build_stage_error,
+    derive_fit_findings_from_snapshot,
+    merge_inspection_results,
+)
 
 __all__ = [
     "ApplyGateway",
@@ -46,7 +55,9 @@ __all__ = [
     "SUPPORTED_BLUEPRINT_FAMILIES",
     "SUPPORTED_CRDS_STRATEGIES",
     "SUPPORTED_FIT_STATUSES",
+    "SUPPORTED_FAILURE_STAGES",
     "SUPPORTED_INSPECTION_DOMAIN_STATUSES",
+    "SUPPORTED_INSPECTION_INTENTS",
     "SUPPORTED_READINESS_CHECK_TYPES",
     "ComponentPlan",
     "FitFindings",
@@ -60,10 +71,12 @@ __all__ = [
     "PlanCompilationError",
     "PlanValidationError",
     "ReadinessCheckPlan",
+    "StageFailure",
     "StructuredPlan",
     "UnresolvedQuestion",
     "ValidationResult",
     "ValuesFileReference",
+    "PlanningInspectionTools",
     "compile_plan_to_wekaappstore",
     "compile_plan_to_yaml",
     "render_wekaappstore_yaml",
@@ -72,4 +85,7 @@ __all__ = [
     "apply_yaml_content_with_namespace",
     "apply_yaml_documents_with_namespace",
     "apply_yaml_file_with_namespace",
+    "build_stage_error",
+    "derive_fit_findings_from_snapshot",
+    "merge_inspection_results",
 ]
