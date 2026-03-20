@@ -250,3 +250,99 @@ def test_response_depth_get_crd_schema() -> None:
     assert isinstance(result["examples"], list)
     for example in result["examples"]:
         assert isinstance(example, str), "examples must contain strings, not nested objects"
+
+
+# ---------------------------------------------------------------------------
+# validate_yaml depth test
+# ---------------------------------------------------------------------------
+
+
+def test_response_depth_validate_yaml() -> None:
+    """validate_yaml response has no value requiring >2 key traversals."""
+    from tools.validate_yaml import _validate_yaml_impl
+
+    valid_yaml = """
+apiVersion: warp.io/v1alpha1
+kind: WekaAppStore
+metadata:
+  name: test-app
+spec:
+  helmChart:
+    repository: https://charts.example.com
+    name: my-app
+    version: 1.0.0
+"""
+    result = _validate_yaml_impl(valid_yaml)
+    assert result["valid"] is True
+    check_depth(result, max_depth=2)
+
+
+# ---------------------------------------------------------------------------
+# apply depth test
+# ---------------------------------------------------------------------------
+
+
+def test_response_depth_apply() -> None:
+    """apply response has no value requiring >2 key traversals.
+
+    Uses confirmed=False to get structured error without needing mocked K8s.
+    """
+    from tools.apply_tool import _apply_impl
+
+    result = _apply_impl(
+        yaml_text="apiVersion: warp.io/v1alpha1\nkind: WekaAppStore\n",
+        namespace="default",
+        confirmed=False,
+    )
+    assert result["applied"] is False
+    assert result["error"] == "approval_required"
+    check_depth(result, max_depth=2)
+
+
+# ---------------------------------------------------------------------------
+# status depth test
+# ---------------------------------------------------------------------------
+
+
+def test_response_depth_status() -> None:
+    """status response has no value requiring >2 key traversals.
+
+    conditions[0].type = depth 2 (conditions=list->dict->str): OK.
+    component_status[0].name = depth 2: OK.
+    """
+    from tools.status_tool import _status_impl
+
+    mock_api = MagicMock()
+    mock_api.get_namespaced_custom_object.return_value = {
+        "metadata": {"name": "test-app", "namespace": "default"},
+        "spec": {},
+        "status": {
+            "releaseStatus": "deployed",
+            "releaseName": "test-app-release",
+            "releaseVersion": 1,
+            "appStackPhase": "Ready",
+            "conditions": [
+                {
+                    "type": "Ready",
+                    "status": "True",
+                    "reason": "ReconcileSuccess",
+                    "message": "All components healthy",
+                    "lastTransitionTime": "2026-03-20T06:00:00Z",
+                }
+            ],
+            "componentStatus": [
+                {
+                    "name": "nginx",
+                    "phase": "Ready",
+                    "releaseName": "nginx-release",
+                    "releaseVersion": 1,
+                    "message": "",
+                    "lastTransitionTime": "2026-03-20T06:00:00Z",
+                }
+            ],
+        },
+    }
+
+    result = _status_impl(name="test-app", namespace="default", custom_objects_api=mock_api)
+    assert result["found"] is True
+    check_depth(result, max_depth=2)

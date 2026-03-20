@@ -22,9 +22,11 @@ def test_mcp_server_name():
     assert server.mcp.name == "weka-app-store-mcp"
 
 
-def test_server_lists_5_tools():
-    """MCP server has exactly 5 tools registered with correct names."""
+def test_server_lists_8_tools():
+    """MCP server has exactly 8 tools registered with correct names."""
+    import importlib
     import server
+    importlib.reload(server)
 
     tools = asyncio.run(server.mcp.list_tools())
     tool_names = {t.name for t in tools}
@@ -35,10 +37,13 @@ def test_server_lists_5_tools():
         "list_blueprints",
         "get_blueprint",
         "get_crd_schema",
+        "validate_yaml",
+        "apply",
+        "status",
     }
 
-    assert len(tools) == 5, (
-        f"Expected 5 tools, got {len(tools)}: {sorted(tool_names)}"
+    assert len(tools) == 8, (
+        f"Expected 8 tools, got {len(tools)}: {sorted(tool_names)}"
     )
     assert tool_names == expected, (
         f"Tool names mismatch.\nExpected: {sorted(expected)}\nGot: {sorted(tool_names)}"
