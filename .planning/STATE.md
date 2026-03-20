@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-last_updated: "2026-03-20T03:22:24.332Z"
+last_updated: "2026-03-20T03:37:22.712Z"
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 12
-  completed_plans: 10
+  completed_plans: 11
 ---
 
 # STATE.md
 
 **Initialized:** 2026-03-20
-**Current status:** Phase 3 plan 02 complete
+**Current status:** Phase 3 plan 03 complete
 
 ## Project Reference
 
@@ -36,9 +36,9 @@ See: `.planning/PROJECT.md` (updated 2026-03-20)
 ## Current Execution Position
 
 - Current phase: `03-conversational-planning-sessions`
-- Current plan: `03-03`
-- Completed plans this phase: `03-01`, `03-02`
-- Last completed plan: `03-02`
+- Current plan: `03-04`
+- Completed plans this phase: `03-01`, `03-02`, `03-03`
+- Last completed plan: `03-03`
 
 ## Decisions
 
@@ -60,9 +60,13 @@ See: `.planning/PROJECT.md` (updated 2026-03-20)
 - [Phase 03]: Keep supported-family routing backend-owned via an explicit keyword catalog derived from repo blueprint metadata.
 - [Phase 03]: Preserve the previously matched family across follow-up turns so short answers do not re-route the session.
 - [Phase 03]: Inject the latest inspection snapshot and fit findings into every draft revision before validation.
+- [Phase 03]: Keep the first planning chat surface server-rendered in Jinja so it reuses the existing FastAPI stack and backend-owned session state.
+- [Phase 03]: Expose a planning-specific SSE endpoint that emits session-state summaries instead of reusing deployment streaming semantics.
+- [Phase 03]: Inject the planning session service through app.state in tests so route coverage stays deterministic without touching deployment paths.
 
 ## Recent Progress
 
+- Completed `03-03-PLAN.md` and wrote `.planning/phases/03-conversational-planning-sessions/03-03-SUMMARY.md`.
 - Completed `03-02-PLAN.md` and wrote `.planning/phases/03-conversational-planning-sessions/03-02-SUMMARY.md`.
 - Completed `03-01-PLAN.md` and wrote `.planning/phases/03-conversational-planning-sessions/03-01-SUMMARY.md`.
 - Completed `02-02-PLAN.md` and wrote `.planning/phases/02-cluster-and-weka-inspection-signals/02-02-SUMMARY.md`.
@@ -77,11 +81,12 @@ See: `.planning/PROJECT.md` (updated 2026-03-20)
 | Phase | Plan | Duration | Tasks | Files | Recorded |
 |-------|------|----------|-------|-------|----------|
 | 03 | 02 | 9 min | 3 | 6 | 2026-03-20T03:20:26Z |
+| 03 | 03 | 12 min | 3 | 5 | 2026-03-20T03:37:22Z |
 
 ## Session Info
 
-- Last session: `2026-03-20T03:20:26Z`
-- Stopped At: `Completed 03-02-PLAN.md`
+- Last session: `2026-03-20T03:37:22Z`
+- Stopped At: `Completed 03-03-PLAN.md`
 
 ## Latest Completed Setup
 
@@ -94,8 +99,8 @@ See: `.planning/PROJECT.md` (updated 2026-03-20)
 
 ## Next Action
 
-- Execute `03-03-PLAN.md` to expose the conversational planning service through chat-facing routes and templates.
-- Preserve the backend-owned family routing and correlation-aware inspection evidence patterns while adding the UI/API surface.
+- Execute `03-04-PLAN.md` to layer review, approval, and apply gating onto the persisted planning session flow.
+- Preserve the separation between planning-session state and preview/apply operations while exposing reviewable fit and YAML artifacts.
 
 ---
-*Last updated: 2026-03-20 after completing 03-02-PLAN.md*
+*Last updated: 2026-03-20 after completing 03-03-PLAN.md*

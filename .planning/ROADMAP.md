@@ -81,7 +81,7 @@ This roadmap adds a NemoClaw-driven planning workflow to the existing WEKA App S
 
 **Goal:** Deliver the chat-first planning workflow with follow-up turns, supported-family matching, and safe session management.
 
-**Plan progress:** 1 of 4 plans completed (`03-01`)
+**Plan progress:** 3 of 4 plans completed (`03-01`, `03-02`, `03-03`)
 
 **Requirements:**
 - CHAT-01
@@ -98,6 +98,8 @@ This roadmap adds a NemoClaw-driven planning workflow to the existing WEKA App S
 
 **Completed plan highlights:**
 - `03-01` established the typed planning-session contract, replayable local persistence seam, and deterministic restart or abandon lifecycle tests.
+- `03-02` added deterministic supported-family matching plus a backend session service that replays turns against bounded inspection evidence and stores correlation-aware draft revisions.
+- `03-03` exposed planning-session routes, a server-rendered chat workspace, a planning-specific state stream, and deterministic route coverage for create, revisit, restart, and abandon behavior.
 
 ### Phase 4: Review, Approval, And Apply Gating
 

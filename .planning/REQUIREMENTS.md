@@ -7,7 +7,7 @@
 
 ### Chat Planning
 
-- [ ] **CHAT-01**: User can start a NemoClaw planning session from the WEKA App Store UI.
+- [x] **CHAT-01**: User can start a NemoClaw planning session from the WEKA App Store UI.
 - [x] **CHAT-02**: User can submit a free-text install request in a chat-style interface.
 - [x] **CHAT-03**: User can answer follow-up questions from NemoClaw within the same planning session.
 - [x] **CHAT-04**: User can see prior prompts, agent responses, and unanswered follow-up questions for the current session.
@@ -83,7 +83,7 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CHAT-01 | Phase 3 | Pending |
+| CHAT-01 | Phase 3 | Complete |
 | CHAT-02 | Phase 3 | Complete |
 | CHAT-03 | Phase 3 | Complete |
 | CHAT-04 | Phase 3 | Complete |
@@ -124,4 +124,4 @@
 
 ---
 *Requirements defined: 2026-03-20*
-*Last updated: 2026-03-20 after completing Phase 3 plan 03-01*
+*Last updated: 2026-03-20 after completing Phase 3 plan 03-03*
