@@ -54,6 +54,11 @@ from .inspection_tools import (
     derive_fit_findings_from_snapshot,
     merge_inspection_results,
 )
+from .session_store import (
+    LocalPlanningSessionStore,
+    PlanningSessionNotFoundError,
+    PlanningSessionRepository,
+)
 
 __all__ = [
     "ApplyGateway",
@@ -104,4 +109,7 @@ __all__ = [
     "build_stage_error",
     "derive_fit_findings_from_snapshot",
     "merge_inspection_results",
+    "LocalPlanningSessionStore",
+    "PlanningSessionNotFoundError",
+    "PlanningSessionRepository",
 ]
