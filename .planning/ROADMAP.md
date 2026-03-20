@@ -99,9 +99,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — MCP server scaffold, test harness, and inspection tools (inspect_cluster + inspect_weka)
-- [ ] 06-02-PLAN.md — Blueprint catalog tools (list_blueprints + get_blueprint)
-- [ ] 06-03-PLAN.md — CRD schema tool (get_crd_schema) and cross-tool integration validation
+- [x] 06-01-PLAN.md — MCP server scaffold, test harness, and inspection tools (inspect_cluster + inspect_weka)
+- [x] 06-02-PLAN.md — Blueprint catalog tools (list_blueprints + get_blueprint)
+- [x] 06-03-PLAN.md — CRD schema tool (get_crd_schema) and cross-tool integration validation
 
 ### Phase 7: Validation, Apply, and Status Tools
 **Goal**: The remaining 3 tools are callable, the apply approval gate is enforced in tool code (not just SKILL.md), the validator works against the WekaAppStore CRD contract, and the mock harness exercises the complete inspect-validate-apply chain
@@ -112,7 +112,11 @@ Plans:
   2. `validate_yaml` accepts valid WekaAppStore YAML and rejects YAML containing v1.0-only fields (`blueprint_family`, `fit_findings`)
   3. `status` returns current deployment state of a named WekaAppStore CR
   4. The mock harness runs a scripted inspect-validate-apply loop against mocked backends without errors, including approval bypass and validation failure paths
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — validate_yaml and apply tools with unit tests
+- [ ] 07-02-PLAN.md — status tool, server wiring, mock agent harness, and integration tests
 
 ### Phase 8: SKILL.md, Agent Context, and Cleanup
 **Goal**: SKILL.md authoritatively defines the agent workflow, tool descriptions are tuned based on harness evidence, the OpenClaw registration config is generated, and all deprecated v1.0 backend-brain files are deleted from the repo
@@ -150,7 +154,7 @@ v2.0 phases execute in numeric order: 6 → 7 → 8 → 9
 | 4. Review, Approval, And Apply Gating | v1.0 | -/- | Complete | 2026-03-20 |
 | 5. Maintainer Draft Authoring And Test Hardening | v1.0 | -/- | Complete | 2026-03-20 |
 | 6. MCP Scaffold and Read-Only Tools | 3/3 | Complete   | 2026-03-20 | - |
-| 7. Validation, Apply, and Status Tools | v2.0 | 0/TBD | Not started | - |
+| 7. Validation, Apply, and Status Tools | v2.0 | 0/2 | Not started | - |
 | 8. SKILL.md, Agent Context, and Cleanup | v2.0 | 0/TBD | Not started | - |
 | 9. Deployment and Registration | v2.0 | 0/TBD | Not started | - |
 
