@@ -12,7 +12,6 @@ def test_harness_happy_path():
 
     mock_apply_deps, mock_apply_ops = build_mock_k8s_deps(apply_should_succeed=True)
     mock_inspection_deps = build_mock_inspection_deps()
-    mock_status_api = mock_apply_deps.custom_objects_api_factory(None)
 
     results = run_happy_path(mock_inspection_deps, mock_apply_deps, mock_apply_ops)
 
@@ -24,8 +23,12 @@ def test_harness_happy_path():
     assert results["apply"]["applied"] is True, (
         f"Expected apply applied=true, got: {results['apply']}"
     )
+    # status step must find the resource
+    assert results["status"]["found"] is True, (
+        f"Expected status found=true, got: {results['status']}"
+    )
     # No exceptions during full chain
-    assert "error" not in results or results.get("error") is None
+    assert results.get("error") is None
 
 
 def test_harness_approval_bypass():
@@ -57,3 +60,28 @@ def test_harness_validation_failure():
     assert "v1_only_field" in error_codes, (
         f"Expected 'v1_only_field' error code, got errors: {result.get('errors')}"
     )
+
+
+def test_select_tool_returns_correct_tool():
+    """select_tool matches intent keywords to the correct tool name."""
+    from harness.mock_agent import build_tool_registry, select_tool
+
+    registry = build_tool_registry()
+
+    # inspect_cluster: first, cluster resources, CPU
+    assert select_tool(["cluster", "resources", "first", "cpu"], registry) == "inspect_cluster"
+
+    # inspect_weka: WEKA storage filesystem
+    assert select_tool(["weka", "storage", "filesystem", "capacity"], registry) == "inspect_weka"
+
+    # list_blueprints: catalog of blueprints
+    assert select_tool(["list", "blueprints", "catalog"], registry) == "list_blueprints"
+
+    # validate_yaml: structurally valid, apiVersion checks, errors list
+    assert select_tool(["structurally valid", "apiversion", "errors"], registry) == "validate_yaml"
+
+    # apply: apply manifest confirmed
+    assert select_tool(["apply", "manifest", "confirmed"], registry) == "apply"
+
+    # status: after apply monitor deployment
+    assert select_tool(["status", "after apply", "monitor", "deployment"], registry) == "status"

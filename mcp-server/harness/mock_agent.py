@@ -4,7 +4,13 @@ Calls tool implementation functions directly with mocked K8s dependencies.
 No MCP stdio protocol needed — tests the tool logic, not framing.
 No network calls are made — all K8s dependencies are fully mocked.
 
+Tool selection uses description-based keyword matching (select_tool), proving
+that tool descriptions contain sufficient sequencing guidance for an agent to
+choose the right tool without hardcoded routing.
+
 Exports:
+  - build_tool_registry(): Build {tool_name: {description, callable}} registry
+  - select_tool(intent_keywords, registry): Match keywords to tool descriptions
   - build_mock_k8s_deps(): Build mocked ApplyGatewayDependencies + ops_log
   - build_mock_inspection_deps(): Build pre-built inspection snapshot dicts
   - run_happy_path(): Full inspect -> list -> get -> validate -> apply -> status chain
@@ -68,6 +74,181 @@ spec:
     name: my-app
     version: 1.0.0
 """.strip()
+
+
+# ---------------------------------------------------------------------------
+# Description-based tool registry
+# ---------------------------------------------------------------------------
+
+
+class _RegistryCapture:
+    """Minimal MCP stub that captures tool registrations for registry building.
+
+    When register_*(mcp) calls @mcp.tool(), this stub captures the decorated
+    function's name and docstring into self.captured.
+    """
+
+    def __init__(self) -> None:
+        self.captured: dict[str, str] = {}
+
+    def tool(self):
+        """Return a decorator that records the function's name and docstring."""
+        def decorator(fn):
+            self.captured[fn.__name__] = (fn.__doc__ or "").strip()
+            return fn
+        return decorator
+
+
+def build_tool_registry(inspection_deps: dict | None = None) -> dict[str, dict]:
+    """Build a registry mapping tool names to their descriptions and callables.
+
+    Descriptions are extracted by calling each register_* function with a
+    lightweight MCP stub that captures @mcp.tool() registrations. This ensures
+    the descriptions in the registry exactly match the docstrings in tools/*.py.
+
+    The callable for each tool wraps the corresponding _impl() or flatten_*()
+    function with any required injected dependencies.
+
+    Args:
+        inspection_deps: Dict from build_mock_inspection_deps(), required for
+            inspect_cluster and inspect_weka callables. If None, those callables
+            will raise NotImplementedError.
+
+    Returns:
+        Dict of {tool_name: {"description": str, "callable": callable}}
+    """
+    from tools.inspect_cluster import register_inspect_cluster
+    from tools.inspect_weka import register_inspect_weka
+    from tools.blueprints import register_blueprint_tools
+    from tools.crd_schema import register_crd_schema
+    from tools.validate_yaml import register_validate_yaml
+    from tools.apply_tool import register_apply
+    from tools.status_tool import register_status
+
+    # Capture descriptions from all register_* functions
+    cap = _RegistryCapture()
+    register_inspect_cluster(cap)
+    register_inspect_weka(cap)
+    register_blueprint_tools(cap)
+    register_crd_schema(cap)
+    register_validate_yaml(cap)
+    register_apply(cap)
+    register_status(cap)
+
+    descriptions = cap.captured  # {tool_name: description_str}
+
+    # Build callables that use injected deps where needed
+    def _callable_inspect_cluster() -> dict:
+        if inspection_deps is None:
+            raise NotImplementedError("inspection_deps required for inspect_cluster")
+        return flatten_inspect_cluster_for_mcp(inspection_deps["cluster_snapshot"])
+
+    def _callable_inspect_weka() -> dict:
+        if inspection_deps is None:
+            raise NotImplementedError("inspection_deps required for inspect_weka")
+        return flatten_inspect_weka_for_mcp(inspection_deps["weka_snapshot"])
+
+    def _callable_list_blueprints() -> dict:
+        entries = scan_blueprints(SAMPLE_BLUEPRINTS_DIR)
+        return {
+            "count": len(entries),
+            "blueprints": [flatten_blueprint_summary(e) for e in entries],
+            "warnings": [],
+        }
+
+    def _callable_get_blueprint(name: str) -> dict:
+        entries = scan_blueprints(SAMPLE_BLUEPRINTS_DIR)
+        for entry in entries:
+            if entry["manifest"].get("metadata", {}).get("name", "") == name:
+                return flatten_blueprint_detail(entry)
+        return {"error": "Blueprint not found", "requested_name": name, "available_names": []}
+
+    def _callable_get_crd_schema() -> dict:
+        # Return a minimal schema response without live K8s
+        return {
+            "captured_at": "2026-03-20T06:00:00Z",
+            "group": "warp.io",
+            "version": "v1alpha1",
+            "kind": "WekaAppStore",
+            "schema": {"type": "object", "properties": {}},
+            "examples": [],
+            "warnings": ["Schema read from mock — no live cluster"],
+        }
+
+    def _callable_validate_yaml(yaml_text: str) -> dict:
+        return _validate_yaml_impl(yaml_text)
+
+    def _callable_apply(yaml_text: str, namespace: str, confirmed: bool,
+                        apply_gateway_deps: ApplyGatewayDependencies | None = None) -> dict:
+        return _apply_impl(
+            yaml_text=yaml_text,
+            namespace=namespace,
+            confirmed=confirmed,
+            apply_gateway_deps=apply_gateway_deps,
+        )
+
+    def _callable_status(name: str, namespace: str = "default",
+                         custom_objects_api=None) -> dict:
+        return _status_impl(name=name, namespace=namespace, custom_objects_api=custom_objects_api)
+
+    callables = {
+        "inspect_cluster": _callable_inspect_cluster,
+        "inspect_weka": _callable_inspect_weka,
+        "list_blueprints": _callable_list_blueprints,
+        "get_blueprint": _callable_get_blueprint,
+        "get_crd_schema": _callable_get_crd_schema,
+        "validate_yaml": _callable_validate_yaml,
+        "apply": _callable_apply,
+        "status": _callable_status,
+    }
+
+    registry = {}
+    for name, description in descriptions.items():
+        registry[name] = {
+            "description": description,
+            "callable": callables.get(name),
+        }
+
+    return registry
+
+
+def select_tool(intent_keywords: list[str], registry: dict) -> str:
+    """Select a tool name by matching intent keywords against tool descriptions.
+
+    Performs simple case-insensitive substring matching: counts how many keywords
+    appear in each tool's description, then returns the tool with the most matches.
+
+    This is intentionally simple — it proves that tool descriptions contain the
+    right vocabulary for tool selection, not that NLP-based routing works.
+
+    Args:
+        intent_keywords: List of lowercase keywords expressing the intent
+            (e.g., ["cluster", "resources", "cpu"] for inspect_cluster).
+        registry: Dict from build_tool_registry().
+
+    Returns:
+        Tool name string of the best-matching tool.
+
+    Raises:
+        ValueError: If registry is empty or no tool matches any keyword.
+    """
+    if not registry:
+        raise ValueError("Tool registry is empty")
+
+    scores: dict[str, int] = {}
+    for tool_name, entry in registry.items():
+        description_lower = entry["description"].lower()
+        score = sum(1 for kw in intent_keywords if kw.lower() in description_lower)
+        scores[tool_name] = score
+
+    best_tool = max(scores, key=lambda t: scores[t])
+    if scores[best_tool] == 0:
+        raise ValueError(
+            f"No tool matched any of the keywords: {intent_keywords}. "
+            f"Available tools: {list(registry.keys())}"
+        )
+
+    return best_tool
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +453,7 @@ def run_happy_path(
 ) -> dict:
     """Run the complete inspect -> list -> get -> validate -> apply -> status chain.
 
+    Uses description-based tool selection via select_tool() for each step.
     All steps use mocked dependencies — no network calls.
 
     Args:
@@ -283,33 +465,42 @@ def run_happy_path(
         Dict with results from each step: inspect_cluster, inspect_weka,
         list_blueprints, get_blueprint, validate, apply, status.
     """
-    # Step 1: inspect_cluster (use pre-built snapshot, flatten it)
-    cluster_result = flatten_inspect_cluster_for_mcp(mock_inspection_deps["cluster_snapshot"])
+    registry = build_tool_registry(inspection_deps=mock_inspection_deps)
 
-    # Step 2: inspect_weka (use pre-built snapshot, flatten it)
-    weka_result = flatten_inspect_weka_for_mcp(mock_inspection_deps["weka_snapshot"])
+    # Step 1: inspect_cluster — intent: understand cluster resources first
+    tool_name = select_tool(["cluster", "resources", "first", "cpu", "memory"], registry)
+    assert tool_name == "inspect_cluster", f"Expected inspect_cluster, got {tool_name}"
+    cluster_result = registry[tool_name]["callable"]()
 
-    # Step 3: list_blueprints (use fixture dir)
-    entries = scan_blueprints(SAMPLE_BLUEPRINTS_DIR)
-    blueprints_result = {
-        "count": len(entries),
-        "blueprints": [flatten_blueprint_summary(e) for e in entries],
-        "warnings": [],
-    }
+    # Step 2: inspect_weka — intent: check WEKA storage capacity
+    tool_name = select_tool(["weka", "storage", "capacity", "filesystem"], registry)
+    assert tool_name == "inspect_weka", f"Expected inspect_weka, got {tool_name}"
+    weka_result = registry[tool_name]["callable"]()
 
-    # Step 4: get_blueprint (first blueprint from list)
-    assert entries, "Need at least one blueprint fixture for happy path"
-    first_entry = entries[0]
-    blueprint_result = flatten_blueprint_detail(first_entry)
+    # Step 3: list_blueprints — intent: discover available blueprints catalog
+    tool_name = select_tool(["list", "blueprints", "catalog", "available"], registry)
+    assert tool_name == "list_blueprints", f"Expected list_blueprints, got {tool_name}"
+    blueprints_result = registry[tool_name]["callable"]()
 
-    # Step 5: validate_yaml
-    validate_result = _validate_yaml_impl(SAMPLE_VALID_YAML)
+    # Step 4: get_blueprint — intent: get full blueprint specification detail
+    assert blueprints_result["count"] > 0, "Need at least one blueprint fixture for happy path"
+    first_bp_name = blueprints_result["blueprints"][0]["name"]
+    tool_name = select_tool(["get_blueprint", "full", "specification", "components"], registry)
+    assert tool_name == "get_blueprint", f"Expected get_blueprint, got {tool_name}"
+    blueprint_result = registry[tool_name]["callable"](name=first_bp_name)
+
+    # Step 5: validate_yaml — intent: validate YAML structure, errors list, apiVersion check
+    tool_name = select_tool(["structurally valid", "apiversion", "errors", "v1.0-only"], registry)
+    assert tool_name == "validate_yaml", f"Expected validate_yaml, got {tool_name}"
+    validate_result = registry[tool_name]["callable"](yaml_text=SAMPLE_VALID_YAML)
     assert validate_result["valid"] is True, (
         f"Happy path YAML must be valid, got: {validate_result['errors']}"
     )
 
-    # Step 6: apply (confirmed=True, mocked deps)
-    apply_result = _apply_impl(
+    # Step 6: apply — intent: apply manifest to cluster with confirmation
+    tool_name = select_tool(["apply", "manifest", "confirmed", "deploy"], registry)
+    assert tool_name == "apply", f"Expected apply, got {tool_name}"
+    apply_result = registry[tool_name]["callable"](
         yaml_text=SAMPLE_VALID_YAML,
         namespace="default",
         confirmed=True,
@@ -319,9 +510,11 @@ def run_happy_path(
         f"Happy path apply must succeed, got: {apply_result}"
     )
 
-    # Step 7: status (use the mock CustomObjectsApi from apply deps)
+    # Step 7: status — intent: monitor deployment status after apply
+    tool_name = select_tool(["status", "deployment", "after apply", "monitor"], registry)
+    assert tool_name == "status", f"Expected status, got {tool_name}"
     mock_status_api = mock_apply_deps.custom_objects_api_factory(None)
-    status_result = _status_impl(
+    status_result = registry[tool_name]["callable"](
         name="test-app",
         namespace="default",
         custom_objects_api=mock_status_api,
@@ -344,6 +537,8 @@ def run_approval_bypass(
 ) -> dict:
     """Verify apply without confirmed=True returns structured error, no CR created.
 
+    Uses description-based tool selection to find the apply tool.
+
     Args:
         mock_apply_deps: ApplyGatewayDependencies from build_mock_k8s_deps().
         mock_apply_ops: ops_log list from build_mock_k8s_deps() — asserted empty after call.
@@ -351,7 +546,13 @@ def run_approval_bypass(
     Returns:
         apply result dict with applied=false and error='approval_required'.
     """
-    result = _apply_impl(
+    registry = build_tool_registry()
+
+    # Select apply tool by description keywords
+    tool_name = select_tool(["apply", "manifest", "confirmed", "cluster"], registry)
+    assert tool_name == "apply", f"Expected apply tool, got {tool_name}"
+
+    result = registry[tool_name]["callable"](
         yaml_text=SAMPLE_VALID_YAML,
         namespace="default",
         confirmed=False,
@@ -374,11 +575,19 @@ def run_approval_bypass(
 def run_validation_failure() -> dict:
     """Verify validate_yaml rejects v1.0 YAML before apply is called.
 
+    Uses description-based tool selection to find the validate_yaml tool.
+
     Returns:
         validate_yaml result dict with valid=false and v1_only_field errors.
         Apply is NOT called in this scenario.
     """
-    result = _validate_yaml_impl(SAMPLE_V1_YAML)
+    registry = build_tool_registry()
+
+    # Select validate_yaml tool by description keywords unique to that tool
+    tool_name = select_tool(["structurally valid", "apiversion", "errors", "v1.0-only"], registry)
+    assert tool_name == "validate_yaml", f"Expected validate_yaml tool, got {tool_name}"
+
+    result = registry[tool_name]["callable"](yaml_text=SAMPLE_V1_YAML)
 
     assert result["valid"] is False, (
         f"Validation failure: v1.0 YAML must be rejected, got valid=true"
