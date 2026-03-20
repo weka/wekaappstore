@@ -1,446 +1,301 @@
-# Stack Research: NemoClaw Planning Layer
-
-**Date:** 2026-03-20
-**Scope:** Standard 2026 stack for adding NemoClaw-driven conversational planning, bounded cluster inspection, and capacity-aware blueprint installation to this existing WEKA App Store codebase.
-
-## Executive Recommendation
-
-Use a **Python-native planning layer inside the existing FastAPI service**:
-
-- **Model/runtime edge:** NVIDIA NIM behind an OpenAI-compatible API
-- **Agent orchestration:** NVIDIA NeMo Agent Toolkit (`nvidia-nat`)
-- **Safety/policy rails:** NVIDIA NeMo Guardrails
-- **Typed contracts:** Pydantic v2 models for tool IO, plan IO, and YAML compilation
-- **Conversation transport:** FastAPI endpoints plus SSE streaming
-- **Session persistence:** PostgreSQL + SQLAlchemy 2 + Alembic
-- **Cluster inspection:** Kubernetes Python client + `kr8s`, Metrics API (`metrics.k8s.io`), Node allocatable data, NVIDIA GPU Operator/NFD labels, and DCGM exporter when present
-- **WEKA inspection:** Thin typed WEKA REST client in the FastAPI app
-- **Execution boundary:** Keep apply/mutation in the existing backend and `WekaAppStore` operator path
-
-This is the best fit for this repo because the current architecture is already:
-
-- FastAPI + Jinja + browser `fetch`/`EventSource`
-- Python-only in both GUI and operator
-- CRD/operator-driven for actual cluster mutation
-- light on durable backend infrastructure today
-
-## Standard Stack
-
-| Layer | Use | Why it fits this repo | Confidence |
-|---|---|---|---|
-| LLM serving | **NVIDIA NIM** via `/v1/chat/completions` or `/v1/responses` | Keeps NemoClaw/NVIDIA alignment while preserving a standard API edge and future swapability | High |
-| Agent runtime | **NeMo Agent Toolkit (`nvidia-nat`)** | NVIDIA-native, framework-agnostic, MCP-capable, and avoids bolting a second agent stack onto an existing Python app | Medium-High |
-| Guardrails | **NeMo Guardrails** | Topic/tool/output rails belong in policy code, not prompts; strong fit for bounded inspection and fail-closed planning | High |
-| Data contracts | **Pydantic v2** | Best fit for this Python brownfield; use one schema system across API, tools, validation, and YAML compiler | High |
-| API/UI transport | **FastAPI + SSE** | Existing app already uses SSE and server-rendered pages; lowest-risk way to add chat streaming and status updates | High |
-| Session store | **PostgreSQL + SQLAlchemy 2 + Alembic** | Durable multi-turn chat, approval checkpoints, audit logs, and resumable planning need storage not present today | Medium-High |
-| Cluster inspection | **Kubernetes Python client + `kr8s` + Metrics API + node labels/allocatable** | Reuses repo libraries and avoids shelling out from the planner | High |
-| GPU inspection | **NVIDIA GPU Operator/NFD labels + DCGM exporter when available** | Needed for GPU model and memory-aware fit checks; Metrics API alone is not enough | High |
-| WEKA inspection | **Typed internal WEKA REST adapter** | Keep WEKA calls deterministic and auditable inside the existing backend | High |
-| Plan compilation | **Deterministic compiler from structured plan -> `WekaAppStore` spec/YAML** | Preserves operator contract and keeps YAML generation out of the model trust boundary | High |
-| Async/background work | **FastAPI background tasks first; introduce Temporal only if v2 durability demands it** | Separate workflow infra is premature for this repo today | Medium |
-| Observability | **OpenTelemetry traces/log correlation, export to Langfuse/Phoenix/OTel backend if desired** | Gives request-to-tool-to-plan auditability without committing the repo to a single vendor UI | Medium |
-
-## Prescriptive Architecture
-
-### 1. Keep one execution model
-
-Use NemoClaw as a planner only. Do **not** let it apply manifests, run `helm`, or run `kubectl`.
+# Stack Research
 
-Recommended boundary:
-
-1. User chats with FastAPI
-2. FastAPI planning service calls Nemo/NAT tools
-3. NAT returns a **structured install plan**
-4. Backend validates and compiles the plan into `WekaAppStore`
-5. User reviews plan + YAML
-6. Existing backend apply path submits the CR
-7. Existing Kopf operator reconciles it
+**Domain:** MCP server in Python — WEKA App Store OpenClaw tool integration
+**Researched:** 2026-03-20
+**Confidence:** MEDIUM-HIGH — MCP SDK verified via PyPI/GitHub (HIGH); OpenClaw stdio config format verified via community docs (MEDIUM); NemoClaw is alpha as of March 16 2026, official config schema not yet published (LOW on NemoClaw-specific details)
 
-Why this fits the repo:
+---
 
-- The current product already has a safe CRD/operator execution path
-- The PRD explicitly keeps mutation authority out of NemoClaw
-- The operator already knows how to reconcile `appStack.components[]`
+## Context: This Is A Brownfield Addition
 
-Confidence: High
+The existing validated stack is **not changing**. Everything below is what needs to be added for the MCP server milestone only.
 
-### 2. Add a planning subsystem inside the FastAPI app, not a new microservice
+**Existing stack (already in `requirements.txt`, do not re-research):**
+- `fastapi>=0.111.0`, `uvicorn[standard]>=0.30.0`, `Jinja2>=3.1.4` — web UI (keep as-is)
+- `kubernetes>=27.0.0` — K8s API client (reused by MCP tool implementations)
+- `PyYAML>=6.0.1` — YAML parsing (reused by validate and apply tools)
+- `pytest>=8.0.0` — test runner (extended with async support)
 
-Create a bounded planning package in the GUI service:
+**Existing code to reuse as tool implementations (do not duplicate):**
+- `webapp/inspection/cluster.py` — `collect_cluster_inspection()` → behind `weka_appstore_inspect_cluster` tool
+- `webapp/inspection/weka.py` — WEKA inspection → behind `weka_appstore_inspect_weka` tool
+- `webapp/planning/apply_gateway.py` — `ApplyGateway` → behind `weka_appstore_apply` tool
+- `webapp/planning/validator.py` — validation logic → behind `weka_appstore_validate_yaml` tool
 
-- `app-store-gui/webapp/planning/api.py`
-- `app-store-gui/webapp/planning/service.py`
-- `app-store-gui/webapp/planning/models.py`
-- `app-store-gui/webapp/planning/tools/`
-- `app-store-gui/webapp/planning/compiler.py`
-- `app-store-gui/webapp/planning/store.py`
+---
 
-Service boundaries:
+## Recommended Stack
 
-- **Conversation API**
-  - create session
-  - append user turn
-  - stream assistant/tool events over SSE
-  - approve/reject plan
-- **Planner service**
-  - assembles context
-  - invokes NAT workflow
-  - records tool results
-  - emits draft plan
-- **Tool registry**
-  - cluster summary
-  - namespace/storage class inventory
-  - CPU/RAM capacity
-  - GPU inventory/memory
-  - WEKA capacity/filesystems
-  - blueprint catalog/schema lookup
-  - plan validation
-- **Compiler**
-  - structured plan -> repo-compatible `WekaAppStore` dict
-  - YAML preview rendering
-- **Store**
-  - chat turns
-  - tool snapshots
-  - plan revisions
-  - approval state
+### Core Technologies (New Additions Only)
 
-Why this fits the repo:
+| Technology | Version | Purpose | Why Recommended |
+|------------|---------|---------|-----------------|
+| `mcp` (official Python SDK) | `>=1.9,<2` | MCP server framework with `FastMCP` high-level API | Official Anthropic SDK; FastMCP is bundled inside the `mcp` package (not a separate install); provides `@mcp.tool()` decorator that auto-generates JSON schema from Python type hints; stdio transport is the default and what OpenClaw uses to spawn the server process |
+| `mcp[cli]` extra | same as `mcp` | MCP Inspector dev tool for manual tool testing | The `cli` extra installs the `mcp dev` and `mcp run` commands; `mcp dev server.py` opens a browser-based inspector to call tools interactively without writing any test code first — essential for iterating on tool shapes before writing automated tests |
 
-- avoids cross-service auth and deployment complexity
-- keeps planning close to existing blueprint/application logic
-- preserves Helm chart simplicity for v1
+**Version pin rationale:** Pin `<2` because v2 is pre-alpha on the `main` branch as of March 2026. v1.x is the stable release. Latest confirmed stable on PyPI: `1.9.4` (June 2025). The `mcp` package requires Python >=3.10.
 
-Confidence: High
+### Supporting Libraries (New Additions Only)
 
-### 3. Use NVIDIA NIM as the model edge, but code to the standard API surface
+| Library | Version | Purpose | When to Use |
+|---------|---------|---------|-------------|
+| `pytest-asyncio` | `>=1.3.0` | Async test execution for MCP tool tests | Required because FastMCP's in-memory test client calls are async coroutines; the existing test suite uses only synchronous pytest; latest stable: 1.3.0 (November 2025) |
 
-Recommendation:
+**Note on event loop management:** The `mcp` package pulls in `anyio` as a transitive dependency. Do not install anyio explicitly unless pinning a version. Configure `pytest-asyncio` in strict mode (explicit `@pytest.mark.asyncio` markers) to avoid the known conflict where pytest-asyncio auto mode and anyio's pytest plugin both attempt to own the event loop.
 
-- Run NemoClaw through **NVIDIA NIM** if available
-- Wrap it behind an internal `PlannerLLMClient`
-- Standardize on OpenAI-compatible request/response envelopes
+### Development Tools
 
-Why:
+| Tool | Purpose | Notes |
+|------|---------|-------|
+| `mcp dev <server.py>` | Opens MCP Inspector in the browser — interactive tool call UI | Installed via `mcp[cli]` extra; use before writing any automated test to verify tool schemas, argument shapes, and return values |
+| `mcp run <server.py>` | Launches the server via stdio in the terminal | Use to smoke-test the server entrypoint as OpenClaw would invoke it (spawns process, reads JSON-RPC from stdin) |
+| `unittest.mock.patch` / `pytest monkeypatch` | Mock K8s API calls in unit tests | Already available in stdlib + pytest; no new package needed; the existing codebase uses this pattern extensively (see `tests/planning/`) |
 
-- NIM exposes `/v1/chat/completions` and `/v1/responses`
-- this reduces lock-in to a vendor-specific SDK surface
-- it keeps a future fallback path open if NemoClaw packaging changes
+---
 
-Important brownfield guidance:
+## Installation
 
-- The repo should not leak NIM-specific payload shapes through route handlers
-- Only the planning adapter should know which model is actually behind the endpoint
+Add to `app-store-gui/requirements.txt` (or a separate `mcp-server/requirements.txt` if the MCP server becomes a standalone deployment unit):
 
-Confidence: High
+```
+# MCP server
+mcp[cli]>=1.9,<2
 
-### 4. Use NeMo Agent Toolkit, but keep the workflow simple
+# Async test support for MCP tool tests
+pytest-asyncio>=1.3.0
+```
 
-Recommendation:
+```bash
+# Install
+pip install "mcp[cli]>=1.9,<2" "pytest-asyncio>=1.3.0"
+```
 
-- Use `nvidia-nat` for the planning loop
-- Start with a **tool-calling or reasoning agent**
-- Keep tools local/in-process in Python for v1
-- Use MCP only if tool isolation becomes a real requirement later
+---
 
-Why:
+## Tool Registration Pattern
 
-- NAT is explicitly framework-agnostic and designed to sit beside an existing stack
-- it supports MCP and observability, but does not force a full replatform
-- this repo does not need a large multi-agent graph to answer bounded install questions
+The FastMCP `@mcp.tool()` decorator is the registration mechanism. Type hints drive the JSON schema that OpenClaw sees; the docstring becomes the tool description the agent reads.
 
-Do first:
+```python
+# mcp_server/server.py
+from mcp.server.fastmcp import FastMCP
 
-- one planner agent
-- one validation pass
-- one compiler
-- one approval gate
+mcp = FastMCP("weka-app-store")
 
-Do later only if needed:
+@mcp.tool()
+def weka_appstore_inspect_cluster() -> dict:
+    """Return a bounded snapshot of Kubernetes cluster state.
 
-- agent-to-agent delegation
-- external MCP servers
-- planner/router split
+    Returns GPU inventory (model, count, memory per node), CPU allocatable vs
+    requested, RAM allocatable vs requested, namespaces, and storage classes.
+    Read-only. No cluster mutation.
+    """
+    from webapp.inspection.cluster import collect_cluster_inspection
+    return collect_cluster_inspection()
+
+@mcp.tool()
+def weka_appstore_validate_yaml(yaml_content: str) -> dict:
+    """Validate a WekaAppStore YAML document against the CRD and operator contract.
 
-Confidence: Medium-High
-
-### 5. Put safety in Guardrails and validators, not in prompts
-
-Recommendation:
-
-- Use **NeMo Guardrails** for:
-  - allowed topic scope
-  - tool allow-listing
-  - unsafe action blocking
-  - required approval gate language
-  - explanation shaping for rejection reasons
-- Pair that with deterministic Python validators
-
-Validation layers:
-
-1. tool input/output schemas
-2. plan schema validation
-3. repo/operator compatibility validation
-4. cluster/storage fit validation
-5. explicit human approval state
-
-Why this fits the repo:
-
-- existing validation is imperative and thin
-- the PRD requires fail-closed behavior
-- guardrails alone are not sufficient; they need deterministic validators behind them
-
-Confidence: High
-
-### 6. Keep the UI server-rendered and stream over SSE
-
-Recommendation:
-
-- Keep Jinja templates
-- Add a dedicated chat page for agent planning
-- Stream assistant/tool/progress events with SSE
-- Use plain browser `fetch` + `EventSource`
-
-Why this fits the repo:
-
-- the current app already uses SSE endpoints and browser `EventSource`
-- this avoids introducing React/Next/Vite build complexity into a repo that does not need it
-- chat, plan preview, and approval are all straightforward in a server-rendered UI
-
-Suggested UX pieces:
-
-- left pane: conversation
-- right pane: live cluster findings / plan draft / YAML preview
-- explicit plan states: `draft`, `validated`, `blocked`, `approved`, `applied`
-
-Confidence: High
-
-### 7. Capacity inspection should be API-first and layered
-
-Recommendation:
-
-- Use **Kubernetes API + Metrics API + vendor telemetry**
-- Do not rely on a single source for capacity
-
-Use this inspection layering:
-
-1. **Node allocatable and labels**
-   - source: core Kubernetes APIs
-   - use for schedulable ceilings and hardware classes
-2. **CPU/RAM current usage**
-   - source: `metrics.k8s.io`
-   - use for near-real-time pressure
-3. **GPU count and schedulable presence**
-   - source: `nvidia.com/gpu` allocatable/limits model
-4. **GPU model/memory**
-   - source: NFD/vendor labels, GPU Operator integrations, DCGM exporter if installed
-5. **WEKA capacity/filesystems**
-   - source: WEKA API
-
-Why:
-
-- Metrics API only gives CPU and memory
-- Kubernetes device plugins expose schedulable GPU resources, but not rich memory telemetry
-- GPU type/memory-aware planning needs vendor labels and telemetry, not just pod spec math
-
-Confidence: High
-
-### 8. Model fit assessment should use a normalized capacity snapshot
-
-Recommendation:
-
-- Build a `CapacitySnapshot` model that combines:
-  - cluster timestamp
-  - namespaces examined
-  - node inventory
-  - CPU allocatable/usage/headroom
-  - memory allocatable/usage/headroom
-  - GPU count/model/memory/free estimate
-  - WEKA total/available/filesystem inventory
-  - inspection confidence flags
-
-Then have the planner reason over the snapshot, not raw live tool calls everywhere.
-
-Why this fits the repo:
-
-- makes behavior testable
-- gives auditable evidence for every rejection
-- lets the compiler/validator reuse the same normalized view
-
-Confidence: High
-
-### 9. Persist sessions and approvals in PostgreSQL
-
-Recommendation:
-
-- Add PostgreSQL for:
-  - planning sessions
-  - chat turns
-  - tool snapshots
-  - plan revisions
-  - approvals
-  - audit events
-
-Minimal tables:
-
-- `planning_session`
-- `planning_message`
-- `planning_tool_snapshot`
-- `planning_plan_revision`
-- `planning_approval`
-- `planning_event`
-
-Why:
-
-- this feature introduces conversational state and review-before-apply
-- file or in-memory storage will become brittle immediately
-- Postgres is standard, durable, and operationally predictable
-
-Confidence: Medium-High
-
-## What To Use For Each Concern
-
-### Agent and Planning
-
-- **Use:** `nvidia-nat`
-- **Also use:** Pydantic models for every tool and every plan object
-- **Pattern:** one bounded planner workflow, not a general multi-agent platform
-- **Confidence:** Medium-High
-
-### Conversation UI
-
-- **Use:** FastAPI routes + SSE + Jinja templates + vanilla JS
-- **Pattern:** optimistic local rendering, server as source of truth
-- **Confidence:** High
-
-### Cluster Inspection
-
-- **Use:** Kubernetes Python client for typed API access
-- **Keep:** `kr8s` where it already simplifies object traversal
-- **Pattern:** read-only, bounded, timeout-controlled inspection adapters
-- **Confidence:** High
-
-### GPU Details
-
-- **Use:** NVIDIA GPU Operator/NFD labels and DCGM exporter when present
-- **Pattern:** degrade gracefully if only `nvidia.com/gpu` count is available
-- **Confidence:** High
-
-### Storage Inspection
-
-- **Use:** WEKA REST adapter with explicit request/response models
-- **Pattern:** one aggregated storage summary tool, not many tiny model-facing calls
-- **Confidence:** High
-
-### Validation and Compilation
-
-- **Use:** deterministic Python compiler + Pydantic validation
-- **Pattern:** model returns structured intent; backend owns final YAML
-- **Confidence:** High
-
-## What NOT To Use
-
-### Do not add a second frontend stack
-
-- **Do not use:** React/Next/Vite rewrite for v1
-- **Why not:** The current app is server-rendered and already streams events. A SPA rewrite adds risk without solving the core planning problem.
-- **Confidence:** High
-
-### Do not let the model execute cluster mutations
-
-- **Do not use:** model-triggered `kubectl`, `helm`, or shell tools
-- **Why not:** Directly conflicts with the PRD and the repo’s safe operator-based execution model.
-- **Confidence:** High
-
-### Do not adopt LangChain/LlamaIndex/CrewAI as a primary new dependency
-
-- **Do not use:** a second general-purpose orchestration framework on top of NAT
-- **Why not:** NAT already gives the NVIDIA-native agent/runtime layer. Doubling orchestration frameworks increases complexity and debugging surface in a repo that is currently simple.
-- **Confidence:** Medium-High
-
-### Do not use Prometheus as the primary planning API
-
-- **Do not use:** ad hoc PromQL as the main source of truth for fit checks
-- **Why not:** Prometheus is useful for observability, but the planner needs bounded, typed, permissioned capacity snapshots. Kubernetes APIs plus WEKA APIs should be authoritative; Prometheus can be supplementary.
-- **Confidence:** High
-
-### Do not use a vector database for pilot blueprint selection
-
-- **Do not use:** RAG-first retrieval over blueprint YAML for the initial release
-- **Why not:** The blueprint catalog is structured and relatively bounded. Deterministic metadata extraction is safer and easier to validate than semantic retrieval in v1.
-- **Confidence:** High
-
-### Do not introduce Temporal in v1 unless long-running resumability becomes a proven problem
-
-- **Do not use:** a workflow engine by default
-- **Why not:** It adds another stateful control-plane component. This repo is not there yet operationally. Start with Postgres-backed session state and explicit approval transitions.
-- **Confidence:** Medium
-
-## Brownfield-Specific Rationale
-
-These recommendations are grounded in the current repo shape:
-
-- The GUI is already **FastAPI + Jinja + browser JS**, so SSE chat is a natural extension.
-- The operator is already the **runtime authority**, so planning should stop at validated CR generation.
-- The repo already depends on the **Kubernetes Python client** and `kr8s`, so bounded inspection should stay Python/API-first.
-- The current codebase has **thin validation and limited tests**, so typed schemas and deterministic compilers matter more than sophisticated agent autonomy.
-- The current deployment story is **Helm-based and compact**, so adding multiple new services should be avoided until proven necessary.
-
-Confidence: High
-
-## Implementation Pattern To Standardize On
-
-Use this contract:
-
-1. `UserIntent`
-2. `CapacitySnapshot`
-3. `BlueprintCandidate`
-4. `InstallPlanDraft`
-5. `ValidatedInstallPlan`
-6. `CompiledWekaAppStoreSpec`
-7. `RenderedYAMLPreview`
-
-Planner responsibilities:
-
-- interpret user goal
-- ask follow-up questions only when required
-- select blueprint family
-- propose parameterization
-- explain fit/non-fit
-
-Backend responsibilities:
-
-- gather tool data
-- enforce schema and policy
-- score fit deterministically
-- compile YAML
-- apply only after approval
-
-Confidence: High
-
-## Sources And Notes
-
-Primary sources used for current-stack recommendations:
-
-- NVIDIA NeMo Agent Toolkit overview: framework-agnostic runtime, MCP, observability, evaluation, UI  
-  https://docs.nvidia.com/nemo/agent-toolkit/
-- NVIDIA NeMo Guardrails: programmable guardrails, rail types, tracing/OpenTelemetry support  
-  https://docs.nvidia.com/nemo/guardrails/latest/
-- NVIDIA NIM for LLMs API reference: `/v1/chat/completions`, `/v1/completions`, `/v1/responses`  
-  https://docs.nvidia.com/nim/large-language-models/latest/api-reference.html
-- FastAPI `StreamingResponse` docs for streaming server responses  
-  https://fastapi.tiangolo.com/advanced/custom-response/
-- Kubernetes resource metrics pipeline and Metrics API  
-  https://kubernetes.io/docs/tasks/debug/debug-cluster/resource-metrics-pipeline/
-- Kubernetes GPU scheduling, device plugins, and NFD-based labeling  
-  https://kubernetes.io/docs/tasks/manage-gpus/scheduling-gpus/
-- Node Feature Discovery feature labels  
-  https://kubernetes-sigs.github.io/node-feature-discovery/master/usage/features.html
-- NVIDIA GPU Operator getting started  
-  https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html
-- NVIDIA DCGM exporter for GPU telemetry in Kubernetes  
-  https://docs.nvidia.com/datacenter/dcgm/latest/gpu-telemetry/dcgm-exporter.html
-
-Inference note:
-
-- As of **2026-03-20**, I found stable official NVIDIA documentation for **NeMo Agent Toolkit, Guardrails, and NIM**, but not a clear public standalone SDK/API reference specifically branded as **NemoClaw**. Because of that, the recommended stack treats NemoClaw as the planning/model layer and anchors implementation on the stable public NVIDIA components and API surfaces above.
+    Returns pass/fail with actionable errors. Call this before weka_appstore_apply.
+    """
+    from webapp.planning.validator import validate_plan_yaml
+    return validate_plan_yaml(yaml_content)
+
+if __name__ == "__main__":
+    mcp.run()  # stdio transport by default — what OpenClaw uses
+```
+
+**Critical rules:**
+- Decorator is `@mcp.tool()` with parentheses — `@mcp.tool` (no parentheses) raises `TypeError`
+- Type hints on parameters generate the JSON schema OpenClaw uses to construct arguments
+- Docstrings are agent-facing, not human-facing — write them to guide the agent's reasoning
+- `mcp.run()` with no arguments defaults to stdio transport; this is correct for OpenClaw subprocess model
+- Return `dict` — FastMCP serializes it to JSON automatically
+
+---
+
+## OpenClaw Registration Format
+
+OpenClaw registers MCP servers in YAML configuration. The server runs as a child process via stdio — no HTTP server, no port, no TLS:
+
+```yaml
+# ~/.openclaw/openclaw.yaml (or openclaw.json — format depends on OpenClaw version)
+agents:
+  - id: main
+    model: anthropic/claude-sonnet-4-5
+    mcp_servers:
+      - name: weka-app-store
+        command: python3
+        args:
+          - /path/to/app-store-gui/mcp_server/server.py
+        env:
+          KUBECONFIG: /path/to/.kube/config
+          WEKA_API_ENDPOINT: https://weka-cluster.example.com
+```
+
+OpenClaw spawns the process at agent start and communicates over stdin/stdout using JSON-RPC 2.0. The agent discovers available tools through the MCP protocol handshake.
+
+**Confidence: MEDIUM** — format verified via community documentation (clawctl.com MCP setup guide, March 2026). NemoClaw alpha as of March 16 2026 does not yet publish an official config schema. The stdio subprocess model itself is confirmed by the MCP specification and multiple sources.
+
+---
+
+## Mock Agent Harness Pattern
+
+FastMCP provides an in-process test client — the entire tool chain can be exercised without spawning a subprocess or running a live OpenClaw instance:
+
+```python
+# tests/mcp/conftest.py
+import pytest
+from mcp import Client
+from mcp_server.server import mcp
+
+@pytest.fixture
+async def mcp_client():
+    async with Client(transport=mcp) as client:
+        yield client
+```
+
+```python
+# tests/mcp/test_tool_cluster.py
+import pytest
+from unittest.mock import patch
+
+@pytest.mark.asyncio
+async def test_inspect_cluster_returns_domains(mcp_client):
+    mock_result = {"domains": {"cpu": {"status": "complete", "observed": {"free_cores": 48.0}}}}
+    with patch("webapp.inspection.cluster.collect_cluster_inspection", return_value=mock_result):
+        result = await mcp_client.call_tool("weka_appstore_inspect_cluster", {})
+    assert result.data["domains"]["cpu"]["status"] == "complete"
+```
+
+The mock agent harness (`test_mock_harness.py`) calls tools in the full deployment sequence to prove end-to-end flow without a live agent:
+
+```python
+@pytest.mark.asyncio
+async def test_full_deploy_flow(mcp_client, mock_k8s, mock_weka):
+    # 1. Inspect cluster resources
+    cluster = await mcp_client.call_tool("weka_appstore_inspect_cluster", {})
+    # 2. Inspect WEKA storage
+    weka = await mcp_client.call_tool("weka_appstore_inspect_weka", {})
+    # 3. List blueprints
+    catalog = await mcp_client.call_tool("weka_appstore_list_blueprints", {})
+    # 4. Validate generated YAML
+    validation = await mcp_client.call_tool(
+        "weka_appstore_validate_yaml",
+        {"yaml_content": SAMPLE_WEKAAPPSTORE_YAML}
+    )
+    assert validation.data["valid"] is True
+    # 5. Apply (mocked K8s write)
+    apply_result = await mcp_client.call_tool(
+        "weka_appstore_apply",
+        {"yaml_content": SAMPLE_WEKAAPPSTORE_YAML, "namespace": "ai-platform"}
+    )
+    assert apply_result.data["applied"] == ["WekaAppStore"]
+```
+
+---
+
+## Recommended File Layout
+
+The MCP server is a new top-level module alongside `webapp/`, not wired into the FastAPI app:
+
+```
+app-store-gui/
+  mcp_server/
+    __init__.py
+    server.py          # FastMCP instance; all @mcp.tool() registrations
+    tools/
+      __init__.py
+      cluster.py       # thin wrapper over webapp/inspection/cluster.py
+      weka.py          # thin wrapper over webapp/inspection/weka.py
+      blueprints.py    # blueprint catalog read (list + get)
+      validate.py      # thin wrapper over webapp/planning/validator.py
+      apply.py         # thin wrapper over webapp/planning/apply_gateway.py
+      status.py        # WekaAppStore CR status query via K8s custom objects API
+      schema.py        # CRD schema retrieval for agent YAML generation context
+  tests/
+    mcp/
+      conftest.py           # async fixtures: in-memory FastMCP client, mock K8s/WEKA
+      test_tool_cluster.py
+      test_tool_weka.py
+      test_tool_blueprints.py
+      test_tool_validate.py
+      test_tool_apply.py
+      test_tool_status.py
+      test_tool_schema.py
+      test_mock_harness.py  # end-to-end tool chain without live OpenClaw
+```
+
+---
+
+## pytest Configuration Update
+
+Add `asyncio_mode = strict` to avoid event loop conflicts between pytest-asyncio and anyio:
+
+```ini
+# pytest.ini
+[pytest]
+asyncio_mode = strict
+```
+
+This keeps pytest-asyncio in strict mode (tests must be explicitly marked `@pytest.mark.asyncio`) and prevents anyio's pytest plugin from interfering.
+
+---
+
+## Alternatives Considered
+
+| Recommended | Alternative | When to Use Alternative |
+|-------------|-------------|-------------------------|
+| `mcp` official SDK with bundled `FastMCP` | `fastmcp` PyPI package (PrefectHQ / jlowin) | The community `fastmcp` v3.0 (January 2026) adds granular auth, OpenTelemetry, and OpenAPI provider support — switch to it if the project needs multi-server composition, fine-grained authorization, or built-in tracing |
+| stdio transport (`mcp.run()` default) | Streamable HTTP transport | Use HTTP if the MCP server must serve multiple concurrent OpenClaw instances, if browser-based MCP clients need direct access, or if a shared remote MCP server deployment is needed |
+| MCP server as a module in `app-store-gui/` | Separate Python package/repo | Use a separate package only if the MCP server needs independent versioning, a separate container image, or an independent deployment pipeline |
+| `pytest-asyncio` strict mode | anyio `@pytest.mark.anyio` | Use anyio's marker if the whole test suite migrates to anyio backends — for now, strict asyncio_mode avoids retrofitting the existing synchronous test files |
+
+---
+
+## What NOT to Use
+
+| Avoid | Why | Use Instead |
+|-------|-----|-------------|
+| `pip install fastmcp` (PyPI `fastmcp` package) | This is `PrefectHQ/fastmcp` — a community fork with its own release cycle and diverged APIs. It is NOT the official FastMCP. The official FastMCP lives inside the `mcp` package at `from mcp.server.fastmcp import FastMCP` | `pip install "mcp[cli]>=1.9,<2"` |
+| `mcp>=2` | v2 is pre-alpha on the `main` branch with breaking API changes as of March 2026 | `mcp>=1.9,<2` |
+| HTTP/SSE transport for the initial implementation | Requires a running server with an open port, firewall rules, and optional TLS; OpenClaw needs a URL instead of a command; adds operational complexity for no benefit when only one agent instance connects | `mcp.run()` stdio (default) |
+| Custom chat UI routes in FastAPI | OpenClaw provides the conversation interface natively — building a parallel UI creates two authoritative interfaces | OpenClaw's native WebSocket Gateway / chat channels |
+| Session or conversation state in MCP tool responses | OpenClaw has built-in memory and session management — adding state to tools creates conflicts with the agent's own tracking | Stateless tools; let OpenClaw own state |
+| Planning/compiler/family-matcher logic in the MCP server | OpenClaw reasons about YAML structure from the CRD schema context the tools provide — reimplementing this in Python duplicates the agent's core reasoning capability | `weka_appstore_get_crd_schema` + `weka_appstore_validate_yaml` give the agent what it needs; remove the v1.0 compiler and family-matcher |
+| `asyncio_mode = "auto"` in pytest-asyncio | Auto mode causes pytest-asyncio to claim all async tests globally, which conflicts with anyio's plugin that the `mcp` package pulls in | `asyncio_mode = "strict"` with explicit `@pytest.mark.asyncio` markers |
+
+---
+
+## Version Compatibility
+
+| Package | Compatible With | Notes |
+|---------|-----------------|-------|
+| `mcp>=1.9,<2` | Python >=3.10 | Confirm Python version is >=3.10 in the project; the rest of the existing stack (FastAPI, kubernetes-client) supports 3.10+ |
+| `mcp>=1.9,<2` | `anyio` (transitive) | `mcp` pulls in anyio automatically; no explicit anyio pin needed unless a specific version conflict appears |
+| `pytest-asyncio>=1.3.0` | `pytest>=8.0.0` | Existing repo already has `pytest>=8.0.0` — compatible |
+| `pytest-asyncio>=1.3.0` | anyio pytest plugin | Keep `asyncio_mode = strict` to prevent both plugins competing for the event loop |
+| `kubernetes>=27.0.0` | MCP server tools | The existing kubernetes client is imported by tool implementations; no version change needed |
+| `PyYAML>=6.0.1` | MCP validate tool | Existing PyYAML is reused by `weka_appstore_validate_yaml`; no version change needed |
+
+---
+
+## Sources
+
+- PyPI `mcp` package (official Anthropic SDK) — v1.9.4 confirmed latest stable, v2 pre-alpha: https://pypi.org/project/mcp/
+- GitHub `modelcontextprotocol/python-sdk` — v1.x is current stable release: https://github.com/modelcontextprotocol/python-sdk
+- MCP Python SDK official API docs: https://py.sdk.modelcontextprotocol.io/
+- FastMCP in-process testing guide (official MCP docs): https://gofastmcp.com/servers/testing
+- OpenClaw MCP server YAML config format (community, MEDIUM confidence): https://www.clawctl.com/blog/mcp-server-setup-guide
+- MCP tool registration decorator pattern (official MCP docs): https://modelcontextprotocol.io/docs/develop/build-server
+- NemoClaw alpha announcement — NVIDIA, March 16 2026: https://nvidianews.nvidia.com/news/nvidia-announces-nemoclaw
+- pytest-asyncio PyPI — v1.3.0 released November 2025: https://pypi.org/project/pytest-asyncio/
+- MCPcat unit testing guide (mock patterns, in-process client): https://mcpcat.io/guides/writing-unit-tests-mcp-servers/
+- Stop Vibe-Testing Your MCP Server (jlowin.dev) — pytest fixture patterns for FastMCP: https://www.jlowin.dev/blog/stop-vibe-testing-mcp-servers
+
+---
+
+*Stack research for: MCP server + OpenClaw tool integration (WEKA App Store v2.0 milestone)*
+*Researched: 2026-03-20*
+*Replaces: previous STACK.md (NemoClaw planning layer, v1.0 architecture — now superseded by OpenClaw pivot)*

@@ -1,189 +1,575 @@
-# NemoClaw Planning Architecture
+# Architecture Research: MCP Tool Server for OpenClaw Integration
 
-## Recommendation
+**Domain:** MCP tool server wrapping existing Python inspection/apply business logic
+**Researched:** 2026-03-20
+**Confidence:** HIGH (official MCP SDK docs, FastMCP docs, PRD analysis, codebase inspection)
 
-Integrate NemoClaw as a new planning layer inside the FastAPI GUI/backend boundary, not inside the CRD or operator. The planning layer should own conversation state, bounded cluster/WEKA inspection, structured plan generation, and pre-apply validation. The existing `WekaAppStore` CRD and Kopf operator should remain the execution contract: a `WekaAppStore` resource is created only after the user approves a validated plan.
+---
 
-This keeps mutation authority in deterministic backend and operator code, matches the PRD, and avoids making the operator responsible for conversational or partially-complete intent.
+## Architectural Pivot Summary
 
-## Target Component Boundaries
+The previous ARCHITECTURE.md described the old approach: NemoClaw embedded inside the FastAPI
+backend, which would own conversation state, session management, and plan compilation.
 
-### 1. Chat/UI Layer
-- Location: existing FastAPI/Jinja GUI, with new agent-mode routes and templates.
-- Responsibility: capture user intent, display plan/validation/YAML preview, collect follow-up answers, and require explicit approval.
-- Must not: inspect Kubernetes directly from the browser or apply generated YAML without backend validation.
+The new PRD (PRD-openclaw-integration.md) reverses this. OpenClaw is the brain. We are a
+toolbox. This document describes the MCP tool server architecture only.
 
-### 2. Planning Session Service
-- Location: new backend module extracted from `app-store-gui/webapp/main.py`.
-- Responsibility: manage planning sessions, turn history, correlation IDs, selected blueprint family, unresolved questions, and final plan state.
-- Output contract: structured `InstallPlan` JSON plus validation results and rendered `WekaAppStore` YAML preview.
-- Persistence: start with backend-managed session storage; do not persist draft plans as CRs in v1.
+---
 
-### 3. NemoClaw Orchestrator Adapter
-- Location: new backend service boundary called by the planning session service.
-- Responsibility: build NemoClaw prompts, expose only bounded tools, normalize responses, reject malformed output, and map follow-up questions back into the session.
-- Must return structured data first. YAML generation should be derived server-side from the structured plan, with model-generated YAML treated as advisory only.
+## Standard Architecture
 
-### 4. Inspection Adapter Layer
-- Location: new backend modules wrapping current Kubernetes and future WEKA API reads.
-- Responsibility: provide deterministic tool results for:
-  - cluster summary
-  - namespace list
-  - storage classes
-  - GPU inventory and GPU memory summary
-  - CPU and RAM availability summary
-  - WEKA capacity and filesystem summary
-  - blueprint catalog and blueprint schema metadata
-- Design rule: NemoClaw calls these adapters through narrow functions, not through unrestricted `kubectl`, `helm`, or raw Kubernetes clients.
+### System Overview
 
-### 5. Plan Validator / Translator
-- Location: new backend module shared by chat preview and final apply.
-- Responsibility:
-  - validate plan shape and required fields
-  - validate cluster-fit and storage-fit claims against tool outputs
-  - enforce repo/operator contract rules for `appStack.components[]`
-  - translate structured plan into canonical `WekaAppStore` YAML
-- This should become the single entry point before both preview and apply.
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                          OpenClaw / NemoClaw                         │
+│  (Conversation, reasoning, YAML generation, approval UI, memory)     │
+└──────────────────────────┬───────────────────────────────────────────┘
+                           │  MCP Protocol (JSON-RPC over stdio or HTTP)
+                           │  tools/list → tools/call
+┌──────────────────────────▼───────────────────────────────────────────┐
+│                    WEKA App Store MCP Server                         │
+│              mcp-server/server.py  (FastMCP instance)                │
+│                                                                      │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌────────────────────┐  │
+│  │ inspect_cluster │  │  inspect_weka    │  │  list_blueprints   │  │
+│  ├─────────────────┤  ├──────────────────┤  ├────────────────────┤  │
+│  │  get_blueprint  │  │  get_crd_schema  │  │  validate_yaml     │  │
+│  ├─────────────────┤  └──────────────────┘  └────────────────────┘  │
+│  │     apply       │  (destructiveHint=True, REQUIRES APPROVAL)      │
+│  ├─────────────────┤                                                  │
+│  │     status      │                                                  │
+│  └────────┬────────┘                                                  │
+└───────────┼──────────────────────────────────────────────────────────┘
+            │  Direct Python import (same virtualenv, same process)
+┌───────────▼──────────────────────────────────────────────────────────┐
+│                  Existing App Store Business Logic                   │
+│                                                                      │
+│  app-store-gui/webapp/inspection/cluster.py   (K8s inspection)       │
+│  app-store-gui/webapp/inspection/weka.py      (WEKA inspection)      │
+│  app-store-gui/webapp/planning/validator.py   (YAML validation)      │
+│  app-store-gui/webapp/planning/apply_gateway.py  (CR submission)     │
+│  app-store-gui/webapp/planning/models.py      (shared types)         │
+└───────────┬──────────────────────────────────────────────────────────┘
+            │
+┌───────────▼──────────────────────────────────────────────────────────┐
+│                        External Systems                              │
+│                                                                      │
+│  ┌──────────────────┐    ┌──────────────────┐   ┌────────────────┐  │
+│  │  Kubernetes API  │    │    WEKA API       │   │  Blueprint     │  │
+│  │  (read + write)  │    │  (read-only)      │   │  Catalog Files │  │
+│  └──────────────────┘    └──────────────────┘   └────────────────┘  │
+└──────────────────────────────────────────────────────────────────────┘
+```
 
-### 6. Existing Apply Gateway
-- Location: existing GUI apply path, but refactored behind one helper.
-- Responsibility: submit approved canonical YAML through the existing manifest apply flow that creates `WekaAppStore` resources.
-- Required change: unify `apply_blueprint_with_namespace()` and `apply_blueprint_content_with_namespace()` behind one internal manifest application service before NemoClaw work adds a third path.
+### Component Responsibilities
 
-### 7. Existing Runtime Layer
-- Components: `WekaAppStore` CRD and `operator_module/main.py`.
-- Responsibility: unchanged runtime reconciliation of approved resources into Helm releases and Kubernetes manifests.
-- V1 stance: no new execution authority in NemoClaw and no major CRD redesign.
+| Component | Responsibility | Implementation |
+|-----------|----------------|----------------|
+| OpenClaw / NemoClaw | Conversation, intent, reasoning, YAML gen, approval gate | External agent system — we do not build this |
+| MCP Server (`mcp-server/server.py`) | Expose tools via MCP protocol; thin adapter only; no business logic | Python, FastMCP (`mcp[cli]`) |
+| Tool modules (`mcp-server/tools/`) | One file per tool group; import existing business logic; build tool response schema | Python, structured dataclasses |
+| `inspection/cluster.py` | Kubernetes GPU/CPU/RAM/namespace/storageclass reads | Existing — reused unmodified |
+| `inspection/weka.py` | WEKA capacity and filesystem reads | Existing — reused unmodified |
+| `planning/validator.py` | CRD schema and operator contract validation | Existing — reused unmodified |
+| `planning/apply_gateway.py` | Submit `WekaAppStore` CR to Kubernetes | Existing — reused unmodified |
+| `planning/models.py` | Shared dataclasses for inspection/plan types | Existing — reused, may need minor extensions |
+| Blueprint catalog | YAML/JSON files describing available apps | Existing helm chart values and weka-app-store-operator-chart structure |
+| Mock harness (`mcp-server/tests/mock_agent.py`) | Simulate OpenClaw tool-use loop for testing without live agent | New — test tooling only |
 
-## CRD And Operator Fit
+---
 
-### `WekaAppStore` CRD
-- Keep `WekaAppStore` as the runtime submission format.
-- Use the existing `spec.appStack.components[]` contract as the canonical execution target.
-- Avoid storing draft conversational state in the CRD. Drafts are not declarative desired runtime state and would create noisy or invalid reconcile attempts.
-- Minimal v1 schema change is optional, not required. If provenance must be preserved, prefer metadata labels/annotations added at submission time rather than new planning fields in `spec`.
+## Recommended Project Structure
 
-### Operator
-- Keep the operator focused on reconcile only.
-- Do not add NemoClaw calls, cluster-fit logic, or follow-up question handling to the operator.
-- The operator should continue consuming validated `WekaAppStore` specs and reporting `appStackPhase` and `componentStatus`.
-- If later needed, add only execution-adjacent improvements such as clearer status messages or provenance annotations surfaced in status.
+```
+wekaappstore/
+├── app-store-gui/
+│   └── webapp/
+│       ├── inspection/          # EXISTING — reused as-is
+│       │   ├── cluster.py       #   K8s inspection functions
+│       │   └── weka.py          #   WEKA inspection functions
+│       ├── planning/            # EXISTING — reused as-is
+│       │   ├── apply_gateway.py #   CR submission
+│       │   ├── validator.py     #   Plan/YAML validation
+│       │   └── models.py        #   Shared dataclasses
+│       └── main.py              # EXISTING FastAPI app — not modified
+│
+├── mcp-server/                  # NEW — entire MCP server lives here
+│   ├── pyproject.toml           #   Dependencies (mcp[cli], kubernetes, etc.)
+│   ├── server.py                #   FastMCP instance creation + tool registration
+│   ├── tools/
+│   │   ├── __init__.py
+│   │   ├── inspect_cluster.py   #   weka_appstore_inspect_cluster tool
+│   │   ├── inspect_weka.py      #   weka_appstore_inspect_weka tool
+│   │   ├── blueprints.py        #   list_blueprints + get_blueprint + get_crd_schema tools
+│   │   ├── validate.py          #   weka_appstore_validate_yaml tool
+│   │   ├── apply.py             #   weka_appstore_apply tool (destructive)
+│   │   └── status.py            #   weka_appstore_status tool
+│   ├── schemas/
+│   │   ├── __init__.py
+│   │   └── responses.py         #   Pydantic models for tool return types
+│   ├── context/
+│   │   ├── __init__.py
+│   │   └── kube_client.py       #   Shared kubernetes client init (read vs write)
+│   └── tests/
+│       ├── conftest.py          #   Shared fixtures (mock K8s, mock WEKA)
+│       ├── mock_agent.py        #   Simulates OpenClaw tool-use loop for CI
+│       ├── test_inspect_cluster.py
+│       ├── test_inspect_weka.py
+│       ├── test_blueprints.py
+│       ├── test_validate.py
+│       ├── test_apply.py
+│       └── test_status.py
+│
+└── SKILL.md                     # NEW — agent workflow instructions for OpenClaw
+```
 
-## End-To-End Data Flow
+### Structure Rationale
 
-1. User starts an agent-mode install session in the GUI.
-2. FastAPI creates a planning session with a correlation ID and initial user intent.
-3. Planning session service calls bounded inspection adapters for cluster, storage, blueprint, and WEKA facts needed for the first reasoning pass.
-4. NemoClaw receives:
-   - user intent
-   - bounded tool outputs
-   - blueprint catalog/schema metadata
-   - operator/CRD constraints
-5. NemoClaw returns either:
-   - follow-up questions, or
-   - a structured `InstallPlan` draft with fit rationale.
-6. Plan validator checks:
-   - schema completeness
-   - allowed blueprint/operator constructs
-   - namespace and component rules
-   - fit claims against current inspection data
-7. Backend translates the validated plan into canonical `WekaAppStore` YAML for preview.
-8. GUI shows:
-   - conversation transcript
-   - structured plan summary
-   - validation results
-   - YAML preview
-9. On approval, backend submits the canonical YAML through the existing apply gateway.
-10. Kubernetes stores the `WekaAppStore` resource and the operator reconciles it as today.
-11. GUI polls existing CR/operator status endpoints for runtime progress.
+- **`mcp-server/` at repo root:** The MCP server is a peer process to `app-store-gui/`, not
+  a submodule of it. It has its own `pyproject.toml` and dependency set but shares the Python
+  path to import from `app-store-gui/webapp/`.
 
-## Suggested Internal Contracts
+- **`mcp-server/tools/` one file per tool group:** Keeps each tool's wrapper small and
+  independently testable. The wrapper never contains business logic — it only calls existing
+  code and transforms the result into the tool response schema.
 
-### Planning Session
-- `session_id`
-- `correlation_id`
-- `user_intent`
-- `conversation_turns[]`
-- `inspection_snapshot`
-- `draft_plan`
-- `validation_result`
-- `rendered_wekaappstore_yaml`
-- `approval_state`
+- **`mcp-server/schemas/responses.py`:** Pydantic models for what each tool returns. These
+  are the contracts OpenClaw reasons against. Stable schemas here mean the agent's prompts
+  don't break when internal implementation changes.
 
-### Structured Plan
-- `blueprint_family`
-- `target_namespace`
-- `components[]`
-- `values_overrides`
-- `dependencies`
-- `fit_assessment`
-- `weka_storage_assessment`
-- `prerequisites`
-- `unresolved_questions`
-- `reasoning_summary`
+- **`mcp-server/context/kube_client.py`:** Single shared Kubernetes client initialized once
+  per server process. Read-only and read-write clients are separate objects to make the
+  permission boundary explicit and auditable.
 
-### Validation Result
-- `plan_valid`
-- `operator_contract_valid`
-- `cluster_fit_valid`
-- `storage_fit_valid`
-- `errors[]`
-- `warnings[]`
+- **`mcp-server/tests/mock_agent.py`:** Critical for development without a live OpenClaw
+  instance. Calls tools directly through the FastMCP test interface in sequence: inspect
+  cluster → inspect weka → list blueprints → validate → apply.
 
-## Build Order For Roadmap
+---
 
-1. Extract shared backend services before adding NemoClaw.
-   The current GUI monolith and duplicated apply paths are the biggest integration hazard. Create reusable modules for manifest apply, blueprint catalog access, and cluster inspection first.
+## Architectural Patterns
 
-2. Add deterministic inspection adapters and validation contracts.
-   Build the bounded Kubernetes and WEKA inspection layer plus a plan validator before integrating the model. This creates testable interfaces and prevents prompt work from driving backend shape.
+### Pattern 1: Separate Process, Shared Python Path
 
-3. Introduce structured plan translation to canonical `WekaAppStore` YAML.
-   Server-side translation must exist before chat UX goes live, otherwise YAML generation semantics will drift from operator reality.
+**What:** The MCP server runs as an independent process (`python mcp-server/server.py`) but
+imports from `app-store-gui/webapp/` using the same virtualenv and PYTHONPATH. The FastAPI
+app and MCP server are not aware of each other at runtime.
 
-4. Add the NemoClaw adapter and mocked planning loop.
-   Start with mocked/model-stubbed responses, follow-up handling, and failure paths. Prove the contract before full model integration.
+**When to use:** Always. This is the correct architecture for this project.
 
-5. Add the chat UI and approval flow.
-   Wire the frontend only after the backend can produce deterministic plan, validation, and preview payloads.
+**Trade-offs:**
+- Pro: No coupling between FastAPI routes and MCP tools. Either can restart independently.
+- Pro: OpenClaw spawns the MCP server as a child process via stdio; it does not know about
+  FastAPI at all.
+- Pro: Existing business logic is imported directly — no HTTP round-trip between MCP and
+  FastAPI.
+- Con: Both processes share the same K8s credentials and cluster state. This is acceptable
+  here because both represent the same operator, not a multi-tenant setup.
+- Con: If `inspection/cluster.py` or `planning/apply_gateway.py` have initialization side
+  effects, they must be safe to call from two processes. (Review before Phase 1.)
 
-6. Add apply handoff and runtime observability.
-   Reuse the existing apply path, add correlation IDs to plan/apply logs, and connect plan sessions to CR submission events.
+**Example registration in `~/.openclaw/openclaw.json`:**
+```json
+{
+  "mcpServers": {
+    "weka-appstore": {
+      "command": "python",
+      "args": ["/path/to/wekaappstore/mcp-server/server.py"],
+      "env": {
+        "KUBECONFIG": "/path/to/kubeconfig"
+      }
+    }
+  }
+}
+```
 
-7. Expand to maintainer blueprint-authoring mode after install planning works.
-   Reuse the same planner, validator, and YAML translator, but output draft files instead of applying.
+### Pattern 2: Thin Tool Wrapper (Never Reimplement Logic)
 
-## Risks From Current Code Fragility
+**What:** Each tool function in `mcp-server/tools/` is a thin wrapper. It validates the
+incoming tool arguments, calls one or more existing functions from the business logic layer,
+and maps the result to the tool response schema. No business logic lives in the wrapper.
 
-### GUI Monolith Risk
-- `app-store-gui/webapp/main.py` is already ~2,176 lines and mixes routing, cluster IO, templating, and apply logic.
-- Adding NemoClaw directly into this file will increase coupling and make roadmap phases hard to verify.
-- Implication: service extraction is not optional early work.
+**When to use:** Every tool, without exception.
 
-### Duplicated Apply Logic Risk
-- File-based and string-based blueprint apply flows already duplicate namespace mutation and CR submission behavior.
-- NemoClaw would introduce a third manifest source unless these paths are unified first.
-- Implication: refactor apply into one canonical backend path before any planning-generated YAML is allowed to submit.
+**Trade-offs:**
+- Pro: Business logic tested once in existing unit tests. Tool wrapper test only needs to
+  verify the mapping and error handling.
+- Pro: Future changes to inspection logic automatically propagate to the MCP tool.
+- Con: If the existing function's return shape is messy, the wrapper must normalize it. This
+  is a one-time cost.
 
-### Weak Automated Verification Risk
-- Current concerns already identify thin coverage across GUI deploy paths, operator reconcile logic, and chart rendering.
-- NemoClaw integration increases the number of edge cases without changing the operator contract.
-- Implication: roadmap should put contract tests around plan validation, YAML translation, and apply handoff before broad feature expansion.
+**Example:**
+```python
+# mcp-server/tools/inspect_cluster.py
+from webapp.inspection.cluster import collect_cluster_inspection
+from mcp-server.schemas.responses import ClusterInspectionResult
 
-### Runtime/Inspection Cost Risk
-- Existing GUI status endpoints already do live cluster-wide reads.
-- Reusing that style for agent tools will create slow, expensive planning turns and inconsistent answers.
-- Implication: inspection adapters need narrow queries, caching, and stable response schemas.
+@mcp.tool()
+def weka_appstore_inspect_cluster() -> ClusterInspectionResult:
+    """
+    Returns GPU inventory, CPU/RAM availability, namespaces, and storage classes.
+    Read-only. No cluster mutation.
+    """
+    raw = collect_cluster_inspection()
+    return ClusterInspectionResult.from_raw(raw)
+```
 
-### Operator Partial-Failure Risk
-- The operator stops `appStack` execution on first failure and leaves partial installs behind.
-- NemoClaw can improve preflight fit, but it does not remove reconcile-time partial failure.
-- Implication: roadmap should keep operator-side status clarity and partial-failure handling visible as follow-on hardening work.
+### Pattern 3: Destructive Tool Annotation for Apply
 
-## Decision Summary
+**What:** The `weka_appstore_apply` tool is annotated with MCP's `destructiveHint=True` (via
+`annotations` in the tool definition). This signals to OpenClaw that the tool modifies state
+and MUST NOT be called without user approval.
 
-- Put NemoClaw between the GUI and the existing apply path, not in the operator.
-- Keep planning state outside the CRD until approval.
-- Make structured plan JSON the primary contract; derive `WekaAppStore` YAML server-side.
-- Treat bounded inspection and validation services as prerequisites, not follow-up polish.
-- Sequence roadmap work around backend extraction and validation first, then model integration, then UI, then maintainer authoring.
+**When to use:** Only the `apply` tool. All other tools are read-only.
+
+**Trade-offs:**
+- Pro: OpenClaw's built-in approval gate fires automatically for annotated tools. We do not
+  need to build UI approval logic.
+- Pro: Even if a poorly-configured agent tried to skip approval, the annotation is visible in
+  the tools/list response and compliant clients enforce it.
+- Con: Depends on OpenClaw respecting the annotation. Defense-in-depth: the `apply` tool
+  should also validate internally that the input YAML passed through `validate_yaml` first.
+
+**MCP tool annotation pattern (FastMCP):**
+```python
+from mcp.types import Tool
+
+@mcp.tool(annotations={"destructiveHint": True, "requiresApproval": True})
+def weka_appstore_apply(wekaappstore_yaml: str, namespace: str) -> ApplyResult:
+    """
+    Creates or updates a WekaAppStore CR. REQUIRES USER APPROVAL before calling.
+    Input must be pre-validated via weka_appstore_validate_yaml.
+    """
+    ...
+```
+
+### Pattern 4: Structured Output Schemas
+
+**What:** All tool return types are Pydantic models defined in `mcp-server/schemas/responses.py`.
+These become the JSON schema the agent reasons against via the MCP `outputSchema` field.
+
+**When to use:** All tools. The agent needs stable, typed outputs to reason correctly.
+
+**Trade-offs:**
+- Pro: Stable contracts mean SKILL.md instructions remain valid even as internal
+  implementations evolve.
+- Pro: FastMCP automatically generates `outputSchema` from Pydantic return type hints.
+- Con: Requires discipline to not change field names without reviewing agent prompts.
+
+### Pattern 5: STDIO Transport for OpenClaw Integration
+
+**What:** The MCP server uses stdio transport (default for FastMCP). OpenClaw spawns it as a
+child process and communicates via stdin/stdout JSON-RPC.
+
+**When to use:** OpenClaw integration. Also for the mock agent harness in CI.
+
+**Trade-offs:**
+- Pro: No network port needed. Simpler deployment, no TLS concerns.
+- Pro: OpenClaw manages the server lifecycle — no separate daemon to manage.
+- Con: One server process per OpenClaw session. Not multi-tenant. Acceptable here.
+- Note: If the MCP server ever needs to serve multiple concurrent agents (e.g., team-wide
+  deployment), switch to HTTP/SSE transport. That requires a port and network access but
+  no code changes to tools themselves — only the `mcp.run()` call changes.
+
+---
+
+## Data Flow
+
+### Read-Only Tool Call (inspect_cluster)
+
+```
+OpenClaw agent decides it needs cluster state
+    ↓
+tools/call { name: "weka_appstore_inspect_cluster", arguments: {} }
+    ↓
+MCP server receives call → routes to inspect_cluster.py wrapper
+    ↓
+wrapper calls collect_cluster_inspection() from webapp/inspection/cluster.py
+    ↓
+cluster.py issues Kubernetes API reads (nodes, pods, namespaces, storage classes)
+    ↓
+wrapper maps result to ClusterInspectionResult Pydantic model
+    ↓
+MCP server serializes to JSON, returns via tools/call response
+    ↓
+OpenClaw receives structured JSON, reasons about GPU/CPU/RAM availability
+```
+
+### Destructive Tool Call (apply) with Approval Gate
+
+```
+OpenClaw has validated YAML, presents plan to user
+    ↓
+User approves in OpenClaw chat UI
+    ↓
+OpenClaw sees apply tool has destructiveHint=True — shows confirmation prompt
+    ↓
+User confirms
+    ↓
+tools/call { name: "weka_appstore_apply", arguments: { wekaappstore_yaml: "...", namespace: "..." } }
+    ↓
+MCP server receives call → routes to apply.py wrapper
+    ↓
+apply.py internally re-validates YAML via validate_yaml logic (defense-in-depth)
+    ↓
+apply.py calls apply_gateway.py to submit WekaAppStore CR to Kubernetes
+    ↓
+Kubernetes stores CR → Kopf operator reconciles → Helm releases deployed
+    ↓
+MCP server returns ApplyResult { resource_name, namespace, timestamp }
+    ↓
+OpenClaw reports success to user, can follow up with weka_appstore_status calls
+```
+
+### Full Agent Workflow (Inspect → Reason → Validate → Apply)
+
+```
+User: "Install NIM LLM inference with WEKA storage on this cluster"
+    ↓
+[OpenClaw invokes tools in sequence]
+    ↓
+1. weka_appstore_inspect_cluster    → GPU/CPU/RAM/namespace/storageclass snapshot
+2. weka_appstore_inspect_weka       → WEKA capacity + filesystem list
+3. weka_appstore_list_blueprints    → Available blueprint catalog
+4. weka_appstore_get_blueprint      → Full detail for chosen blueprint
+5. weka_appstore_get_crd_schema     → WekaAppStore CRD spec for YAML generation
+    ↓
+[OpenClaw reasons: does cluster fit? which values to set? generate YAML]
+    ↓
+6. weka_appstore_validate_yaml      → Validation pass/fail + errors
+    ↑ (agent iterates if errors returned)
+    ↓
+[OpenClaw presents plan + YAML to user, requests approval]
+    ↓
+7. weka_appstore_apply              → Creates WekaAppStore CR (approval-gated)
+    ↓
+[OpenClaw polls for completion]
+    ↓
+8. weka_appstore_status             → Reports appStackPhase and component status
+```
+
+---
+
+## Integration Points
+
+### MCP Server → Existing Business Logic
+
+| Boundary | Communication | Notes |
+|----------|---------------|-------|
+| `mcp-server/tools/` → `webapp/inspection/cluster.py` | Direct Python import | Server must have `app-store-gui/` on PYTHONPATH |
+| `mcp-server/tools/` → `webapp/inspection/weka.py` | Direct Python import | Same PYTHONPATH requirement |
+| `mcp-server/tools/` → `webapp/planning/validator.py` | Direct Python import | Validator is pure Python, no side effects at import |
+| `mcp-server/tools/` → `webapp/planning/apply_gateway.py` | Direct Python import | Apply gateway initializes K8s client at call time, not import time — verify this |
+| `mcp-server/tools/` → `webapp/planning/models.py` | Direct Python import | Models are dataclasses — safe to share |
+
+### MCP Server → External Systems
+
+| Service | Integration Pattern | Notes |
+|---------|---------------------|-------|
+| Kubernetes API | `kubernetes` Python client, initialized in `context/kube_client.py` | Read client and write client are separate objects |
+| WEKA API | Called via `webapp/inspection/weka.py` existing implementation | MCP server does not add new WEKA API calls |
+| Blueprint catalog | Read from filesystem — same chart directories existing FastAPI app reads | Must agree on catalog root path between FastAPI and MCP server |
+
+### OpenClaw → MCP Server
+
+| Boundary | Communication | Notes |
+|----------|---------------|-------|
+| OpenClaw registers server | Entry in `~/.openclaw/openclaw.json` under `mcpServers` | OpenClaw spawns as child process via stdio |
+| OpenClaw discovers tools | `tools/list` JSON-RPC call on startup | FastMCP handles this automatically |
+| OpenClaw calls tool | `tools/call` JSON-RPC call | Tool response returned synchronously |
+| OpenClaw approval gate | Triggered by `destructiveHint: true` annotation on apply tool | OpenClaw-native — MCP server does not implement UI |
+
+---
+
+## New vs. Modified Components
+
+### New (must be built)
+
+| Component | Location | Description |
+|-----------|----------|-------------|
+| MCP server entry point | `mcp-server/server.py` | FastMCP instance, registers all tools |
+| Tool wrappers | `mcp-server/tools/*.py` | Thin adapters calling existing business logic |
+| Response schemas | `mcp-server/schemas/responses.py` | Pydantic models for stable tool output contracts |
+| K8s client context | `mcp-server/context/kube_client.py` | Shared client init, read/write separation |
+| Mock agent harness | `mcp-server/tests/mock_agent.py` | Simulates OpenClaw tool-use loop for CI |
+| Tool unit tests | `mcp-server/tests/test_*.py` | Per-tool tests with mocked K8s and WEKA |
+| `pyproject.toml` | `mcp-server/pyproject.toml` | MCP server dependencies |
+| SKILL.md | `SKILL.md` (repo root) | Agent workflow instructions for OpenClaw |
+
+### Existing (reused, not modified in Phase 1)
+
+| Component | Location | Reuse Pattern |
+|-----------|----------|---------------|
+| Cluster inspection | `app-store-gui/webapp/inspection/cluster.py` | Called directly from `tools/inspect_cluster.py` |
+| WEKA inspection | `app-store-gui/webapp/inspection/weka.py` | Called directly from `tools/inspect_weka.py` |
+| Plan validator | `app-store-gui/webapp/planning/validator.py` | Called directly from `tools/validate.py` |
+| Apply gateway | `app-store-gui/webapp/planning/apply_gateway.py` | Called directly from `tools/apply.py` |
+| Shared models | `app-store-gui/webapp/planning/models.py` | Imported for type references |
+
+### Existing (to be deprecated after MCP tools prove stable)
+
+| Component | Location | Reason |
+|-----------|----------|--------|
+| `planning/session_service.py` | `app-store-gui/webapp/planning/` | OpenClaw owns conversation state |
+| `planning/session_store.py` | `app-store-gui/webapp/planning/` | OpenClaw has built-in memory |
+| `planning/family_matcher.py` | `app-store-gui/webapp/planning/` | OpenClaw reasons about this |
+| `planning/compiler.py` | `app-store-gui/webapp/planning/` | OpenClaw generates YAML from CRD schema context |
+| Planning session routes in `main.py` | `app-store-gui/webapp/main.py` | Replaced by OpenClaw Gateway |
+
+---
+
+## Build Order and Phase Dependencies
+
+The following order respects code dependencies and testability gates.
+
+### Phase 1: MCP Server Scaffold + Read-Only Tools
+
+**Prerequisite:** None. These tools have no mutation risk.
+
+**Build order within phase:**
+1. `mcp-server/pyproject.toml` and `mcp-server/context/kube_client.py` — foundation
+2. `mcp-server/schemas/responses.py` — define response contracts before writing wrappers
+3. `mcp-server/tools/inspect_cluster.py` — wrap `inspection/cluster.py`
+4. `mcp-server/tools/inspect_weka.py` — wrap `inspection/weka.py`
+5. `mcp-server/tools/blueprints.py` — list_blueprints, get_blueprint, get_crd_schema
+6. `mcp-server/server.py` — register all Phase 1 tools
+7. Tests for all Phase 1 tools with mocked K8s/WEKA
+
+**Gate to Phase 2:** All Phase 1 tools callable via `mcp dev server.py` inspector. Mocked
+K8s responses produce correct structured output.
+
+### Phase 2: Validation and Apply Tools
+
+**Prerequisite:** Phase 1 complete. Tools 1-5 testable.
+
+**Build order within phase:**
+1. `mcp-server/tools/validate.py` — wrap `planning/validator.py`
+2. `mcp-server/tools/status.py` — wrap K8s CR status reads
+3. `mcp-server/tools/apply.py` — wrap `planning/apply_gateway.py`; add destructiveHint
+4. `mcp-server/tests/mock_agent.py` — full tool-use loop test
+5. Register Phase 2 tools in `server.py`
+
+**Critical:** `apply.py` wrapper MUST internally re-validate YAML via `validate.py` logic
+before calling the apply gateway. This is defense-in-depth independent of OpenClaw approval.
+
+**Gate to Phase 3:** mock_agent.py can run full loop — inspect → validate → apply against
+mocked backends — without errors.
+
+### Phase 3: Skill Definition and Agent Context
+
+**Prerequisite:** Phase 2 complete. All 8 tools working and tested.
+
+**Build order within phase:**
+1. `SKILL.md` — workflow instructions for OpenClaw agent
+2. Structure blueprint catalog for agent consumption (verify `list_blueprints` output is
+   LLM-friendly)
+3. Package CRD schema as returned by `get_crd_schema` tool (verify completeness)
+4. End-to-end test with mock_agent.py proving inspect → reason → validate → apply flow
+
+### Phase 4: Live OpenClaw Integration
+
+**Prerequisite:** Phase 3 complete. Server stable.
+
+**Build order within phase:**
+1. Register MCP server in `~/.openclaw/openclaw.json`
+2. Test tools/list discovery
+3. Test each tool via OpenClaw chat
+4. Tune SKILL.md based on actual agent behavior
+5. Validate approval gating fires for apply tool
+
+---
+
+## Scaling Considerations
+
+This is a single-operator tool server, not a multi-tenant service. Scaling is not a
+primary concern.
+
+| Scale | Architecture Notes |
+|-------|--------------------|
+| Single operator, single cluster | STDIO transport. OpenClaw spawns server per session. |
+| Team use, shared OpenClaw instance | Switch to HTTP transport. Server runs as persistent process. Blueprint catalog reads become concurrent — add file-level locking or cache. |
+| Multi-cluster | Separate MCP server per cluster, or add `cluster_context` argument to each tool and switch kubeconfig dynamically. |
+
+---
+
+## Anti-Patterns
+
+### Anti-Pattern 1: Embedding the MCP Server Inside the FastAPI Process
+
+**What people do:** Mount the MCP server as a FastAPI sub-app using `app.mount()` or
+`FastApiMCP(app)`.
+
+**Why it's wrong for this project:** OpenClaw connects to MCP servers via stdio process
+spawning, not HTTP. Embedding inside FastAPI requires HTTP transport and introduces the
+FastAPI app as a dependency for the agent to work. The MCP server would not be runnable
+standalone. It also couples the MCP server's lifecycle to the web UI's lifecycle.
+
+**Do this instead:** Keep the MCP server as a standalone Python process in `mcp-server/`.
+The FastAPI app and MCP server share business logic via Python imports, not via HTTP.
+
+### Anti-Pattern 2: Reimplementing Business Logic in Tool Wrappers
+
+**What people do:** Copy inspection code or validation logic into the MCP tool file because
+it is easier than figuring out the right import path.
+
+**Why it's wrong:** Duplicated logic diverges. When `cluster.py` is updated, the copy in
+the MCP tool does not get the fix. This has already caused bugs in the existing codebase
+(see PITFALLS.md: duplicated apply logic).
+
+**Do this instead:** Import and call. Tools are wrappers, not re-implementations.
+
+### Anti-Pattern 3: Skipping the Validation Tool Before Apply
+
+**What people do:** Let the agent call `apply` directly after generating YAML, skipping
+`validate_yaml` because the agent "should know the schema."
+
+**Why it's wrong:** LLM YAML generation is unreliable. The agent will produce invalid YAML.
+Without the validate step, the operator fails at reconcile time with an opaque error. The
+agent cannot recover without structured validation feedback.
+
+**Do this instead:** The SKILL.md must instruct the agent to always call `validate_yaml`
+before `apply`. The `apply` wrapper should also defensively re-validate internally.
+
+### Anti-Pattern 4: Writing to stdout in the STDIO MCP Server
+
+**What people do:** Add `print()` statements or standard logging to stdout for debugging.
+
+**Why it's wrong:** In stdio transport, stdout is the JSON-RPC channel. Any text written to
+stdout corrupts the MCP protocol messages and breaks the server.
+
+**Do this instead:** Use `logging` configured to write to stderr or a file. FastMCP routes
+its own output correctly; tool code must not print to stdout.
+
+### Anti-Pattern 5: Using the Apply Tool Without the Approval Annotation
+
+**What people do:** Omit `destructiveHint: True` from the apply tool definition because it
+feels redundant — "OpenClaw will ask for approval anyway."
+
+**Why it's wrong:** The annotation is the machine-readable signal that triggers the approval
+gate. Without it, OpenClaw may call apply inline without user confirmation, depending on its
+configuration. The annotation must be present in the tool definition.
+
+**Do this instead:** Apply tool must have both `destructiveHint: True` and clear docstring
+language stating that user approval is required.
+
+---
+
+## Sources
+
+- [MCP Python SDK — Official GitHub](https://github.com/modelcontextprotocol/python-sdk) — HIGH confidence
+- [MCP Tools Specification (2025-06-18)](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) — HIGH confidence
+- [Build an MCP Server — Official Docs](https://modelcontextprotocol.io/docs/develop/build-server) — HIGH confidence
+- [FastMCP — Running Server / Deployment](https://gofastmcp.com/deployment/running-server) — HIGH confidence
+- [FastMCP — FastAPI Integration](https://gofastmcp.com/integrations/fastapi) — HIGH confidence
+- [OpenClaw MCP Server Registration](https://safeclaw.io/blog/openclaw-mcp) — MEDIUM confidence (third-party guide, consistent with MCP spec)
+- [OpenClaw `openclaw.json` configuration](https://openclawvps.io/blog/add-mcp-openclaw) — MEDIUM confidence (third-party guide)
+- [MCP Transport Comparison — stdio vs SSE vs HTTP](https://dev.to/zrcic/understanding-mcp-server-transports-stdio-sse-and-http-streamable-5b1p) — MEDIUM confidence
+- [DEV Community: MCP into existing FastAPI backend](https://dev.to/hiteshchawla/create-mcp-into-an-existing-fastapi-backend-3onp) — MEDIUM confidence
+- [MCP Security — Tool Annotations and Approval](https://towardsdatascience.com/the-mcp-security-survival-guide-best-practices-pitfalls-and-real-world-lessons/) — MEDIUM confidence
+
+---
+
+*Architecture research for: WEKA App Store MCP tool server (OpenClaw integration milestone)*
+*Researched: 2026-03-20*
+*Replaces: previous ARCHITECTURE.md (NemoClaw-in-backend approach)*
