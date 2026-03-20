@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: OpenClaw MCP Tool Integration
 status: planning
-stopped_at: Completed 06-02-PLAN.md
-last_updated: "2026-03-20T06:12:15.519Z"
+stopped_at: Completed 06-03-PLAN.md
+last_updated: "2026-03-20T06:17:42.640Z"
 last_activity: 2026-03-20 — v2.0 roadmap created; Phases 6-9 defined
 progress:
   total_phases: 9
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 19
-  completed_plans: 14
+  completed_plans: 15
   percent: 0
 ---
 
@@ -48,6 +48,7 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 *Updated after each plan completion*
 | Phase 06-mcp-scaffold-and-read-only-tools P06-01 | 4min | 2 tasks | 13 files |
 | Phase 06-mcp-scaffold-and-read-only-tools P06-02 | 8min | 2 tasks | 5 files |
+| Phase 06-mcp-scaffold-and-read-only-tools P06-03 | 3min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -62,6 +63,9 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 - [Phase 06]: Separate flatten_inspect_*_for_mcp() functions never expose inspection_snapshot or domain wrappers to agents
 - [Phase 06]: register_*(mcp) pattern for tool registration enables isolated test instances
 - [Phase Phase 06-02]: scan_blueprints() returns internal wrapper dicts — flatten functions shape agent-facing JSON; helm_chart sub-dict hoisted to flat component fields for 2-key depth contract
+- [Phase Phase 06-03]: _get_crd_schema_impl() injectable pattern matches inspect tools — same testability approach
+- [Phase Phase 06-03]: 'schema' field is documented exception to 2-key depth rule — pass-through K8s CRD OpenAPI data, not our domain model
+- [Phase Phase 06-03]: check_depth() shared helper in test_response_depth.py enforces depth contract globally across all tools
 
 ### Pending Todos
 
@@ -75,6 +79,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T06:12:15.517Z
-Stopped at: Completed 06-02-PLAN.md
+Last session: 2026-03-20T06:17:42.637Z
+Stopped at: Completed 06-03-PLAN.md
 Resume file: None

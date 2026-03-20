@@ -79,7 +79,7 @@ Plans:
 
 **Milestone Goal:** Build an MCP server exposing WEKA App Store capabilities as tools OpenClaw can call, deliver all 8 tools with a mock harness for testing without a live agent, define the agent workflow in SKILL.md, and remove deprecated v1.0 backend-brain code.
 
-- [ ] **Phase 6: MCP Scaffold and Read-Only Tools** - Runnable MCP server with 5 read-only tools and flat agent-facing response schemas
+- [x] **Phase 6: MCP Scaffold and Read-Only Tools** - Runnable MCP server with 5 read-only tools and flat agent-facing response schemas (completed 2026-03-20)
 - [ ] **Phase 7: Validation, Apply, and Status Tools** - Remaining 3 tools with approval gate, correct validator contract, and full mock harness
 - [ ] **Phase 8: SKILL.md, Agent Context, and Cleanup** - Agent workflow definition, tool description tuning, deprecated code deleted
 - [ ] **Phase 9: Deployment and Registration** - Container image, OpenClaw/NemoClaw registration config, deployment documentation
@@ -149,7 +149,7 @@ v2.0 phases execute in numeric order: 6 → 7 → 8 → 9
 | 3. Conversational Planning Sessions | v1.0 | 4/4 | Complete | 2026-03-20 |
 | 4. Review, Approval, And Apply Gating | v1.0 | -/- | Complete | 2026-03-20 |
 | 5. Maintainer Draft Authoring And Test Hardening | v1.0 | -/- | Complete | 2026-03-20 |
-| 6. MCP Scaffold and Read-Only Tools | 2/3 | In Progress|  | - |
+| 6. MCP Scaffold and Read-Only Tools | 3/3 | Complete   | 2026-03-20 | - |
 | 7. Validation, Apply, and Status Tools | v2.0 | 0/TBD | Not started | - |
 | 8. SKILL.md, Agent Context, and Cleanup | v2.0 | 0/TBD | Not started | - |
 | 9. Deployment and Registration | v2.0 | 0/TBD | Not started | - |
