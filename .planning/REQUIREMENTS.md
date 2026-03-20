@@ -23,7 +23,7 @@ Requirements for the OpenClaw MCP Tool Integration milestone. Each maps to roadm
 
 ### Agent Integration
 
-- [ ] **AGNT-01**: SKILL.md defines the agent workflow with validate-before-apply constraint and negative examples
+- [x] **AGNT-01**: SKILL.md defines the agent workflow with validate-before-apply constraint and negative examples
 - [x] **AGNT-02**: Mock agent harness exercises full tool chain with scripted tool-use loops
 - [ ] **AGNT-03**: OpenClaw registration config (`openclaw.json` / NemoClaw equivalent) generated for the MCP server
 
@@ -36,9 +36,9 @@ Requirements for the OpenClaw MCP Tool Integration milestone. Each maps to roadm
 
 ### Code Cleanup
 
-- [ ] **CLEAN-01**: Remove deprecated `planning/session_service.py`, `planning/session_store.py`, `planning/family_matcher.py`, `planning/compiler.py`
-- [ ] **CLEAN-02**: Remove deprecated planning session routes and `planning_session.html` template from `main.py`
-- [ ] **CLEAN-03**: Preserve `inspection/cluster.py`, `planning/apply_gateway.py`, `planning/validator.py` as tool implementations
+- [x] **CLEAN-01**: Remove deprecated `planning/session_service.py`, `planning/session_store.py`, `planning/family_matcher.py`, `planning/compiler.py`
+- [x] **CLEAN-02**: Remove deprecated planning session routes and `planning_session.html` template from `main.py`
+- [x] **CLEAN-03**: Preserve `inspection/cluster.py`, `planning/apply_gateway.py`, `planning/validator.py` as tool implementations
 
 ## v3.0 Requirements
 
@@ -75,16 +75,16 @@ Deferred to future milestone after live OpenClaw is available.
 | MCPS-09 | Phase 7 | Complete |
 | MCPS-10 | Phase 6 | Complete |
 | MCPS-11 | Phase 6 | Complete |
-| AGNT-01 | Phase 8 | Pending |
+| AGNT-01 | Phase 8 | Complete |
 | AGNT-02 | Phase 7 | Complete |
 | AGNT-03 | Phase 8 | Pending |
 | DEPLOY-01 | Phase 9 | Pending |
 | DEPLOY-02 | Phase 9 | Pending |
 | DEPLOY-03 | Phase 9 | Pending |
 | DEPLOY-04 | Phase 9 | Pending |
-| CLEAN-01 | Phase 8 | Pending |
-| CLEAN-02 | Phase 8 | Pending |
-| CLEAN-03 | Phase 8 | Pending |
+| CLEAN-01 | Phase 8 | Complete |
+| CLEAN-02 | Phase 8 | Complete |
+| CLEAN-03 | Phase 8 | Complete |
 
 **Coverage:**
 - v2.0 requirements: 21 total

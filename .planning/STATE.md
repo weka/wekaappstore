@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: OpenClaw MCP Tool Integration
 status: planning
-stopped_at: Phase 8 context gathered
-last_updated: "2026-03-20T07:35:01.415Z"
+stopped_at: Completed 08-03-PLAN.md
+last_updated: "2026-03-20T10:42:27.248Z"
 last_activity: 2026-03-20 — v2.0 roadmap created; Phases 6-9 defined
 progress:
   total_phases: 9
   completed_phases: 5
-  total_plans: 21
-  completed_plans: 17
+  total_plans: 24
+  completed_plans: 19
   percent: 0
 ---
 
@@ -51,6 +51,8 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 | Phase 06-mcp-scaffold-and-read-only-tools P06-03 | 3min | 2 tasks | 5 files |
 | Phase 07-validation-apply-and-status-tools P01 | 2min | 2 tasks | 4 files |
 | Phase 07-validation-apply-and-status-tools PP02 | 4min | 2 tasks | 8 files |
+| Phase 08-skill-md-agent-context-and-cleanup PP03 | 18min | 2 tasks | 17 files |
+| Phase 08-skill-md-agent-context-and-cleanup PP01 | 8min | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -72,6 +74,10 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 - [Phase Phase 07-01]: confirmed is not True (identity check) in apply tool — prevents string 'true' or int 1 from bypassing confirmation gate
 - [Phase Phase 07-02]: Harness calls flatten_* functions directly with pre-built snapshot dicts (avoids mocking K8s collection stack)
 - [Phase Phase 07-02]: ops_log pattern: mock side-effecting methods append (op_type, kwargs) tuples to shared list for assertion
+- [Phase Phase 08-03]: Kept PLANNING_APPLY_GATEWAY in main.py — apply_blueprint_with_namespace is actively used by blueprint deploy routes, not part of planning session removal
+- [Phase Phase 08-03]: build_structured_plan_preview / execute_structured_plan_apply / apply_structured_plan removed as dead code — no route callers, depended on deleted compiler.py
+- [Phase 08-skill-md-agent-context-and-cleanup]: SKILL.md uses 12 numbered steps with explicit validate-retry loop (max 3 attempts) and re-inspect-before-apply as mandatory rule
+- [Phase 08-skill-md-agent-context-and-cleanup]: _RegistryCapture stub builds description registry by calling register_* with minimal MCP shim — description-based routing without hardcoded tool names
 
 ### Pending Todos
 
@@ -85,6 +91,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T07:35:01.407Z
-Stopped at: Phase 8 context gathered
-Resume file: .planning/phases/08-skill-md-agent-context-and-cleanup/08-CONTEXT.md
+Last session: 2026-03-20T10:42:27.245Z
+Stopped at: Completed 08-03-PLAN.md
+Resume file: None

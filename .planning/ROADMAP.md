@@ -160,7 +160,7 @@ v2.0 phases execute in numeric order: 6 → 7 → 8 → 9
 | 5. Maintainer Draft Authoring And Test Hardening | v1.0 | -/- | Complete | 2026-03-20 |
 | 6. MCP Scaffold and Read-Only Tools | 3/3 | Complete   | 2026-03-20 | - |
 | 7. Validation, Apply, and Status Tools | 1/2 | In Progress|  | - |
-| 8. SKILL.md, Agent Context, and Cleanup | v2.0 | 0/3 | Not started | - |
+| 8. SKILL.md, Agent Context, and Cleanup | 2/3 | In Progress|  | - |
 | 9. Deployment and Registration | v2.0 | 0/TBD | Not started | - |
 
 ---
