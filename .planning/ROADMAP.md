@@ -24,7 +24,7 @@ This roadmap adds a NemoClaw-driven planning workflow to the existing WEKA App S
 
 **Goal:** Establish the deterministic structured-plan contract, YAML translation, and safe existing-runtime handoff before NemoClaw-generated plans can submit anything.
 
-**Plan progress:** 2 of 4 plans completed (`01-01`, `01-03`)
+**Plan progress:** 4 of 4 plans completed (`01-01`, `01-02`, `01-03`, `01-04`)
 
 **Requirements:**
 - PLAN-02
@@ -43,7 +43,9 @@ This roadmap adds a NemoClaw-driven planning workflow to the existing WEKA App S
 
 **Completed plan highlights:**
 - `01-01` established the pytest harness and seeded planning/apply gateway fixtures.
+- `01-02` established the typed structured-plan contract and layered validation rules for deterministic acceptance, warnings, and rejection.
 - `01-03` extracted the shared YAML apply gateway and verified `WekaAppStore` runtime-path compatibility with mocked seam tests.
+- `01-04` compiled validated plans into canonical `WekaAppStore` YAML and wired `main.py` preview/apply helpers through the shared gateway.
 
 ### Phase 2: Cluster And WEKA Inspection Signals
 
