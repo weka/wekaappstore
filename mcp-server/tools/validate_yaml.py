@@ -148,18 +148,28 @@ def register_validate_yaml(mcp: Any) -> None:
     @mcp.tool()
     def validate_yaml(yaml_text: str) -> dict:
         """Call this tool BEFORE apply to verify that generated WekaAppStore YAML
-        is structurally valid per the CRD contract.
+        is structurally valid per the CRD contract. Never skip this step.
 
         Checks: correct apiVersion (warp.io/v1alpha1), kind (WekaAppStore),
-        metadata.name present, no v1.0-only planning fields (blueprint_family,
-        fit_findings, namespace_strategy, etc.), and at least one deployment
+        metadata.name present, no v1.0-only snake_case planning fields
+        (blueprint_family, fit_findings, namespace_strategy, reasoning_summary,
+        request_summary, unresolved_questions), and at least one deployment
         method (helmChart, appStack, or image).
 
-        Returns valid=true with empty errors on success, or valid=false with
-        a structured errors list on failure. Each error has a code, path, and
-        message field to help the agent pinpoint and fix the issue.
+        Returns valid=true with empty errors on success. Returns valid=false with
+        a structured errors list on failure — each error has code, path, and
+        message to pinpoint the exact issue. Fix the error and call validate_yaml
+        again. Maximum 3 retry attempts before escalating to user.
 
-        Sequencing: get_crd_schema -> (generate YAML) -> validate_yaml -> apply.
+        After validate_yaml returns valid=true: re-run inspect_cluster to confirm
+        cluster resources haven't changed, then present YAML to user for approval
+        before calling apply.
+
+        Returns: captured_at, valid (bool), errors (list of {code, path, message}),
+        warnings.
+
+        Sequencing: get_crd_schema -> (generate YAML) -> validate_yaml ->
+        inspect_cluster (re-run) -> (user approval) -> apply.
         Do not call apply if validate_yaml returns valid=false.
         """
         return _validate_yaml_impl(yaml_text)

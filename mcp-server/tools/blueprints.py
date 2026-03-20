@@ -156,12 +156,18 @@ def register_blueprint_tools(mcp: Any) -> None:
 
     @mcp.tool()
     def list_blueprints() -> dict:
-        """Call this after inspect_cluster to see which blueprints are available for
-        deployment. Returns a catalog of all discovered blueprint manifests with their
-        names, components, and resource requirements. Use the blueprint name from this
-        list to call get_blueprint for full detail.
+        """Call this after inspect_cluster to discover available blueprints. Returns
+        a catalog of all WekaAppStore blueprint manifests with their names, component
+        counts, and component names. Cross-reference the cluster resources from
+        inspect_cluster to assess which blueprints fit.
 
-        Sequencing: inspect_cluster -> list_blueprints -> get_blueprint.
+        Use the blueprint 'name' field from this list to call get_blueprint for full
+        specification details.
+
+        Returns: captured_at, count, blueprints (list of {name, namespace,
+        component_count, component_names, source_file}), warnings.
+
+        Sequencing: inspect_cluster -> list_blueprints -> get_blueprint -> get_crd_schema.
         """
         entries = scan_blueprints(config.BLUEPRINTS_DIR)
         warnings: list[str] = []
@@ -182,12 +188,20 @@ def register_blueprint_tools(mcp: Any) -> None:
 
     @mcp.tool()
     def get_blueprint(name: str) -> dict:
-        """Call this after list_blueprints to get full detail for a specific blueprint
-        by name. Returns the complete blueprint specification including all components,
-        Helm chart references, dependencies, and prerequisites. Use this to understand
-        what will be deployed before calling validate_yaml.
+        """Call this after list_blueprints to retrieve full specification for a named
+        blueprint. Returns all components (flat, with helm_chart_* fields), target
+        namespaces, dependencies between components, prerequisites that must exist in
+        the cluster, and any warnings.
 
-        Sequencing: list_blueprints -> get_blueprint -> (generate YAML) -> validate_yaml.
+        Read the prerequisites list carefully — some blueprints require existing
+        operator installations or cluster configuration. After reading the full spec,
+        call get_crd_schema to obtain the CRD schema before generating YAML.
+
+        Returns: name, namespace, api_version, components (list), prerequisites
+        (list), warnings.
+
+        Sequencing: list_blueprints -> get_blueprint -> get_crd_schema ->
+        (generate YAML) -> validate_yaml.
         """
         entries = scan_blueprints(config.BLUEPRINTS_DIR)
 

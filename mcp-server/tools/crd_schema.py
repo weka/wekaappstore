@@ -133,11 +133,20 @@ def register_crd_schema(mcp: Any) -> None:
 
     @mcp.tool()
     def get_crd_schema() -> dict:
-        """Call this tool when you need to generate WekaAppStore YAML from scratch.
-        Returns the CRD OpenAPI v3 schema defining valid fields and structure, plus
-        1-2 example manifests from the blueprint catalog. Use the schema to validate
-        your YAML structure and the examples to pattern-match correct formatting.
+        """Call this tool after get_blueprint and BEFORE generating WekaAppStore YAML.
+        Returns the CRD OpenAPI v3 schema defining every valid field, type, and
+        constraint, plus 1-2 example manifests from the blueprint catalog. Study both
+        the schema and examples before writing YAML — they show correct camelCase field
+        names and required structure.
 
-        Sequencing: get_blueprint -> get_crd_schema -> (generate YAML) -> validate_yaml.
+        After generating YAML using this schema, call validate_yaml before apply to
+        catch any structural errors. Do not skip validation even if the YAML looks
+        correct.
+
+        Returns: captured_at, group, version, kind, schema (OpenAPI v3 dict),
+        examples (list of YAML strings), warnings.
+
+        Sequencing: get_blueprint -> get_crd_schema -> (generate YAML) ->
+        validate_yaml -> apply.
         """
         return _get_crd_schema_impl()

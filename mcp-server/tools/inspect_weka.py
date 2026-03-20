@@ -88,12 +88,18 @@ def register_inspect_weka(mcp: Any) -> None:
 
     @mcp.tool()
     def inspect_weka() -> dict:
-        """Call this tool to inspect WEKA storage resources when the blueprint requires
-        WEKA filesystems or CSI storage. Returns WEKA cluster capacity, filesystem
-        inventory, and mount status. Call alongside or after inspect_cluster when
-        storage details are needed for blueprint sizing.
+        """Call this tool after inspect_cluster when the blueprint requires WEKA
+        filesystems or the cluster uses a 'wekafs' storage class. Returns WEKA cluster
+        capacity (total, used, free in GiB), per-filesystem breakdown, and any
+        warnings about WEKA availability.
 
-        Sequencing: inspect_cluster / inspect_weka -> list_blueprints.
+        Skip this tool only if the blueprint has no WEKA storage requirements and the
+        storage class is not wekafs.
+
+        Returns: captured_at, weka_cluster_name, weka_cluster_status,
+        total_capacity_gib, free_capacity_gib, filesystems (list), warnings.
+
+        Sequencing: inspect_cluster -> inspect_weka -> list_blueprints.
         """
         try:
             from webapp.inspection.weka import collect_weka_inspection

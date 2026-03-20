@@ -112,15 +112,23 @@ def register_apply(mcp: Any) -> None:
     def apply(yaml_text: str, namespace: str, confirmed: bool) -> dict:
         """Apply a WekaAppStore YAML manifest to the cluster.
 
-        IMPORTANT: confirmed must be true (boolean). You must call validate_yaml
-        first to verify the YAML is valid, then show the user what will be created
-        (resource name, namespace, deployment method), and only set confirmed=true
-        after the user explicitly approves the apply.
+        SAFETY RULES — all three must be satisfied before calling apply:
+        1. validate_yaml must have returned valid=true for this YAML
+        2. inspect_cluster must have been re-run AFTER validate_yaml passed to
+           confirm cluster resources haven't changed since the initial inspection
+        3. The user must have explicitly approved — show them the resource name,
+           namespace, deployment method, and component list, then wait for approval
 
-        Setting confirmed=false returns a structured error — no resources are
-        created and no K8s API calls are made.
+        confirmed must be exactly boolean true (not string "true" or integer 1).
+        Any other value for confirmed returns error='approval_required' without
+        creating any K8s resources.
 
-        Sequencing: validate_yaml -> (user approval) -> apply (confirmed=true).
-        After apply, call status to monitor deployment progress.
+        After a successful apply, call status to monitor deployment progress.
+
+        Returns: captured_at, applied (bool), applied_kinds (list), namespace,
+        error (str|None), message (str|None), warnings.
+
+        Sequencing: validate_yaml -> inspect_cluster (re-run) ->
+        (explicit user approval) -> apply (confirmed=True) -> status.
         """
         return _apply_impl(yaml_text=yaml_text, namespace=namespace, confirmed=confirmed)

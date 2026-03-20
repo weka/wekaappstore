@@ -82,14 +82,23 @@ def register_inspect_cluster(mcp: Any) -> None:
 
     @mcp.tool()
     def inspect_cluster() -> dict:
-        """Call this tool FIRST when you need to understand what cluster resources are
-        available before blueprint selection. Returns a flat snapshot of CPU cores,
-        memory, GPU devices, namespaces, and storage classes. Call before
-        list_blueprints to know which blueprints can fit the cluster. Call again after
-        time passes to refresh — results are not cached.
+        """Call this tool FIRST before any other tool when planning a blueprint
+        deployment. Returns a flat snapshot of CPU cores, memory GiB, GPU devices,
+        visible namespaces, and available storage classes. Use the results to determine
+        whether the cluster can host the intended blueprint before calling
+        list_blueprints.
 
-        Sequencing: inspect_cluster -> list_blueprints -> get_blueprint ->
-        validate_yaml -> apply.
+        Also call AGAIN after validate_yaml passes and before calling apply — cluster
+        resources may have changed since the initial inspection. If resources are now
+        insufficient, do not proceed with apply.
+
+        Returns: captured_at, k8s_version, cpu_cores_free, memory_gib_free,
+        gpu_total, gpu_models, storage_classes, default_storage_class,
+        app_store_crd_installed, warnings.
+
+        Sequencing: inspect_cluster (FIRST) -> inspect_weka -> list_blueprints ->
+        get_blueprint -> get_crd_schema -> validate_yaml ->
+        inspect_cluster (AGAIN before apply) -> apply -> status.
         """
         try:
             from webapp.inspection.cluster import collect_cluster_inspection

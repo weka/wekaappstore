@@ -122,18 +122,25 @@ def register_status(mcp: Any) -> None:
 
     @mcp.tool()
     def status(name: str, namespace: str = "default") -> dict:
-        """Read the current deployment state of a named WekaAppStore CR.
+        """Call this tool after apply to monitor deployment progress of a
+        WekaAppStore CR. Pass the resource name and namespace from the applied
+        manifest.
 
         Returns releaseStatus, releaseName, releaseVersion, appStackPhase,
         conditions, and componentStatus from the CR's .status subresource.
 
-        When the CR was just created, the operator may not have reconciled yet —
-        the response will include a warning and appStackPhase will be null.
-        Call again in 10-30 seconds if status appears empty.
+        When the CR was just created by apply, the operator may not have
+        reconciled yet — appStackPhase will be null and a warning is included.
+        Call again in 10-30 seconds and repeat until appStackPhase is 'Ready'
+        or 'Failed'. Report the final status to the user.
 
-        Returns found=false with a warning if the named CR does not exist.
+        Returns found=false with a warning if the named CR does not exist in
+        the specified namespace.
 
-        Sequencing: apply -> status. After apply, call status to monitor
-        deployment progress. Repeat until appStackPhase is 'Ready' or 'Failed'.
+        Returns: captured_at, name, namespace, found (bool), release_status,
+        release_name, app_stack_phase, conditions (list), component_status
+        (list), warnings.
+
+        Sequencing: apply -> status (repeat until appStackPhase is Ready or Failed).
         """
         return _status_impl(name=name, namespace=namespace)
