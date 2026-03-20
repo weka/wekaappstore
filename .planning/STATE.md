@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: OpenClaw MCP Tool Integration
 status: planning
-stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-03-20T06:45:23.107Z"
+stopped_at: Completed 07-02-PLAN.md
+last_updated: "2026-03-20T06:52:36.729Z"
 last_activity: 2026-03-20 — v2.0 roadmap created; Phases 6-9 defined
 progress:
   total_phases: 9
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 21
-  completed_plans: 16
+  completed_plans: 17
   percent: 0
 ---
 
@@ -50,6 +50,7 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 | Phase 06-mcp-scaffold-and-read-only-tools P06-02 | 8min | 2 tasks | 5 files |
 | Phase 06-mcp-scaffold-and-read-only-tools P06-03 | 3min | 2 tasks | 5 files |
 | Phase 07-validation-apply-and-status-tools P01 | 2min | 2 tasks | 4 files |
+| Phase 07-validation-apply-and-status-tools PP02 | 4min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,8 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 - [Phase Phase 06-03]: check_depth() shared helper in test_response_depth.py enforces depth contract globally across all tools
 - [Phase Phase 07-01]: validate_yaml only rejects known v1.0 snake_case fields (blueprint_family, fit_findings, etc.) — camelCase CRD fields pass through to avoid false positives
 - [Phase Phase 07-01]: confirmed is not True (identity check) in apply tool — prevents string 'true' or int 1 from bypassing confirmation gate
+- [Phase Phase 07-02]: Harness calls flatten_* functions directly with pre-built snapshot dicts (avoids mocking K8s collection stack)
+- [Phase Phase 07-02]: ops_log pattern: mock side-effecting methods append (op_type, kwargs) tuples to shared list for assertion
 
 ### Pending Todos
 
@@ -82,6 +85,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T06:45:23.104Z
-Stopped at: Completed 07-01-PLAN.md
+Last session: 2026-03-20T06:52:36.726Z
+Stopped at: Completed 07-02-PLAN.md
 Resume file: None
