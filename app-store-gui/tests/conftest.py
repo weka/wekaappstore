@@ -264,6 +264,14 @@ def compiled_wekaappstore_yaml(compiled_wekaappstore_document: dict) -> str:
 
 
 @pytest.fixture
+def warning_plan_payload(valid_plan_payload: dict) -> dict:
+    payload = deepcopy(valid_plan_payload)
+    payload["components"][0]["helm_chart"].pop("release_name")
+    payload["components"][0].pop("wait_for_ready")
+    return payload
+
+
+@pytest.fixture
 def apply_gateway_input(compiled_wekaappstore_document: dict, compiled_wekaappstore_yaml: str) -> dict:
     return {
         "namespace_override": "ai-platform",
