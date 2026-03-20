@@ -1,14 +1,27 @@
-# NemoClaw Agent Planning For WEKA App Store
+# OpenClaw MCP Tools For WEKA App Store
 
 ## What This Is
 
-This project extends the existing WEKA App Store codebase with a NemoClaw-driven planning workflow that helps users install blueprints through a conversational interface instead of fixed forms alone. It builds on the current FastAPI web app, Kubernetes operator, and `WekaAppStore` CRD by adding agent-assisted plan generation, cluster fit assessment, and review-before-apply for blueprint installs.
+This project extends the WEKA App Store with an MCP tool server that lets OpenClaw/NemoClaw agents inspect cluster resources, browse blueprints, validate YAML, and apply installations through the existing WEKA operator. The agent handles all conversation, reasoning, and YAML generation — we provide the tools it calls.
 
-The primary users are platform users and cluster admins deploying blueprints into Kubernetes clusters, plus maintainers who need faster ways to author operator-compatible blueprint definitions.
+The primary users are platform users and cluster admins who interact with OpenClaw to deploy blueprints, plus maintainers who use the agent to draft new blueprint definitions.
 
 ## Core Value
 
-Users can describe what they want to deploy, and the system turns that into a safe, validated WEKA App Store installation plan that actually fits the target cluster before anything is applied.
+OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
+
+## Current Milestone: v2.0 OpenClaw MCP Tool Integration
+
+**Goal:** Build an MCP server exposing WEKA App Store capabilities as tools OpenClaw can call, with a mock harness for development without a live agent.
+
+**Target features:**
+- MCP server with read-only cluster and WEKA inspection tools
+- Blueprint catalog and CRD schema tools for agent context
+- YAML validation tool against CRD/operator contract
+- Approval-gated apply tool that creates `WekaAppStore` CRs
+- SKILL.md defining the agent's blueprint planning workflow
+- Mock agent harness for end-to-end testing without live OpenClaw
+- Removal of deprecated backend-brain code from v1.0
 
 ## Requirements
 
@@ -21,46 +34,50 @@ Users can describe what they want to deploy, and the system turns that into a sa
 
 ### Active
 
-- [ ] Add a NemoClaw-backed chat workflow in the web app for conversational blueprint planning and follow-up questions.
-- [ ] Add bounded backend tools for Kubernetes inspection, including GPU count, GPU type, GPU memory, CPU availability, and RAM availability.
-- [ ] Add bounded backend tools for WEKA API inspection, including storage capacity, available space, and existing filesystems.
-- [ ] Generate structured installation plans and operator-compatible `WekaAppStore` YAML from NemoClaw output.
-- [ ] Validate cluster fit, storage fit, and operator contract compatibility before allowing apply.
-- [ ] Preserve explicit user review and approval before the existing backend apply path is invoked.
-- [ ] Support maintainer-facing draft blueprint generation compatible with repo conventions and operator semantics.
+- [ ] MCP server exposes bounded read-only tools for Kubernetes cluster inspection (GPU, CPU, RAM, namespaces, storage classes)
+- [ ] MCP server exposes bounded read-only tools for WEKA storage inspection (capacity, filesystems, mounts)
+- [ ] MCP server exposes blueprint catalog and schema tools for agent consumption
+- [ ] MCP server exposes a YAML validation tool that checks against CRD and operator contract
+- [ ] MCP server exposes an approval-gated apply tool that creates `WekaAppStore` CRs through the existing operator path
+- [ ] SKILL.md defines the agent workflow for blueprint planning, validation, and installation
+- [ ] Mock agent harness can exercise the full tool chain without a live OpenClaw instance
+- [ ] Deprecated v1.0 backend-brain code (session service, family matcher, compiler, session routes) is removed
 
 ### Out of Scope
 
-- Autonomous unrestricted `kubectl` or `helm` execution by NemoClaw — v1 must keep mutation authority in the existing backend and operator paths.
-- Replacing the `WekaAppStore` CRD or the current operator reconciliation contract — the new workflow must build on the current runtime model, not swap it out.
-- Broad authentication redesign for the GUI — valuable, but not the scope of this planning initiative.
-- General Kubernetes authoring outside the WEKA app store/operator model — this project is for bounded blueprint planning and installation.
+- Building a custom chat UI — OpenClaw provides the conversation interface natively
+- Reimplementing agent reasoning in Python — OpenClaw handles intent, follow-ups, and plan generation
+- Session/conversation state management — OpenClaw has built-in memory
+- Autonomous unrestricted kubectl/helm execution — tools are bounded and read-only except for the gated apply
+- Replacing the `WekaAppStore` CRD or operator contract — the MCP tools work with the existing runtime model
+- Live OpenClaw/NemoClaw deployment — development uses mock harness; live integration is a follow-on milestone
 
 ## Context
 
-The codebase is already a brownfield Kubernetes application bundle with a FastAPI and Jinja web UI in `app-store-gui/webapp/main.py`, a Kopf-based operator in `operator_module/main.py`, and a Helm chart in `weka-app-store-operator-chart/`. The current architecture already supports applying blueprint manifests that create `WekaAppStore` custom resources and reconciling those resources into Helm releases and Kubernetes manifests.
+The codebase is a brownfield Kubernetes application bundle with a FastAPI/Jinja web UI, a Kopf-based operator, and a Helm chart. The v1.0 milestone built backend-owned planning logic (typed plan contracts, cluster/WEKA inspection, session management, family matching, YAML compilation) under the assumption that NemoClaw was a thin model API. After discovering that OpenClaw is a full agentic framework with native tool-use, conversation management, and MCP support, the architecture was pivoted to tool-registration-first.
 
-Recent codebase mapping identified several constraints that matter to this effort: blueprint apply logic is duplicated in the GUI, namespace handling is fragile, runtime validation is mostly imperative, and automated test coverage is currently limited. Those issues make it important to introduce structured plan validation before increasing the complexity of the apply flow.
+Reusable from v1.0: `inspection/cluster.py` (K8s inspection logic), `planning/apply_gateway.py` (apply path), `planning/validator.py` (CRD validation rules). These become implementations behind MCP tools.
 
-The new PRD defines a NemoClaw integration that adds a chat-first UX in the web app and bounded inspection tools so the system can reason about GPU inventory, GPU memory, CPU, RAM, and WEKA storage capacity before proposing blueprint installs. This is especially important for large LLM deployments and multi-blueprint coexistence on the same Kubernetes cluster.
+OpenClaw connects via WebSocket Gateway, uses OpenAI-compatible model API, and registers tools through MCP servers, TypeScript plugins, or SKILL.md files. NemoClaw adds NVIDIA inference (NIM/Nemotron) and sandboxed execution on top.
 
 ## Constraints
 
-- **Tech stack**: Must fit into the existing FastAPI GUI, Kopf operator, Helm chart, and `WekaAppStore` CRD architecture — avoids introducing a second execution model.
-- **Compatibility**: No CRD-breaking changes in v1 — current operator semantics must continue to work for generated app stacks.
-- **Safety**: NemoClaw must use bounded, auditable tools only — unrestricted cluster mutation is explicitly out of scope.
-- **Data dependency**: Cluster-fit decisions depend on trustworthy Kubernetes resource signals and WEKA API responses — capacity logic is only as good as those inputs.
-- **Quality**: Existing test coverage is thin in key deploy paths — validation and tests need to be added early to reduce regression risk.
+- **Tech stack**: MCP server in Python (reuses existing inspection/apply code), must work as a standalone process alongside the FastAPI backend
+- **Compatibility**: No CRD-breaking changes — MCP tools produce standard `WekaAppStore` resources the operator already handles
+- **Safety**: All inspection tools read-only; apply tool requires approval gate; no unrestricted cluster exec
+- **Development**: Must be fully testable without a live OpenClaw/NemoClaw instance via mock harness
+- **MCP protocol**: Tools must conform to MCP server specification for OpenClaw compatibility
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Build on the existing WEKA App Store repo as a brownfield project | The current GUI, operator, and CRD already implement the safe apply path and runtime contract the new workflow needs | — Pending |
-| Use NemoClaw as a planning layer, not the execution authority | Keeps cluster mutation in deterministic backend/operator code paths and reduces safety risk | — Pending |
-| Make the user interaction chat-first in the web app | The PRD requires iterative planning, follow-up questions, and explanation of cluster-fit constraints | — Pending |
-| Treat GPU, CPU, RAM, and WEKA storage inspection as first-class bounded tools | Capacity assessment is central to deciding whether blueprint installs and large models can fit the cluster | — Pending |
-| Preserve explicit human review before apply | This aligns with the existing safety posture and prevents silent cluster mutations from agent output | — Pending |
+| Build on the existing WEKA App Store repo as a brownfield project | The current GUI, operator, and CRD already implement the safe apply path and runtime contract | ✓ Good |
+| Pivot from backend-brain to OpenClaw-native tool registration | OpenClaw is a full agent framework — reimplementing its reasoning in Python duplicates its capabilities | — Pending |
+| Provide tools via MCP server, not custom API endpoints | OpenClaw has native MCP support; MCP is the standard tool integration path | — Pending |
+| Remove v1.0 backend-brain code instead of keeping it | Clean break avoids confusion about which code path is authoritative | — Pending |
+| Develop with mock harness before live OpenClaw | NemoClaw not yet available in environment; mock proves tool chain works | — Pending |
+| Let OpenClaw generate YAML from CRD schema context | The agent reasons about YAML structure natively; validate_yaml tool catches errors | — Pending |
 
 ---
-*Last updated: 2026-03-20 after initialization*
+*Last updated: 2026-03-20 after v2.0 milestone start (OpenClaw pivot)*

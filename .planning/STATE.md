@@ -1,111 +1,53 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
+milestone: v2.0
+milestone_name: OpenClaw MCP Tool Integration
 status: in_progress
-last_updated: "2026-03-20T03:48:19.626Z"
+last_updated: "2026-03-20T12:00:00Z"
 progress:
-  total_phases: 5
-  completed_phases: 3
-  total_plans: 12
-  completed_plans: 12
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # STATE.md
 
 **Initialized:** 2026-03-20
-**Current status:** Phase 3 complete, Phase 4 pending
+**Current status:** Defining requirements
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-03-20)
 
-**Core value:** Users can describe what they want to deploy, and the system turns that into a safe, validated WEKA App Store installation plan that actually fits the target cluster before anything is applied.
-**Current focus:** Phase 4 - Review, Approval, And Apply Gating
+**Core value:** OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
+**Current focus:** Defining v2.0 requirements
 
 ## Current Roadmap Status
 
-| Phase | Name | Status |
-|-------|------|--------|
-| 1 | Plan Contract And YAML Translation | Complete |
-| 2 | Cluster And WEKA Inspection Signals | Complete |
-| 3 | Conversational Planning Sessions | Complete |
-| 4 | Review, Approval, And Apply Gating | Pending |
-| 5 | Maintainer Draft Authoring And Test Hardening | Pending |
+Not yet created — defining requirements.
 
 ## Current Execution Position
 
-- Current phase: `04-review-approval-and-apply-gating`
-- Current plan: `04-01`
-- Completed plans this phase: none yet
-- Last completed plan: `03-04`
+- Current phase: Not started (defining requirements)
+- Current plan: —
+- Status: Defining requirements
+- Last activity: 2026-03-20 — Milestone v2.0 started
+
+## Accumulated Context
+
+Carried from v1.0:
+- Reusable: `inspection/cluster.py`, `planning/apply_gateway.py`, `planning/validator.py`
+- To remove: `planning/session_service.py`, `planning/session_store.py`, `planning/family_matcher.py`, `planning/compiler.py`, planning session routes in `main.py`, `planning_session.html`
+- The `WekaAppStore` CRD and Kopf operator are unchanged and remain the execution path
+- Existing blueprint apply logic was already extracted into `apply_gateway.py` during v1.0
 
 ## Decisions
 
-- Extract the duplicated YAML document apply logic into `app-store-gui/webapp/planning/apply_gateway.py` instead of introducing planner-only execution code.
-- Keep namespace override, cluster-scope handling, and `WekaAppStore` `CustomObjectsApi` routing aligned with the existing backend path.
-- Expose both functional helpers and an `ApplyGateway` wrapper so `main.py` can adopt the gateway with minimal follow-up churn.
-- Compile only validated structured plans into canonical YAML and refuse to emit preview/apply artifacts when blocking validation issues remain.
-- Reuse the shared `ApplyGateway` for both legacy YAML apply helpers and structured-plan handoff so planner output stays on the existing CRD/operator path.
-- [Phase 02]: Keep Phase 1 payloads valid by allowing fit_findings to omit domain metadata while requiring fail-closed semantics once Phase 2 domains are present.
-- [Phase 02]: Model inspection freshness and blockers per domain so later cluster and WEKA services can report partial GPU or storage facts without inventing ad hoc fields.
-- [Phase 02]: Keep the existing cluster-status response contract by flattening planner-grade inspection snapshots for current UI consumers.
-- [Phase 02]: Inject Kubernetes client seams into cluster inspection so bounded read-only behavior stays deterministic under pytest.
-- [Phase 02]: Use only WekaCluster custom resources as the WEKA inspection source so planner inspection stays bounded to operator-visible state.
-- [Phase 02]: Restrict the planner tool surface to explicit inspection intents and append audit metadata for every inspection call.
-- [Phase 02]: Merge cluster and WEKA inspection domains into one correlation-scoped planner snapshot so fit reasoning shares stable provenance.
-- [Phase 02]: Classify preview and apply failures by explicit stages instead of ad hoc error strings so later UI flows can surface deterministic diagnostics.
-- [Phase 03]: Represent restart as a replacement session linked to the original so audit history stays intact.
-- [Phase 03]: Keep the initial planning-session seam file-backed with injected clocks and ID factories for deterministic pytest coverage.
-- [Phase 03]: Keep supported-family routing backend-owned via an explicit keyword catalog derived from repo blueprint metadata.
-- [Phase 03]: Preserve the previously matched family across follow-up turns so short answers do not re-route the session.
-- [Phase 03]: Inject the latest inspection snapshot and fit findings into every draft revision before validation.
-- [Phase 03]: Keep the first planning chat surface server-rendered in Jinja so it reuses the existing FastAPI stack and backend-owned session state.
-- [Phase 03]: Expose a planning-specific SSE endpoint that emits session-state summaries instead of reusing deployment streaming semantics.
-- [Phase 03]: Inject the planning session service through app.state in tests so route coverage stays deterministic without touching deployment paths.
-- [Phase 03]: Validate planning session state and pending follow-up eligibility before creating new replay metadata.
-- [Phase 03]: Treat restarted and abandoned planning sessions as immutable history for later review and apply gating.
-- [Phase 03]: Reject session lifecycle markers at the structured-plan validator boundary so conversational state never reaches YAML-generation inputs.
-
-## Recent Progress
-
-- Completed `03-04-PLAN.md` and wrote `.planning/phases/03-conversational-planning-sessions/03-04-SUMMARY.md`.
-- Completed `03-03-PLAN.md` and wrote `.planning/phases/03-conversational-planning-sessions/03-03-SUMMARY.md`.
-- Completed `03-02-PLAN.md` and wrote `.planning/phases/03-conversational-planning-sessions/03-02-SUMMARY.md`.
-- Completed `03-01-PLAN.md` and wrote `.planning/phases/03-conversational-planning-sessions/03-01-SUMMARY.md`.
-- Completed `02-02-PLAN.md` and wrote `.planning/phases/02-cluster-and-weka-inspection-signals/02-02-SUMMARY.md`.
-- Completed `02-03-PLAN.md` and wrote `.planning/phases/02-cluster-and-weka-inspection-signals/02-03-SUMMARY.md`.
-- Completed `02-04-PLAN.md` and wrote `.planning/phases/02-cluster-and-weka-inspection-signals/02-04-SUMMARY.md`.
-- Integrated bounded inspection snapshots into planner fit findings and stage-classified preview/apply diagnostics with deterministic mocked coverage.
-- Added backend-owned planning-session models, a replayable local session store, and deterministic restart or abandon lifecycle tests for Phase 3.
-- Added deterministic supported-family matching plus a backend session service that replays each turn against bounded inspection evidence and stores correlation-aware draft revisions.
-
-## Performance Metrics
-
-| Phase | Plan | Duration | Tasks | Files | Recorded |
-|-------|------|----------|-------|-------|----------|
-| 03 | 02 | 9 min | 3 | 6 | 2026-03-20T03:20:26Z |
-| 03 | 03 | 12 min | 3 | 5 | 2026-03-20T03:37:22Z |
-| 03 | 04 | 9 min | 3 | 8 | 2026-03-20T03:48:19Z |
-
-## Session Info
-
-- Last session: `2026-03-20T03:48:19Z`
-- Stopped At: `Completed 03-04-PLAN.md`
-
-## Latest Completed Setup
-
-- Initialized GSD project from `.planning/PRD-nemoclaw-integration.md`
-- Wrote `.planning/PROJECT.md`
-- Wrote `.planning/config.json`
-- Completed research set in `.planning/research/`
-- Defined v1 requirements in `.planning/REQUIREMENTS.md`
-- Created initial roadmap in `.planning/ROADMAP.md`
-
-## Next Action
-
-- Plan `04-01` to expose reviewable fit and YAML artifacts while keeping apply behind explicit approval.
-- Preserve the separation between active planning-session drafts and later review or apply transitions.
+- [v2.0]: Pivot from backend-brain architecture to OpenClaw-native MCP tool registration
+- [v2.0]: Remove deprecated v1.0 backend-brain code (session service, family matcher, compiler, session routes)
+- [v2.0]: Build MCP server in Python reusing existing inspection and apply code
+- [v2.0]: Develop with mock agent harness since NemoClaw not yet available in environment
 
 ---
-*Last updated: 2026-03-20 after completing 03-04-PLAN.md*
+*Last updated: 2026-03-20 after milestone v2.0 start*
