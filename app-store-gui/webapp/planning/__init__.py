@@ -17,6 +17,13 @@ from .models import (
     ValuesFileReference,
 )
 from .validator import validate_structured_plan
+from .compiler import (
+    PlanCompilationError,
+    compile_plan_to_wekaappstore,
+    compile_plan_to_yaml,
+    render_wekaappstore_yaml,
+    validate_and_compile_plan,
+)
 from .apply_gateway import (
     ApplyGateway,
     ApplyGatewayDependencies,
@@ -38,12 +45,17 @@ __all__ = [
     "HelmChartPlan",
     "NamespaceStrategy",
     "NormalizationWarning",
+    "PlanCompilationError",
     "PlanValidationError",
     "ReadinessCheckPlan",
     "StructuredPlan",
     "UnresolvedQuestion",
     "ValidationResult",
     "ValuesFileReference",
+    "compile_plan_to_wekaappstore",
+    "compile_plan_to_yaml",
+    "render_wekaappstore_yaml",
+    "validate_and_compile_plan",
     "validate_structured_plan",
     "apply_yaml_content_with_namespace",
     "apply_yaml_documents_with_namespace",

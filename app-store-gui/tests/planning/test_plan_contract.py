@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 
 import pytest
+import yaml
 
 
 PHASE_ONE_REQUIREMENTS = {"PLAN-02", "PLAN-03", "PLAN-06", "PLAN-07"}
@@ -293,6 +294,33 @@ def test_validator_result_serializes_to_a_stable_contract_payload(valid_plan_pay
         "warnings": [],
         "errors": [],
     }
+
+
+def test_main_preview_helper_validates_and_compiles_structured_plans(
+    valid_plan_payload: dict,
+) -> None:
+    main = importlib.import_module("webapp.main")
+
+    preview = main.build_structured_plan_preview(valid_plan_payload)
+
+    assert preview["valid"] is True
+    assert preview["errors"] == []
+    assert preview["compiled_document"]["kind"] == "WekaAppStore"
+    assert preview["compiled_document"]["metadata"]["namespace"] == "ai-platform"
+    assert yaml.safe_load(preview["yaml"]) == preview["compiled_document"]
+
+
+def test_main_preview_helper_returns_validation_errors_without_yaml(
+    invalid_plan_payloads: dict[str, dict],
+) -> None:
+    main = importlib.import_module("webapp.main")
+
+    preview = main.build_structured_plan_preview(invalid_plan_payloads["blocking_unresolved_question"])
+
+    assert preview["valid"] is False
+    assert preview["compiled_document"] is None
+    assert preview["yaml"] is None
+    assert preview["errors"][0]["code"] == "blocking_unresolved_question"
 
 
 def test_plan_contract_suite_excludes_later_phase_topics(
