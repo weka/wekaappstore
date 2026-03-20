@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 import sys
+from typing import Any
 
 import pytest
 import yaml
@@ -328,6 +329,104 @@ def blocked_gpu_fit_findings(complete_fit_findings: dict) -> dict:
     payload["domains"]["gpu"]["blockers"] = deepcopy(payload["blockers"])
     payload["inspection_snapshot"]["domains"]["gpu"] = deepcopy(payload["domains"]["gpu"])
     return payload
+
+
+@pytest.fixture
+def mocked_cluster_inspection_topology() -> dict[str, Any]:
+    return {
+        "namespaces": ["default", "ai-platform", "weka"],
+        "storage_classes": [
+            {
+                "name": "gp3",
+                "annotations": {},
+                "provisioner": "ebs.csi.aws.com",
+                "parameters": {"type": "gp3"},
+            },
+            {
+                "name": "wekafs",
+                "annotations": {"storageclass.kubernetes.io/is-default-class": "true"},
+                "provisioner": "csi.weka.io",
+                "parameters": {"filesystemName": "weka-home"},
+                "reclaim_policy": "Delete",
+                "volume_binding_mode": "Immediate",
+                "allow_volume_expansion": True,
+            },
+        ],
+        "nodes": [
+            {
+                "name": "cpu-node-1",
+                "labels": {},
+                "allocatable": {"cpu": "16", "memory": "128Gi"},
+                "capacity": {"cpu": "16", "memory": "128Gi"},
+            },
+            {
+                "name": "gpu-node-1",
+                "labels": {
+                    "nvidia.com/gpu.product": "NVIDIA L40",
+                    "nvidia.com/gpu.memory": "48Gi",
+                },
+                "allocatable": {"cpu": "32", "memory": "256Gi", "nvidia.com/gpu": "4"},
+                "capacity": {"cpu": "32", "memory": "256Gi", "nvidia.com/gpu": "4"},
+            },
+        ],
+        "pods": [
+            {
+                "name": "research-api-0",
+                "namespace": "ai-platform",
+                "phase": "Running",
+                "node_name": "cpu-node-1",
+                "containers": [
+                    {
+                        "requests": {"cpu": "4", "memory": "16Gi"},
+                    }
+                ],
+                "init_containers": [],
+            },
+            {
+                "name": "trainer-0",
+                "namespace": "ai-platform",
+                "phase": "Running",
+                "node_name": "gpu-node-1",
+                "containers": [
+                    {
+                        "requests": {"cpu": "8", "memory": "64Gi", "nvidia.com/gpu": "2"},
+                    }
+                ],
+                "init_containers": [],
+            },
+        ],
+        "cluster_policies": [{"metadata": {"name": "gpu-cluster-policy"}}],
+        "daemon_sets": {},
+        "app_store_crs": [
+            {"metadata": {"namespace": "default", "name": "app-store-cluster-init"}},
+        ],
+        "k8s_version": "v1.30.1",
+    }
+
+
+@pytest.fixture
+def mocked_weka_cluster_payload() -> dict[str, Any]:
+    return {
+        "items": [
+            {
+                "metadata": {"name": "weka-prod", "namespace": "weka"},
+                "status": {
+                    "status": "Ready",
+                    "stats": {
+                        "capacity": {"totalBytes": 2199023255552},
+                        "filesystem": {"totalAvailableCapacity": 1649267441664},
+                        "filesystems": [
+                            {
+                                "name": "weka-home",
+                                "totalBytes": 1099511627776,
+                                "availableBytes": 824633720832,
+                            }
+                        ],
+                    },
+                },
+            }
+        ]
+    }
 
 
 @pytest.fixture

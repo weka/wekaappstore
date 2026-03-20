@@ -16,17 +16,23 @@ import subprocess
 import shutil
 import platform
 import logging
+import uuid
 
 from kubernetes import client, config, utils
 from kubernetes.client.rest import ApiException
 from jinja2 import Environment
+from webapp.inspection import collect_cluster_inspection, collect_weka_inspection, flatten_cluster_status
 from webapp.planning import (
     ApplyGateway,
     PlanCompilationError,
+    build_stage_error,
     compile_plan_to_wekaappstore,
     compile_plan_to_yaml,
+    derive_fit_findings_from_snapshot,
+    merge_inspection_results,
     validate_structured_plan,
 )
+from webapp.planning.inspection_tools import PlanningInspectionTools
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -245,257 +251,51 @@ def load_kube_config() -> None:
 
 
 def get_cluster_status() -> Dict[str, Any]:
-    """Collects cluster status: CPU/GPU node counts, GPU Operator, K8s version, CRD installed, default StorageClass.
+    """Collect bounded cluster status through the shared inspection service."""
+    snapshot = collect_cluster_inspection(load_kube_config=load_kube_config)
+    return flatten_cluster_status(snapshot)
 
-    Also computes used vs free resources based on pod resource requests scheduled on Ready nodes.
-    """
-    load_kube_config()
 
-    core = client.CoreV1Api()
-    ext = client.ApiextensionsV1Api()
-    storage_api = client.StorageV1Api()
+def _new_correlation_id() -> str:
+    return f"plan-{uuid.uuid4().hex[:12]}"
 
-    cpu_nodes = 0
-    gpu_nodes = 0
-    cpu_milli_total = 0
-    gpu_devices_total = 0
 
-    ready_node_names = set()
-
-    def _cpu_to_millicores(val: Any) -> int:
-        try:
-            if val is None:
-                return 0
-            s = str(val).strip()
-            if s.endswith('m'):
-                return int(float(s[:-1]))
-            # handle plain integers/floats like '4' or '4.5'
-            return int(float(s) * 1000)
-        except Exception:
-            return 0
-
-    try:
-        nodes = core.list_node().items
-        for n in nodes:
-            # Only count Ready nodes
-            conditions = {c.type: c.status for c in (n.status.conditions or [])}
-            is_ready = conditions.get("Ready") == "True"
-            if not is_ready:
-                continue
-            ready_node_names.add(n.metadata.name)
-            alloc = n.status.allocatable or {}
-            # Tally CPU millicores from all Ready nodes
-            cpu_milli_total += _cpu_to_millicores(alloc.get('cpu'))
-            # GPU detection: allocatable nvidia.com/gpu > 0
-            gpu_alloc = alloc.get("nvidia.com/gpu")
-            try:
-                gpu_count = int(gpu_alloc) if gpu_alloc is not None else 0
-            except ValueError:
-                # Sometimes it's a string number
-                try:
-                    gpu_count = int(str(gpu_alloc))
-                except Exception:
-                    gpu_count = 0
-            gpu_devices_total += max(gpu_count, 0)
-            if gpu_count and gpu_count > 0:
-                gpu_nodes += 1
-            else:
-                cpu_nodes += 1
-    except Exception as e:
-        # If we can't list nodes, surface minimal info
-        return {
-            "cpu_nodes": None,
-            "gpu_nodes": None,
-            "gpu_operator_installed": None,
-            "k8s_version": None,
-            "app_store_crd_installed": None,
-            "app_store_cluster_init_present": None,
-            "app_store_crs": [],
-            "default_storage_class": None,
-            "default_storage_class_details": None,
-            "error": f"Error fetching node data: {e}"
-        }
-
-    # Compute resource usage (based on requests) on Ready nodes only
-    cpu_milli_used = 0
-    gpu_devices_used = 0
-    try:
-        pods = core.list_pod_for_all_namespaces().items
-        for p in pods:
-            # Skip completed/failed pods
-            phase = (p.status.phase or "").lower()
-            if phase in ("succeeded", "failed"):
-                continue
-            node_name = getattr(p.spec, 'node_name', None)
-            if node_name not in ready_node_names:
-                continue
-            # Sum container requests
-            containers = list(p.spec.containers or [])
-            init_containers = list(getattr(p.spec, 'init_containers', []) or [])
-            for c in containers + init_containers:
-                res = getattr(c, 'resources', None)
-                reqs = getattr(res, 'requests', None) if res else None
-                if not reqs:
-                    continue
-                cpu_val = reqs.get('cpu') if isinstance(reqs, dict) else None
-                gpu_val = reqs.get('nvidia.com/gpu') if isinstance(reqs, dict) else None
-                cpu_milli_used += _cpu_to_millicores(cpu_val)
-                try:
-                    if gpu_val is not None:
-                        gpu_devices_used += int(str(gpu_val))
-                except Exception:
-                    pass
-    except Exception:
-        # If listing pods fails, leave used as 0
-        pass
-
-    # Kubernetes version
-    try:
-        version_api = client.VersionApi()
-        version = version_api.get_code().git_version
-    except Exception:
-        version = None
-
-    # NVIDIA GPU Operator detection (more accurate):
-    # 1) Check presence of ClusterPolicy custom resources (group=nvidia.com, version=v1, plural=clusterpolicies)
-    # 2) Fallback: check for the NVIDIA device plugin DaemonSet readiness in common namespaces
-    gpu_operator_installed = None
-    try:
-        co_api = client.CustomObjectsApi()
-        try:
-            cps = co_api.list_cluster_custom_object(group="nvidia.com", version="v1", plural="clusterpolicies")
-            items = (cps or {}).get("items", [])
-            if isinstance(items, list) and len(items) > 0:
-                gpu_operator_installed = True
-            else:
-                gpu_operator_installed = False
-        except ApiException as ae:
-            if ae.status == 404:
-                gpu_operator_installed = False
-            else:
-                gpu_operator_installed = None
-        # If not clearly installed, try DaemonSet probe
-        if gpu_operator_installed is False:
-            try:
-                apps_api = client.AppsV1Api()
-                candidate_namespaces = ["gpu-operator-resources", "nvidia-device-plugin", "kube-system", "gpu-operator"]
-                found_ready = False
-                for ns in candidate_namespaces:
-                    try:
-                        dss = apps_api.list_namespaced_daemon_set(ns).items
-                    except ApiException as ae2:
-                        if ae2.status in (403, 404):
-                            continue
-                        raise
-                    for ds in dss:
-                        name = ds.metadata.name or ""
-                        if "nvidia-device-plugin" in name:
-                            status_ds = ds.status or {}
-                            desired = status_ds.desired_number_scheduled or 0
-                            ready = status_ds.number_ready or 0
-                            if desired and ready and ready > 0:
-                                found_ready = True
-                                break
-                    if found_ready:
-                        break
-                if found_ready:
-                    gpu_operator_installed = True
-            except Exception:
-                pass
-    except Exception:
-        gpu_operator_installed = None
-
-    # WekaAppStore CRD + CRs detection
-    app_store_crd_installed = None
-    cluster_init_present = None
-    applied_crs: List[Dict[str, str]] = []
-    try:
-        # Correct CRD name as defined in warrp-crd.yaml
-        ext.read_custom_resource_definition("wekaappstores.warp.io")
-        app_store_crd_installed = True
-        try:
-            co_api = client.CustomObjectsApi()
-            crs = co_api.list_cluster_custom_object(group="warp.io", version="v1alpha1", plural="wekaappstores")
-            items = (crs or {}).get("items", [])
-            names = []
-            for it in items:
-                meta = (it or {}).get("metadata", {}) or {}
-                ns = meta.get("namespace") or "default"
-                nm = meta.get("name") or ""
-                if nm:
-                    names.append({"namespace": ns, "name": nm})
-            applied_crs = names
-            cluster_init_present = any(x.get("name") == "app-store-cluster-init" for x in names)
-        except ApiException as ae2:
-            if ae2.status == 404:
-                # CRD exists but no CRs
-                applied_crs = []
-                cluster_init_present = False
-            else:
-                applied_crs = []
-                cluster_init_present = None
-        except Exception:
-            applied_crs = []
-            cluster_init_present = None
-    except ApiException as ae:
-        if ae.status == 404:
-            app_store_crd_installed = False
-            cluster_init_present = False
-        else:
-            app_store_crd_installed = None
-    except Exception:
-        app_store_crd_installed = None
-
-    # Default StorageClass detection
-    default_sc = None
-    default_sc_details = None
-    try:
-        scs = storage_api.list_storage_class().items
-        for sc in scs:
-            ann = (sc.metadata.annotations or {})
-            is_default = ann.get("storageclass.kubernetes.io/is-default-class") or ann.get("storageclass.beta.kubernetes.io/is-default-class")
-            if str(is_default).lower() == "true":
-                default_sc = sc.metadata.name
-                # Collect detailed fields for UI
-                default_sc_details = {
-                    "name": sc.metadata.name,
-                    "provisioner": sc.provisioner,
-                    "parameters": dict(sc.parameters or {}),
-                    "reclaimPolicy": getattr(sc, "reclaim_policy", None) or (getattr(sc, "reclaimPolicy", None)),
-                    "volumeBindingMode": getattr(sc, "volume_binding_mode", None) or (getattr(sc, "volumeBindingMode", None)),
-                    "allowVolumeExpansion": getattr(sc, "allow_volume_expansion", None) or (getattr(sc, "allowVolumeExpansion", None)),
-                    "annotations": dict(sc.metadata.annotations or {}),
-                }
-                break
-    except Exception:
-        default_sc = None
-        default_sc_details = None
-
-    # Convert CPU millicores to cores (rounded to 2 decimals)
-    cpu_cores_total = round(cpu_milli_total / 1000.0, 2)
-    cpu_cores_used = round(cpu_milli_used / 1000.0, 2)
-    cpu_cores_free = round(max(cpu_milli_total - cpu_milli_used, 0) / 1000.0, 2)
-
-    gpu_devices_used = int(gpu_devices_used)
-    gpu_devices_free = max(int(gpu_devices_total) - gpu_devices_used, 0)
-
-    return {
-        "cpu_nodes": cpu_nodes,
-        "gpu_nodes": gpu_nodes,
-        "cpu_cores_total": cpu_cores_total,
-        "cpu_cores_used": cpu_cores_used,
-        "cpu_cores_free": cpu_cores_free,
-        "gpu_devices_total": gpu_devices_total,
-        "gpu_devices_used": gpu_devices_used,
-        "gpu_devices_free": gpu_devices_free,
-        "gpu_operator_installed": gpu_operator_installed,
-        "k8s_version": version,
-        "app_store_crd_installed": app_store_crd_installed,
-        "app_store_cluster_init_present": cluster_init_present,
-        "app_store_crs": [f"{x['namespace']}/{x['name']}" for x in applied_crs],
-        "default_storage_class": default_sc,
-        "default_storage_class_details": default_sc_details,
+def build_planning_inspection_snapshot(*, correlation_id: Optional[str] = None) -> Dict[str, Any]:
+    """Build one merged planner-facing inspection snapshot from bounded cluster and WEKA services."""
+    correlation_id = correlation_id or _new_correlation_id()
+    cluster_result = PLANNING_INSPECTION_TOOLS.inspect(
+        "cluster_snapshot", correlation_id=correlation_id
+    )
+    weka_result = PLANNING_INSPECTION_TOOLS.inspect(
+        "weka_storage", correlation_id=correlation_id
+    )
+    snapshot = merge_inspection_results(
+        [cluster_result["result"], weka_result["result"]],
+        correlation_id=correlation_id,
+    )
+    snapshot["sources"] = {
+        "cluster": cluster_result["audit"],
+        "weka": weka_result["audit"],
     }
+    return snapshot
+
+
+def build_fit_findings_from_inspection(
+    *,
+    inspection_snapshot: Optional[Dict[str, Any]] = None,
+    required_domains: Optional[List[str]] = None,
+    correlation_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    snapshot = inspection_snapshot or build_planning_inspection_snapshot(
+        correlation_id=correlation_id
+    )
+    return derive_fit_findings_from_snapshot(snapshot, required_domains=required_domains)
+
+
+PLANNING_INSPECTION_TOOLS = PlanningInspectionTools(
+    cluster_collector=lambda: collect_cluster_inspection(load_kube_config=load_kube_config),
+    weka_collector=lambda: collect_weka_inspection(load_kube_config=load_kube_config),
+)
 
 
 def ensure_namespace_exists(namespace: Optional[str]) -> None:
@@ -681,8 +481,23 @@ def apply_blueprint_content_with_namespace(content: str, namespace: str) -> Dict
     return PLANNING_APPLY_GATEWAY.apply_content(content, namespace)
 
 
-def build_structured_plan_preview(payload: Dict[str, Any]) -> Dict[str, Any]:
-    validation = validate_structured_plan(payload)
+def build_structured_plan_preview(
+    payload: Dict[str, Any],
+    *,
+    inspection_snapshot: Optional[Dict[str, Any]] = None,
+    required_domains: Optional[List[str]] = None,
+    correlation_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    correlation_id = correlation_id or _new_correlation_id()
+    working_payload = copy.deepcopy(payload)
+    if inspection_snapshot is not None:
+        working_payload["fit_findings"] = build_fit_findings_from_inspection(
+            inspection_snapshot=inspection_snapshot,
+            required_domains=required_domains,
+            correlation_id=correlation_id,
+        )
+
+    validation = validate_structured_plan(working_payload)
     if not validation.valid or validation.plan is None:
         return {
             "valid": False,
@@ -690,28 +505,90 @@ def build_structured_plan_preview(payload: Dict[str, Any]) -> Dict[str, Any]:
             "warnings": [warning.to_dict() for warning in validation.warnings],
             "compiled_document": None,
             "yaml": None,
+            "correlation_id": correlation_id,
+            "failure_stage": "validation",
+            "inspection_snapshot": inspection_snapshot,
         }
 
-    compiled_document = compile_plan_to_wekaappstore(validation.plan)
-    rendered_yaml = compile_plan_to_yaml(validation.plan)
+    try:
+        compiled_document = compile_plan_to_wekaappstore(validation.plan)
+        rendered_yaml = compile_plan_to_yaml(validation.plan)
+    except PlanCompilationError as exc:
+        return {
+            "valid": False,
+            "errors": [build_stage_error("yaml_generation", exc, correlation_id=correlation_id)],
+            "warnings": [warning.to_dict() for warning in validation.warnings],
+            "compiled_document": None,
+            "yaml": None,
+            "correlation_id": correlation_id,
+            "failure_stage": "yaml_generation",
+            "inspection_snapshot": inspection_snapshot,
+        }
     return {
         "valid": True,
         "errors": [],
         "warnings": [warning.to_dict() for warning in validation.warnings],
         "compiled_document": compiled_document,
         "yaml": rendered_yaml,
+        "correlation_id": correlation_id,
+        "failure_stage": None,
+        "inspection_snapshot": inspection_snapshot,
     }
 
 
-def apply_structured_plan(payload: Dict[str, Any], *, namespace_override: str = "") -> Dict[str, Any]:
-    preview = build_structured_plan_preview(payload)
+def execute_structured_plan_apply(
+    payload: Dict[str, Any],
+    *,
+    namespace_override: str = "",
+    inspection_snapshot: Optional[Dict[str, Any]] = None,
+    required_domains: Optional[List[str]] = None,
+    correlation_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    correlation_id = correlation_id or _new_correlation_id()
+    preview = build_structured_plan_preview(
+        payload,
+        inspection_snapshot=inspection_snapshot,
+        required_domains=required_domains,
+        correlation_id=correlation_id,
+    )
     if not preview["valid"] or preview["compiled_document"] is None or preview["yaml"] is None:
-        raise PlanCompilationError("structured plan contains blocking validation issues")
+        return {
+            "ok": False,
+            "validation": {
+                "valid": False,
+                "errors": preview["errors"],
+                "warnings": preview["warnings"],
+            },
+            "compiled_document": None,
+            "yaml": None,
+            "result": None,
+            "correlation_id": correlation_id,
+            "failure_stage": preview.get("failure_stage") or "validation",
+            "inspection_snapshot": preview.get("inspection_snapshot"),
+        }
 
     document_namespace = preview["compiled_document"]["metadata"].get("namespace", "")
     effective_namespace = namespace_override or document_namespace
-    result = PLANNING_APPLY_GATEWAY.apply_content(preview["yaml"], effective_namespace)
+    try:
+        result = PLANNING_APPLY_GATEWAY.apply_content(preview["yaml"], effective_namespace)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "validation": {
+                "valid": True,
+                "errors": [build_stage_error("apply_handoff", exc, correlation_id=correlation_id)],
+                "warnings": preview["warnings"],
+            },
+            "compiled_document": preview["compiled_document"],
+            "yaml": preview["yaml"],
+            "result": None,
+            "correlation_id": correlation_id,
+            "failure_stage": "apply_handoff",
+            "inspection_snapshot": preview.get("inspection_snapshot"),
+        }
+
     return {
+        "ok": True,
         "validation": {
             "valid": True,
             "errors": [],
@@ -720,7 +597,33 @@ def apply_structured_plan(payload: Dict[str, Any], *, namespace_override: str = 
         "compiled_document": preview["compiled_document"],
         "yaml": preview["yaml"],
         "result": result,
+        "correlation_id": correlation_id,
+        "failure_stage": None,
+        "inspection_snapshot": preview.get("inspection_snapshot"),
     }
+
+
+def apply_structured_plan(
+    payload: Dict[str, Any],
+    *,
+    namespace_override: str = "",
+    inspection_snapshot: Optional[Dict[str, Any]] = None,
+    required_domains: Optional[List[str]] = None,
+    correlation_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    response = execute_structured_plan_apply(
+        payload,
+        namespace_override=namespace_override,
+        inspection_snapshot=inspection_snapshot,
+        required_domains=required_domains,
+        correlation_id=correlation_id,
+    )
+    if not response["ok"]:
+        errors = response["validation"]["errors"]
+        if errors:
+            raise PlanCompilationError(errors[0]["message"])
+        raise PlanCompilationError("structured plan contains blocking validation issues")
+    return response
 
 
 def install_warrp_crd() -> Dict[str, Any]:
