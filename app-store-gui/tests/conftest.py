@@ -8,6 +8,8 @@ from typing import Any
 import pytest
 import yaml
 
+from webapp.planning import LocalPlanningSessionStore
+
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 if str(APP_ROOT) not in sys.path:
@@ -516,6 +518,31 @@ def apply_gateway_input(compiled_wekaappstore_document: dict, compiled_wekaappst
             "applied": ["WekaAppStore"],
         },
     }
+
+
+@pytest.fixture
+def planning_session_store(tmp_path: Path) -> LocalPlanningSessionStore:
+    timestamps = iter(
+        [
+            "2026-03-20T10:00:00Z",
+            "2026-03-20T10:01:00Z",
+            "2026-03-20T10:02:00Z",
+            "2026-03-20T10:03:00Z",
+            "2026-03-20T10:04:00Z",
+            "2026-03-20T10:05:00Z",
+            "2026-03-20T10:06:00Z",
+            "2026-03-20T10:07:00Z",
+        ]
+    )
+    session_ids = iter(["session-001", "session-002", "session-003"])
+    turn_ids = iter(["turn-001", "turn-002", "turn-003", "turn-004", "turn-005"])
+
+    return LocalPlanningSessionStore(
+        tmp_path / "planning-sessions",
+        now=lambda: next(timestamps),
+        session_id_factory=lambda: next(session_ids),
+        turn_id_factory=lambda: next(turn_ids),
+    )
 
 
 @pytest.fixture
