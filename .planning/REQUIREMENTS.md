@@ -25,7 +25,7 @@ Requirements for the OpenClaw MCP Tool Integration milestone. Each maps to roadm
 
 - [x] **AGNT-01**: SKILL.md defines the agent workflow with validate-before-apply constraint and negative examples
 - [x] **AGNT-02**: Mock agent harness exercises full tool chain with scripted tool-use loops
-- [ ] **AGNT-03**: OpenClaw registration config (`openclaw.json` / NemoClaw equivalent) generated for the MCP server
+- [x] **AGNT-03**: OpenClaw registration config (`openclaw.json` / NemoClaw equivalent) generated for the MCP server
 
 ### Deployment
 
@@ -77,7 +77,7 @@ Deferred to future milestone after live OpenClaw is available.
 | MCPS-11 | Phase 6 | Complete |
 | AGNT-01 | Phase 8 | Complete |
 | AGNT-02 | Phase 7 | Complete |
-| AGNT-03 | Phase 8 | Pending |
+| AGNT-03 | Phase 8 | Complete |
 | DEPLOY-01 | Phase 9 | Pending |
 | DEPLOY-02 | Phase 9 | Pending |
 | DEPLOY-03 | Phase 9 | Pending |

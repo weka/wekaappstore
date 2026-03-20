@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: OpenClaw MCP Tool Integration
 status: planning
-stopped_at: Completed 08-03-PLAN.md
-last_updated: "2026-03-20T10:42:27.248Z"
+stopped_at: Completed 08-02-PLAN.md
+last_updated: "2026-03-20T10:46:34.608Z"
 last_activity: 2026-03-20 — v2.0 roadmap created; Phases 6-9 defined
 progress:
   total_phases: 9
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 24
-  completed_plans: 19
+  completed_plans: 20
   percent: 0
 ---
 
@@ -53,6 +53,7 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 | Phase 07-validation-apply-and-status-tools PP02 | 4min | 2 tasks | 8 files |
 | Phase 08-skill-md-agent-context-and-cleanup PP03 | 18min | 2 tasks | 17 files |
 | Phase 08-skill-md-agent-context-and-cleanup PP01 | 8min | 2 tasks | 11 files |
+| Phase 08-skill-md-agent-context-and-cleanup P02 | 2min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,8 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 - [Phase Phase 08-03]: build_structured_plan_preview / execute_structured_plan_apply / apply_structured_plan removed as dead code — no route callers, depended on deleted compiler.py
 - [Phase 08-skill-md-agent-context-and-cleanup]: SKILL.md uses 12 numbered steps with explicit validate-retry loop (max 3 attempts) and re-inspect-before-apply as mandatory rule
 - [Phase 08-skill-md-agent-context-and-cleanup]: _RegistryCapture stub builds description registry by calling register_* with minimal MCP shim — description-based routing without hardcoded tool names
+- [Phase 08]: _RegistryCapture pattern reused in generate_openclaw_config.py to extract tool names/descriptions without FastMCP startup
+- [Phase 08]: openclaw.json includes skill field pointing to SKILL.md so OpenClaw agent loads workflow before calling tools
 
 ### Pending Todos
 
@@ -91,6 +94,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T10:42:27.245Z
-Stopped at: Completed 08-03-PLAN.md
+Last session: 2026-03-20T10:46:34.605Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None
