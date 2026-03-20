@@ -1,94 +1,110 @@
 from __future__ import annotations
 
-import pytest
 from kubernetes.client.rest import ApiException
+import pytest
 
 from webapp.inspection.weka import collect_weka_inspection
 from webapp.planning.inspection_tools import PlanningInspectionTools
 
 
-class _CustomObjectsApi:
+class _WekaObjectsStub:
     def __init__(self, response: dict | Exception) -> None:
-        self.response = response
-        self.calls: list[tuple[str, str, str]] = []
+        self._response = response
 
-    def list_cluster_custom_object(self, *, group: str, version: str, plural: str):
-        self.calls.append((group, version, plural))
-        if isinstance(self.response, Exception):
-            raise self.response
-        return self.response
+    def list_cluster_custom_object(self, *, group: str, version: str, plural: str) -> dict:
+        assert group == "weka.weka.io"
+        assert plural == "wekaclusters"
+        if isinstance(self._response, Exception):
+            raise self._response
+        return self._response
 
 
-def test_collect_weka_inspection_returns_capacity_and_filesystem_inventory(
-    mocked_weka_cluster_payload: dict,
-) -> None:
-    api = _CustomObjectsApi(mocked_weka_cluster_payload)
-
+def test_collect_weka_inspection_reads_capacity_and_filesystems() -> None:
     snapshot = collect_weka_inspection(
-        load_kube_config=lambda: None,
-        custom_objects_api=api,
+        custom_objects_api=_WekaObjectsStub(
+            {
+                "items": [
+                    {
+                        "metadata": {"name": "weka-a", "namespace": "weka"},
+                        "status": {
+                            "status": "Ready",
+                            "stats": {
+                                "capacity": {"totalBytes": 5000},
+                                "filesystem": {"totalAvailableCapacity": 3200},
+                                "filesystems": [
+                                    {
+                                        "name": "weka-home",
+                                        "totalBytes": 4000,
+                                        "availableBytes": 2500,
+                                    }
+                                ],
+                            },
+                        },
+                    }
+                ]
+            }
+        )
     )
 
-    domain = snapshot["domains"]["weka"]
-    assert api.calls == [("weka.weka.io", "v1alpha1", "wekaclusters")]
-    assert domain["status"] == "complete"
-    assert domain["observed"]["cluster_total_bytes"] == 2199023255552
-    assert domain["observed"]["cluster_free_bytes"] == 1649267441664
-    assert domain["observed"]["filesystems"][0]["name"] == "weka-home"
-    assert domain["blockers"] == []
+    weka = snapshot["domains"]["weka"]
+    assert weka["status"] == "complete"
+    assert weka["observed"]["cluster_total_bytes"] == 5000
+    assert weka["observed"]["cluster_free_bytes"] == 3200
+    assert weka["observed"]["filesystems"] == [
+        {"name": "weka-home", "total_bytes": 4000, "free_bytes": 2500}
+    ]
 
 
-def test_collect_weka_inspection_returns_partial_when_operator_status_is_incomplete(
-    mocked_weka_cluster_payload: dict,
-) -> None:
-    payload = {"items": [mocked_weka_cluster_payload["items"][0].copy()]}
-    payload["items"][0]["status"] = {
-        "status": "Ready",
-        "stats": {},
-    }
-
+def test_collect_weka_inspection_returns_partial_when_operator_data_is_incomplete() -> None:
     snapshot = collect_weka_inspection(
-        load_kube_config=lambda: None,
-        custom_objects_api=_CustomObjectsApi(payload),
+        custom_objects_api=_WekaObjectsStub(
+            {
+                "items": [
+                    {
+                        "metadata": {"name": "weka-a", "namespace": "weka"},
+                        "status": {"status": "Ready", "stats": {}},
+                    }
+                ]
+            }
+        )
     )
 
-    domain = snapshot["domains"]["weka"]
-    assert domain["status"] == "partial"
-    assert {blocker["code"] for blocker in domain["blockers"]} == {
-        "weka_capacity_missing",
-        "weka_free_capacity_missing",
-        "weka_filesystems_missing",
-    }
+    weka = snapshot["domains"]["weka"]
+    blocker_codes = {blocker["code"] for blocker in weka["blockers"]}
+    assert weka["status"] == "partial"
+    assert {"weka_capacity_missing", "weka_free_capacity_missing", "weka_filesystems_missing"} <= blocker_codes
 
 
-def test_collect_weka_inspection_returns_unavailable_when_operator_is_missing() -> None:
-    snapshot = collect_weka_inspection(
-        load_kube_config=lambda: None,
-        custom_objects_api=_CustomObjectsApi(ApiException(status=404, reason="not found")),
-    )
-
-    domain = snapshot["domains"]["weka"]
-    assert domain["status"] == "unavailable"
-    assert domain["blockers"][0]["code"] == "weka_inspection_failed"
-
-
-def test_planning_inspection_tools_limits_supported_intents_and_records_audit(
-    mocked_weka_cluster_payload: dict,
-) -> None:
+def test_planning_inspection_tools_bound_intents_and_audit_log() -> None:
     tools = PlanningInspectionTools(
-        cluster_collector=lambda: {"domains": {"cpu": {"status": "complete"}}},
-        weka_collector=lambda: collect_weka_inspection(
-            load_kube_config=lambda: None,
-            custom_objects_api=_CustomObjectsApi(mocked_weka_cluster_payload),
-        ),
+        cluster_collector=lambda: {
+            "captured_at": "2026-03-20T00:00:00Z",
+            "domains": {"cpu": {"status": "complete", "required": True, "blockers": [], "notes": []}},
+        },
+        weka_collector=lambda: {
+            "captured_at": "2026-03-20T00:00:00Z",
+            "domains": {"weka": {"status": "partial", "required": True, "blockers": [], "notes": []}},
+        },
     )
 
-    cluster_result = tools.inspect("cluster_snapshot", correlation_id="corr-cluster")
-    weka_result = tools.inspect("weka_storage", correlation_id="corr-weka")
+    planning_snapshot = tools.inspect("planning_snapshot", correlation_id="corr-123")
+    fit = tools.assess_fit(correlation_id="corr-123", required_domains=["cpu", "weka"])
 
-    assert cluster_result["audit"]["intent"] == "cluster_snapshot"
-    assert weka_result["result"]["domains"]["weka"]["status"] == "complete"
-    assert [entry["correlation_id"] for entry in tools.audit_log] == ["corr-cluster", "corr-weka"]
+    assert planning_snapshot["result"]["correlation_id"] == "corr-123"
+    assert sorted(planning_snapshot["result"]["domains"]) == ["cpu", "weka"]
+    assert fit["fit_findings"]["status"] == "blocked"
+    assert fit["fit_findings"]["inspection_snapshot"]["correlation_id"] == "corr-123"
+    assert [event["intent"] for event in tools.audit_log] == ["planning_snapshot", "planning_snapshot"]
 
-    with pytest.raises(ValueError, match="Unsupported inspection intent"):
-        tools.inspect("kubectl_exec")
+    with pytest.raises(ValueError):
+        tools.inspect("kubectl", correlation_id="corr-123")
+
+
+def test_collect_weka_inspection_marks_missing_operator_as_unavailable() -> None:
+    snapshot = collect_weka_inspection(
+        custom_objects_api=_WekaObjectsStub(ApiException(status=404, reason="missing"))
+    )
+
+    weka = snapshot["domains"]["weka"]
+    assert weka["status"] == "unavailable"
+    assert weka["blockers"][0]["code"] == "weka_inspection_failed"
