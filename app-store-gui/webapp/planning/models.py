@@ -29,6 +29,7 @@ SUPPORTED_PLANNING_SESSION_STATUSES = frozenset({"active", "restarted", "abandon
 SUPPORTED_PLANNING_TURN_ROLES = frozenset({"user", "assistant", "system"})
 SUPPORTED_PLANNING_FOLLOW_UP_STATUSES = frozenset({"pending", "answered", "dismissed"})
 SUPPORTED_PLANNING_DRAFT_STATUSES = frozenset({"draft", "validated", "blocked", "abandoned"})
+SUPPORTED_FAMILY_MATCH_STATUSES = frozenset({"matched", "no_supported_family"})
 
 
 @dataclass(slots=True)
@@ -340,3 +341,29 @@ def clone_mapping(value: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     if value is None:
         return {}
     return dict(value)
+
+
+@dataclass(slots=True)
+class SupportedFamilyMetadata:
+    family: str
+    display_name: str
+    description: str
+    keywords: List[str] = field(default_factory=list)
+    required_domains: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class SupportedFamilyMatch:
+    status: str
+    family: Optional[str] = None
+    matched_terms: List[str] = field(default_factory=list)
+    reason: str = ""
+    required_domains: List[str] = field(default_factory=list)
+    score: int = 0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
