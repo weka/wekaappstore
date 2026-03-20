@@ -25,8 +25,10 @@ from webapp.inspection import collect_cluster_inspection, collect_weka_inspectio
 from webapp.planning import (
     ApplyGateway,
     LocalPlanningSessionStore,
+    PlanningSessionFollowUpError,
     PlanCompilationError,
     PlanningSessionNotFoundError,
+    PlanningSessionStateError,
     PlanningSessionService,
     build_stage_error,
     compile_plan_to_wekaappstore,
@@ -392,6 +394,10 @@ def get_planning_session_service() -> PlanningSessionService:
 
 def _planning_session_not_found(session_id: str) -> HTTPException:
     return HTTPException(status_code=404, detail=f"Planning session '{session_id}' was not found.")
+
+
+def _planning_session_conflict(exc: Exception) -> HTTPException:
+    return HTTPException(status_code=409, detail=str(exc))
 
 
 def _planning_session_context(session: Any) -> Dict[str, Any]:
@@ -888,6 +894,8 @@ async def planning_session_message(
         )
     except PlanningSessionNotFoundError as exc:
         raise _planning_session_not_found(session_id) from exc
+    except (PlanningSessionStateError, PlanningSessionFollowUpError) as exc:
+        raise _planning_session_conflict(exc) from exc
 
     wants_json = "application/json" in request.headers.get("accept", "").lower()
     if wants_json:
@@ -920,6 +928,8 @@ async def answer_planning_follow_up(
         )
     except PlanningSessionNotFoundError as exc:
         raise _planning_session_not_found(session_id) from exc
+    except (PlanningSessionStateError, PlanningSessionFollowUpError) as exc:
+        raise _planning_session_conflict(exc) from exc
 
     wants_json = "application/json" in request.headers.get("accept", "").lower()
     if wants_json:

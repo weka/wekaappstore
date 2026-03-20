@@ -3,7 +3,14 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from webapp.planning import LocalPlanningSessionStore, PlanningSessionService
+import pytest
+
+from webapp.planning import (
+    LocalPlanningSessionStore,
+    PlanningSessionFollowUpError,
+    PlanningSessionService,
+    PlanningSessionStateError,
+)
 from webapp.planning.family_matcher import SupportedFamilyMatcher
 
 
@@ -224,3 +231,98 @@ def test_unsupported_family_returns_explicit_no_fit_without_invoking_planner(
     assert transition.draft_revision.structured_plan is None
     assert transition.follow_ups == []
     assert "supported blueprint family" in transition.assistant_message
+
+
+def test_answer_follow_up_rejects_unknown_or_resolved_question_ids(
+    planning_session_store: LocalPlanningSessionStore,
+    planning_snapshot_payload: dict[str, Any],
+    valid_plan_payload: dict[str, Any],
+) -> None:
+    planner_calls: list[dict[str, Any]] = []
+
+    def planner(**kwargs: Any) -> dict[str, Any]:
+        planner_calls.append(kwargs)
+        payload = deepcopy(valid_plan_payload)
+        if len(planner_calls) == 1:
+            payload["namespace_strategy"]["target_namespace"] = None
+            payload["unresolved_questions"] = [
+                {
+                    "question": "Which namespace should receive the deployment?",
+                    "field_path": "namespace_strategy.target_namespace",
+                    "blocking": True,
+                    "install_critical": True,
+                }
+            ]
+            return {
+                "assistant_message": "I need the target namespace before I can finish the draft.",
+                "draft_summary": "Waiting on namespace selection.",
+                "plan": payload,
+                "follow_ups": payload["unresolved_questions"],
+            }
+        payload["unresolved_questions"] = []
+        return {
+            "assistant_message": "The draft plan now targets the ai-platform namespace.",
+            "draft_summary": "Draft updated with the selected namespace.",
+            "plan": payload,
+            "follow_ups": [],
+        }
+
+    service = _service(
+        planning_session_store=planning_session_store,
+        planning_snapshot_payload=planning_snapshot_payload,
+        planner=planner,
+    )
+
+    transition = service.start_session("Deploy an enterprise research assistant for our domain data.")
+
+    with pytest.raises(PlanningSessionFollowUpError, match="does not have follow-up 'fq-999'"):
+        service.answer_follow_up(
+            transition.session.session_id,
+            question_id="fq-999",
+            answer="Use ai-platform.",
+        )
+
+    service.answer_follow_up(
+        transition.session.session_id,
+        question_id=transition.follow_ups[0].question_id,
+        answer="Use the ai-platform namespace.",
+    )
+
+    with pytest.raises(
+        PlanningSessionFollowUpError,
+        match="follow-up 'fq-001' is answered and cannot be answered again",
+    ):
+        service.answer_follow_up(
+            transition.session.session_id,
+            question_id=transition.follow_ups[0].question_id,
+            answer="Use ai-platform again.",
+        )
+
+
+def test_process_turn_rejects_non_active_sessions(
+    planning_session_store: LocalPlanningSessionStore,
+    planning_snapshot_payload: dict[str, Any],
+    valid_plan_payload: dict[str, Any],
+) -> None:
+    def planner(**_: Any) -> dict[str, Any]:
+        return {
+            "assistant_message": "Draft updated.",
+            "draft_summary": "Draft updated.",
+            "plan": deepcopy(valid_plan_payload),
+            "follow_ups": [],
+        }
+
+    service = _service(
+        planning_session_store=planning_session_store,
+        planning_snapshot_payload=planning_snapshot_payload,
+        planner=planner,
+    )
+
+    transition = service.start_session("Deploy an enterprise research assistant for our domain data.")
+    planning_session_store.abandon_session(transition.session.session_id, metadata={"abandoned_by": "user"})
+
+    with pytest.raises(
+        PlanningSessionStateError,
+        match="planning session 'session-001' is abandoned and cannot accept new turns",
+    ):
+        service.process_turn(transition.session.session_id, message="Try the openfold stack instead.")

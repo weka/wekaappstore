@@ -59,9 +59,11 @@ from .inspection_tools import (
     merge_inspection_results,
 )
 from .session_store import (
+    PlanningSessionFollowUpError,
     LocalPlanningSessionStore,
     PlanningSessionNotFoundError,
     PlanningSessionRepository,
+    PlanningSessionStateError,
 )
 from .session_service import PlanningDraftBuilder, PlanningSessionService, PlanningSessionTransition
 
@@ -120,8 +122,10 @@ __all__ = [
     "derive_fit_findings_from_snapshot",
     "merge_inspection_results",
     "LocalPlanningSessionStore",
+    "PlanningSessionFollowUpError",
     "PlanningSessionNotFoundError",
     "PlanningSessionRepository",
+    "PlanningSessionStateError",
     "PlanningDraftBuilder",
     "PlanningSessionService",
     "PlanningSessionTransition",

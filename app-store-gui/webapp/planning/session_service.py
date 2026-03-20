@@ -11,7 +11,11 @@ from .models import (
     PlanningSessionFollowUp,
     SupportedFamilyMatch,
 )
-from .session_store import PlanningSessionRepository
+from .session_store import (
+    PlanningSessionFollowUpError,
+    PlanningSessionRepository,
+    PlanningSessionStateError,
+)
 from .validator import validate_structured_plan
 
 
@@ -96,6 +100,8 @@ class PlanningSessionService:
         question_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> PlanningSessionTransition:
+        session = self._session_store.load_session(session_id)
+        self._ensure_turn_allowed(session=session, question_id=question_id)
         correlation_id = self._correlation_id_factory()
         user_metadata = dict(metadata or {})
         user_metadata["correlation_id"] = correlation_id
@@ -231,6 +237,31 @@ class PlanningSessionService:
             draft_revision=draft_revision,
             follow_ups=follow_ups,
         )
+
+    @staticmethod
+    def _ensure_turn_allowed(
+        *,
+        session: PlanningSession,
+        question_id: Optional[str],
+    ) -> None:
+        if session.status != "active":
+            raise PlanningSessionStateError(
+                f"planning session '{session.session_id}' is {session.status} and cannot accept new turns"
+            )
+        if question_id is None:
+            return
+        follow_up = next(
+            (item for item in session.follow_ups if item.question_id == question_id),
+            None,
+        )
+        if follow_up is None:
+            raise PlanningSessionFollowUpError(
+                f"planning session '{session.session_id}' does not have follow-up '{question_id}'"
+            )
+        if follow_up.status != "pending":
+            raise PlanningSessionFollowUpError(
+                f"follow-up '{question_id}' is {follow_up.status} and cannot be answered again"
+            )
 
     def _plan_payload_from_result(
         self,

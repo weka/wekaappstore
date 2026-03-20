@@ -16,6 +16,14 @@ class PlanningSessionNotFoundError(KeyError):
     """Raised when a session record cannot be found."""
 
 
+class PlanningSessionStateError(RuntimeError):
+    """Raised when a session lifecycle transition is invalid for its current state."""
+
+
+class PlanningSessionFollowUpError(ValueError):
+    """Raised when a follow-up answer does not target a pending question."""
+
+
 class PlanningSessionRepository(Protocol):
     def create_session(
         self,
@@ -109,7 +117,24 @@ class LocalPlanningSessionStore:
         request_summary: Optional[str] = None,
     ) -> PlanningSession:
         session = self.load_session(session_id)
+        if session.status != "active":
+            raise PlanningSessionStateError(
+                f"planning session '{session_id}' is {session.status} and cannot accept new turns"
+            )
         timestamp = self._now()
+        if role == "user" and question_id is not None:
+            follow_up = next(
+                (item for item in session.follow_ups if item.question_id == question_id),
+                None,
+            )
+            if follow_up is None:
+                raise PlanningSessionFollowUpError(
+                    f"planning session '{session_id}' does not have follow-up '{question_id}'"
+                )
+            if follow_up.status != "pending":
+                raise PlanningSessionFollowUpError(
+                    f"follow-up '{question_id}' is {follow_up.status} and cannot be answered again"
+                )
         turn = PlanningSessionTurn(
             turn_id=self._turn_id_factory(),
             role=role,
