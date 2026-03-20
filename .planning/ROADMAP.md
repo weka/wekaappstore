@@ -128,7 +128,12 @@ Plans:
   3. `session_service.py`, `session_store.py`, `family_matcher.py`, and `compiler.py` are absent from the repo (git-removed, not just commented out)
   4. Planning session routes return 410 Gone or are fully removed from `main.py`
   5. `inspection/cluster.py`, `planning/apply_gateway.py`, and `planning/validator.py` remain intact and their tests pass
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 08-01-PLAN.md — SKILL.md, tool description tuning, and description-based harness upgrade
+- [ ] 08-02-PLAN.md — OpenClaw registration config (openclaw.json) generation
+- [ ] 08-03-PLAN.md — Deprecated v1.0 backend-brain code cleanup
 
 ### Phase 9: Deployment and Registration
 **Goal**: The MCP server ships as a container image and OpenClaw/NemoClaw operators can register and invoke it using documented, repeatable configuration steps
@@ -155,7 +160,7 @@ v2.0 phases execute in numeric order: 6 → 7 → 8 → 9
 | 5. Maintainer Draft Authoring And Test Hardening | v1.0 | -/- | Complete | 2026-03-20 |
 | 6. MCP Scaffold and Read-Only Tools | 3/3 | Complete   | 2026-03-20 | - |
 | 7. Validation, Apply, and Status Tools | 1/2 | In Progress|  | - |
-| 8. SKILL.md, Agent Context, and Cleanup | v2.0 | 0/TBD | Not started | - |
+| 8. SKILL.md, Agent Context, and Cleanup | v2.0 | 0/3 | Not started | - |
 | 9. Deployment and Registration | v2.0 | 0/TBD | Not started | - |
 
 ---
