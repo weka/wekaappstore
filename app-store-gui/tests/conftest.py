@@ -90,6 +90,99 @@ def _base_valid_plan() -> dict:
     }
 
 
+def _complete_inspection_domains() -> dict:
+    return {
+        "cpu": {
+            "status": "complete",
+            "required": True,
+            "freshness": {
+                "captured_at": "2026-03-20T00:00:00Z",
+                "max_age_seconds": 300,
+            },
+            "observed": {
+                "allocatable_cores": 64,
+                "free_cores": 52,
+            },
+            "notes": [],
+            "blockers": [],
+        },
+        "memory": {
+            "status": "complete",
+            "required": True,
+            "freshness": {
+                "captured_at": "2026-03-20T00:00:00Z",
+                "max_age_seconds": 300,
+            },
+            "observed": {
+                "allocatable_gib": 256,
+                "free_gib": 224,
+            },
+            "notes": [],
+            "blockers": [],
+        },
+        "gpu": {
+            "status": "complete",
+            "required": True,
+            "freshness": {
+                "captured_at": "2026-03-20T00:00:00Z",
+                "max_age_seconds": 300,
+            },
+            "observed": {
+                "inventory": [
+                    {
+                        "model": "NVIDIA L40",
+                        "count": 4,
+                        "memory_gib": 48,
+                    }
+                ]
+            },
+            "notes": [],
+            "blockers": [],
+        },
+        "namespaces": {
+            "status": "complete",
+            "required": True,
+            "freshness": {
+                "captured_at": "2026-03-20T00:00:00Z",
+            },
+            "observed": {"names": ["ai-platform", "weka"]},
+            "notes": [],
+            "blockers": [],
+        },
+        "storage_classes": {
+            "status": "complete",
+            "required": True,
+            "freshness": {
+                "captured_at": "2026-03-20T00:00:00Z",
+            },
+            "observed": {"names": ["wekafs", "gp3"]},
+            "notes": [],
+            "blockers": [],
+        },
+        "weka": {
+            "status": "complete",
+            "required": True,
+            "freshness": {
+                "captured_at": "2026-03-20T00:00:00Z",
+                "observed_generation": "17",
+            },
+            "observed": {
+                "cluster_total_tib": 200,
+                "cluster_free_tib": 120,
+                "filesystems": [
+                    {
+                        "name": "weka-home",
+                        "total_tib": 100,
+                        "free_tib": 64,
+                    }
+                ],
+            },
+            "notes": [],
+            "blockers": [],
+        },
+    }
+
+
 @pytest.fixture
 def valid_plan_payload() -> dict:
     return _base_valid_plan()
@@ -195,6 +288,46 @@ def phase_one_scope_markers() -> dict[str, set[str]]:
             "coexistence",
         },
     }
+
+
+@pytest.fixture
+def complete_inspection_domains() -> dict:
+    return _complete_inspection_domains()
+
+
+@pytest.fixture
+def complete_fit_findings(complete_inspection_domains: dict) -> dict:
+    return {
+        "status": "fit",
+        "notes": ["Inspection snapshot confirms the request fits the current cluster state."],
+        "blockers": [],
+        "domains": deepcopy(complete_inspection_domains),
+        "inspection_snapshot": {
+            "captured_at": "2026-03-20T00:00:00Z",
+            "correlation_id": "corr-phase2-complete",
+            "domains": deepcopy(complete_inspection_domains),
+        },
+    }
+
+
+@pytest.fixture
+def blocked_gpu_fit_findings(complete_fit_findings: dict) -> dict:
+    payload = deepcopy(complete_fit_findings)
+    payload["status"] = "blocked"
+    payload["notes"] = ["GPU-dependent planning is blocked until model and memory metadata are visible."]
+    payload["blockers"] = [
+        {
+            "code": "gpu_metadata_incomplete",
+            "message": "GPU model and memory must be visible for GPU-dependent planning.",
+            "domain": "gpu",
+        }
+    ]
+    payload["domains"]["gpu"]["status"] = "partial"
+    payload["domains"]["gpu"]["observed"] = {"inventory": [{"count": 4}]}
+    payload["domains"]["gpu"]["notes"] = ["GPU count is visible but model and memory are missing."]
+    payload["domains"]["gpu"]["blockers"] = deepcopy(payload["blockers"])
+    payload["inspection_snapshot"]["domains"]["gpu"] = deepcopy(payload["domains"]["gpu"])
+    return payload
 
 
 @pytest.fixture
