@@ -3,6 +3,7 @@ from .models import (
     DEFAULT_CRD_KIND,
     SUPPORTED_BLUEPRINT_FAMILIES,
     SUPPORTED_CRDS_STRATEGIES,
+    SUPPORTED_FAMILY_MATCH_STATUSES,
     SUPPORTED_FIT_STATUSES,
     SUPPORTED_INSPECTION_DOMAIN_STATUSES,
     SUPPORTED_READINESS_CHECK_TYPES,
@@ -23,6 +24,8 @@ from .models import (
     ReadinessCheckPlan,
     StageFailure,
     StructuredPlan,
+    SupportedFamilyMatch,
+    SupportedFamilyMetadata,
     SUPPORTED_PLANNING_DRAFT_STATUSES,
     SUPPORTED_PLANNING_FOLLOW_UP_STATUSES,
     SUPPORTED_PLANNING_SESSION_STATUSES,
@@ -31,6 +34,7 @@ from .models import (
     ValidationResult,
     ValuesFileReference,
 )
+from .family_matcher import SupportedFamilyMatcher, supported_family_catalog
 from .validator import validate_structured_plan
 from .compiler import (
     PlanCompilationError,
@@ -59,6 +63,7 @@ from .session_store import (
     PlanningSessionNotFoundError,
     PlanningSessionRepository,
 )
+from .session_service import PlanningDraftBuilder, PlanningSessionService, PlanningSessionTransition
 
 __all__ = [
     "ApplyGateway",
@@ -67,6 +72,7 @@ __all__ = [
     "DEFAULT_CRD_KIND",
     "SUPPORTED_BLUEPRINT_FAMILIES",
     "SUPPORTED_CRDS_STRATEGIES",
+    "SUPPORTED_FAMILY_MATCH_STATUSES",
     "SUPPORTED_FIT_STATUSES",
     "SUPPORTED_FAILURE_STAGES",
     "SUPPORTED_INSPECTION_DOMAIN_STATUSES",
@@ -94,10 +100,14 @@ __all__ = [
     "ReadinessCheckPlan",
     "StageFailure",
     "StructuredPlan",
+    "SupportedFamilyMatch",
+    "SupportedFamilyMetadata",
     "UnresolvedQuestion",
     "ValidationResult",
     "ValuesFileReference",
     "PlanningInspectionTools",
+    "SupportedFamilyMatcher",
+    "supported_family_catalog",
     "compile_plan_to_wekaappstore",
     "compile_plan_to_yaml",
     "render_wekaappstore_yaml",
@@ -112,4 +122,7 @@ __all__ = [
     "LocalPlanningSessionStore",
     "PlanningSessionNotFoundError",
     "PlanningSessionRepository",
+    "PlanningDraftBuilder",
+    "PlanningSessionService",
+    "PlanningSessionTransition",
 ]
