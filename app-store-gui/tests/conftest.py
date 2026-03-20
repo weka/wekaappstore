@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 import yaml
+from fastapi.testclient import TestClient
 
 from webapp.planning import LocalPlanningSessionStore
 
@@ -567,3 +568,43 @@ def builtin_manifest_document() -> dict:
             "MODEL_PROVIDER": "weka",
         },
     }
+
+
+@pytest.fixture
+def planning_test_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    from webapp import main
+
+    async def _cluster_initialized() -> bool:
+        return True
+
+    monkeypatch.setattr(main, "is_cluster_initialized_anywhere", _cluster_initialized)
+    monkeypatch.setattr(
+        main,
+        "get_cluster_status",
+        lambda: {
+            "cpu_nodes": 2,
+            "gpu_nodes": 1,
+            "gpu_operator_installed": True,
+            "k8s_version": "v1.31.0",
+            "default_storage_class": "wekafs",
+        },
+    )
+    monkeypatch.setattr(
+        main,
+        "get_auth_status",
+        lambda: {
+            "authenticated": True,
+            "mode": "kubeconfig",
+            "message": "Connected",
+            "details": {
+                "namespace": "ai-platform",
+                "source": "test",
+                "server": "https://cluster.example.test",
+                "context": "pytest",
+                "user": "planner",
+            },
+        },
+    )
+
+    with TestClient(main.app) as client:
+        yield client
