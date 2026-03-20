@@ -19,14 +19,14 @@
 - [ ] **CLSTR-02**: The backend can provide bounded GPU inventory data including available GPU count, GPU model, and GPU memory capacity.
 - [ ] **CLSTR-03**: The backend can provide bounded CPU and RAM availability data relevant to blueprint scheduling decisions.
 - [ ] **CLSTR-04**: The backend can provide WEKA storage inspection data including storage capacity, available space, and existing filesystems.
-- [ ] **CLSTR-05**: The backend can distinguish complete versus partial inspection data and expose confidence or freshness signals to the planner and UI.
+- [x] **CLSTR-05**: The backend can distinguish complete versus partial inspection data and expose confidence or freshness signals to the planner and UI.
 
 ### Planning And Fit Validation
 
 - [ ] **PLAN-01**: The system can map a natural-language request to a supported blueprint family or explicitly report that no supported family fits the request.
 - [x] **PLAN-02**: The system can produce a structured installation plan before producing or previewing YAML.
 - [x] **PLAN-03**: The structured plan includes blueprint family, namespace strategy, component configuration, prerequisites, unresolved questions, and reasoning summary.
-- [ ] **PLAN-04**: The structured plan includes cluster-fit findings for GPU type, GPU count, GPU memory, CPU, RAM, and WEKA storage.
+- [x] **PLAN-04**: The structured plan includes cluster-fit findings for GPU type, GPU count, GPU memory, CPU, RAM, and WEKA storage.
 - [ ] **PLAN-05**: The system can assess whether multiple requested blueprints can coexist on the same cluster without oversubscribing required resources.
 - [x] **PLAN-06**: The backend can validate a structured plan against repo-specific `WekaAppStore` and operator constraints before apply.
 - [x] **PLAN-07**: The backend can reject malformed or unsupported agent output with deterministic validation errors.
@@ -53,7 +53,7 @@
 - [ ] **SAFE-01**: Planning sessions, validation runs, and apply handoffs include stable correlation identifiers.
 - [ ] **SAFE-02**: Failure responses identify whether the failure came from inspection, agent output, plan validation, YAML generation, or cluster apply.
 - [ ] **SAFE-03**: Agent-callable tools are bounded and auditable, with no unrestricted direct `kubectl`, `helm`, or shell execution.
-- [ ] **SAFE-04**: The system fails closed when required inspection data is missing or too incomplete to make a reliable fit decision.
+- [x] **SAFE-04**: The system fails closed when required inspection data is missing or too incomplete to make a reliable fit decision.
 - [ ] **SAFE-05**: The integration can be tested with mocked NemoClaw responses and mocked Kubernetes and WEKA inspection results.
 
 ## v2 Requirements
@@ -92,11 +92,11 @@
 | CLSTR-02 | Phase 2 | Pending |
 | CLSTR-03 | Phase 2 | Pending |
 | CLSTR-04 | Phase 2 | Pending |
-| CLSTR-05 | Phase 2 | Pending |
+| CLSTR-05 | Phase 2 | Complete |
 | PLAN-01 | Phase 3 | Pending |
 | PLAN-02 | Phase 1 | Complete |
 | PLAN-03 | Phase 1 | Complete |
-| PLAN-04 | Phase 2 | Pending |
+| PLAN-04 | Phase 2 | Complete |
 | PLAN-05 | Phase 4 | Pending |
 | PLAN-06 | Phase 1 | Complete |
 | PLAN-07 | Phase 1 | Complete |
@@ -114,7 +114,7 @@
 | SAFE-01 | Phase 2 | Pending |
 | SAFE-02 | Phase 2 | Pending |
 | SAFE-03 | Phase 2 | Pending |
-| SAFE-04 | Phase 2 | Pending |
+| SAFE-04 | Phase 2 | Complete |
 | SAFE-05 | Phase 5 | Pending |
 
 **Coverage:**

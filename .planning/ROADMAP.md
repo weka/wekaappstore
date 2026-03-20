@@ -51,6 +51,8 @@ This roadmap adds a NemoClaw-driven planning workflow to the existing WEKA App S
 
 **Goal:** Build the bounded inspection layer and safety signals needed for trustworthy cluster-fit and storage-fit decisions.
 
+**Plan progress:** 1 of 4 plans completed (`02-01`)
+
 **Requirements:**
 - CLSTR-01
 - CLSTR-02
@@ -68,6 +70,9 @@ This roadmap adds a NemoClaw-driven planning workflow to the existing WEKA App S
 2. Fit signals include freshness and confidence metadata and fail closed when required data is incomplete.
 3. NemoClaw-facing tool calls are bounded, auditable, and read-only.
 4. The system can classify failures by stage: inspection, validation, YAML generation, or apply handoff.
+
+**Completed plan highlights:**
+- `02-01` established the typed inspection-domain contract, per-domain blocker semantics, and fail-closed validation rules for partial or unavailable required inspection data.
 
 ### Phase 3: Conversational Planning Sessions
 
