@@ -16,8 +16,17 @@ from .models import (
     ValidationResult,
     ValuesFileReference,
 )
+from .apply_gateway import (
+    ApplyGateway,
+    ApplyGatewayDependencies,
+    apply_yaml_content_with_namespace,
+    apply_yaml_documents_with_namespace,
+    apply_yaml_file_with_namespace,
+)
 
 __all__ = [
+    "ApplyGateway",
+    "ApplyGatewayDependencies",
     "DEFAULT_CRD_API_VERSION",
     "DEFAULT_CRD_KIND",
     "SUPPORTED_BLUEPRINT_FAMILIES",
@@ -34,4 +43,7 @@ __all__ = [
     "UnresolvedQuestion",
     "ValidationResult",
     "ValuesFileReference",
+    "apply_yaml_content_with_namespace",
+    "apply_yaml_documents_with_namespace",
+    "apply_yaml_file_with_namespace",
 ]

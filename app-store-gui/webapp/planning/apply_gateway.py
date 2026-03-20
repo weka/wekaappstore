@@ -163,6 +163,34 @@ class ApplyGatewayDependencies:
     logger: logging.Logger = logger
 
 
+@dataclass(frozen=True)
+class ApplyGateway:
+    project_root: Optional[str] = None
+    dependencies: ApplyGatewayDependencies = ApplyGatewayDependencies()
+
+    def apply_documents(self, documents: Iterable[Any], namespace_override: str) -> Dict[str, Any]:
+        return apply_yaml_documents_with_namespace(
+            documents,
+            namespace_override,
+            dependencies=self.dependencies,
+        )
+
+    def apply_content(self, content: str, namespace_override: str) -> Dict[str, Any]:
+        return apply_yaml_content_with_namespace(
+            content,
+            namespace_override,
+            dependencies=self.dependencies,
+        )
+
+    def apply_file(self, file_path: str, namespace_override: str) -> Dict[str, Any]:
+        return apply_yaml_file_with_namespace(
+            file_path,
+            namespace_override,
+            project_root=self.project_root,
+            dependencies=self.dependencies,
+        )
+
+
 def _iter_documents(documents: Iterable[Any]) -> Iterable[Dict[str, Any]]:
     for doc in documents:
         if isinstance(doc, dict):

@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from webapp.planning.apply_gateway import (
+    ApplyGateway,
     ApplyGatewayDependencies,
     apply_yaml_content_with_namespace,
 )
@@ -157,5 +158,42 @@ def test_future_apply_gateway_module_can_wrap_existing_helpers() -> None:
     gateway = pytest.importorskip("webapp.planning.apply_gateway")
 
     assert hasattr(gateway, "__file__")
+    assert hasattr(gateway, "ApplyGateway")
     assert hasattr(gateway, "apply_yaml_file_with_namespace")
     assert hasattr(gateway, "apply_yaml_content_with_namespace")
+
+
+def test_apply_gateway_wrapper_keeps_file_and_content_entrypoints_thin(
+    tmp_path,
+    apply_gateway_input: dict,
+) -> None:
+    operations: list[tuple] = []
+    manifest_path = tmp_path / "planner-output.yaml"
+    manifest_path.write_text(apply_gateway_input["yaml_text"], encoding="utf-8")
+
+    class CustomObjectsApiStub:
+        def create_namespaced_custom_object(self, **kwargs):
+            operations.append(("create_namespaced_custom_object", kwargs))
+
+    dependencies = ApplyGatewayDependencies(
+        load_kube_config=lambda: None,
+        ensure_namespace_exists=lambda namespace: operations.append(("ensure_namespace_exists", namespace)),
+        is_cluster_scoped=lambda doc: False,
+        crd_scope_for=lambda group, plural: "Namespaced",
+        with_last_applied_annotation=lambda doc: doc,
+        api_client_factory=lambda: object(),
+        custom_objects_api_factory=lambda api_client: CustomObjectsApiStub(),
+    )
+    gateway = ApplyGateway(project_root=str(tmp_path), dependencies=dependencies)
+
+    file_result = gateway.apply_file("planner-output.yaml", "ai-platform")
+    content_result = gateway.apply_content(apply_gateway_input["yaml_text"], "ai-platform")
+
+    assert file_result == {"applied": ["WekaAppStore"]}
+    assert content_result == {"applied": ["WekaAppStore"]}
+    assert [entry[0] for entry in operations] == [
+        "ensure_namespace_exists",
+        "create_namespaced_custom_object",
+        "ensure_namespace_exists",
+        "create_namespaced_custom_object",
+    ]
