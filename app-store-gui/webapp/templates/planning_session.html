@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Planning Session • WEKA App Store</title>
+  {% if logo_b64 %}
+    <link rel="icon" type="image/png" href="data:image/png;base64,{{ logo_b64 }}">
+  {% endif %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --weka-purple: #6b2fb3; --weka-purple-dark: #552695; --weka-dark: #0b0c10; }
+    body { background: #0b0c10; color: #e5e7eb; font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; }
+    .brand-grad { background: linear-gradient(135deg, #0b0c10 0%, #111827 40%, #0b0c10 100%); }
+    .card { background: rgba(31, 41, 55, 0.6); border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(8px); }
+    .muted { color: #9ca3af; }
+    .btn-purple { background: var(--weka-purple); color: white; }
+    .btn-purple:hover { background: var(--weka-purple-dark); }
+    .btn-outline { border: 1px solid rgba(255,255,255,0.18); color: #e5e7eb; }
+    .btn-outline:hover { background: rgba(255,255,255,0.06); }
+  </style>
+</head>
+<body class="min-h-screen">
+  <header class="brand-grad border-b border-white/10">
+    <div class="max-w-6xl mx-auto px-4 py-6 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        {% if logo_b64 %}
+          <img src="data:image/png;base64,{{ logo_b64 }}" alt="WEKA App Store" class="w-8 h-8 rounded-sm object-contain bg-white/0" />
+        {% else %}
+          <div class="w-8 h-8 rounded-sm" style="background: var(--weka-purple);"></div>
+        {% endif %}
+        <a href="/" class="text-2xl font-semibold tracking-tight hover:text-white">WEKA App Store</a>
+      </div>
+      <div class="flex items-center gap-3 text-sm">
+        <a href="/" class="text-white/80 hover:text-white">Home</a>
+        <span class="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-[0.2em] text-white/60">{{ session.status }}</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-8 space-y-6">
+    <section class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div class="lg:col-span-8 space-y-6">
+        <div class="card rounded-xl p-6">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="text-xs uppercase tracking-[0.2em] text-white/50">Planning Session</div>
+              <h1 class="text-3xl font-semibold mt-2">Session {{ session.session_id }}</h1>
+              <p class="muted mt-3 max-w-3xl">{{ session.request_summary or 'No request summary recorded yet.' }}</p>
+            </div>
+            <div class="text-right text-xs muted">
+              <div>Last activity</div>
+              <div class="text-white/80 mt-1">{{ session.last_activity_at or session.updated_at }}</div>
+            </div>
+          </div>
+          {% if session_history.restarted_from_session_id %}
+          <div class="mt-4 rounded-lg border border-blue-400/20 bg-blue-400/10 px-4 py-3 text-sm text-blue-50">
+            Restarted from session {{ session_history.restarted_from_session_id }}.
+          </div>
+          {% endif %}
+          {% if session_history.replacement_session_id %}
+          <div class="mt-4 rounded-lg border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-50">
+            This session was restarted into {{ session_history.replacement_session_id }}.
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="card rounded-xl p-6">
+          <div class="flex items-center justify-between gap-4 mb-5">
+            <div>
+              <h2 class="text-xl font-semibold">Transcript</h2>
+              <p class="muted text-sm mt-1">Persisted backend conversation history for this planning session.</p>
+            </div>
+          </div>
+          <div class="space-y-4">
+            {% for turn in transcript %}
+            <article class="rounded-xl border {{ 'border-purple-400/30 bg-purple-500/10' if turn.role == 'user' else 'border-white/10 bg-white/5' }} px-4 py-4">
+              <div class="flex items-center justify-between gap-3 text-xs uppercase tracking-[0.18em]">
+                <span class="{{ 'text-purple-100' if turn.role == 'user' else 'text-blue-100' }}">{{ turn.role }}</span>
+                <span class="text-white/45">{{ turn.created_at }}</span>
+              </div>
+              <p class="mt-3 whitespace-pre-wrap text-sm leading-6 text-white/90">{{ turn.message }}</p>
+            </article>
+            {% else %}
+            <div class="rounded-lg border border-dashed border-white/10 px-4 py-8 text-sm muted">No transcript yet.</div>
+            {% endfor %}
+          </div>
+        </div>
+
+        {% if session.status == 'active' %}
+        <div class="card rounded-xl p-6 space-y-4">
+          <div>
+            <h2 class="text-xl font-semibold">Continue the Session</h2>
+            <p class="muted text-sm mt-1">Add a new free-text planning turn. This does not start preview or apply.</p>
+          </div>
+          <form action="/planning/sessions/{{ session.session_id }}/message" method="post" class="space-y-4">
+            <textarea
+              name="message"
+              rows="4"
+              required
+              class="w-full rounded-lg border border-white/10 bg-gray-900/70 px-4 py-3 text-sm text-white placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-purple-600"
+              placeholder="Add more detail about the target workload, namespace, storage, or constraints."
+            ></textarea>
+            <div class="flex items-center justify-end">
+              <button type="submit" class="btn-purple px-4 py-2.5 rounded-md text-sm font-medium">Send Planning Turn</button>
+            </div>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+
+      <aside class="lg:col-span-4 space-y-6">
+        <div class="card rounded-xl p-6">
+          <h2 class="text-xl font-semibold">Draft Status</h2>
+          {% if draft_revision %}
+          <div class="mt-4 space-y-3 text-sm">
+            <div class="flex items-center justify-between">
+              <span class="muted">Revision</span>
+              <span class="text-white/90">#{{ draft_revision.revision_number }}</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="muted">Status</span>
+              <span class="text-white/90">{{ draft_revision.status }}</span>
+            </div>
+            <div>
+              <div class="muted mb-1">Summary</div>
+              <p class="text-white/90 leading-6">{{ draft_revision.summary }}</p>
+            </div>
+            {% if draft_plan %}
+            <div>
+              <div class="muted mb-1">Blueprint Family</div>
+              <div class="text-white/90">{{ draft_plan.blueprint_family or '-' }}</div>
+            </div>
+            <div>
+              <div class="muted mb-1">Target Namespace</div>
+              <div class="text-white/90">{{ draft_plan.namespace_strategy.target_namespace if draft_plan.namespace_strategy else '-' }}</div>
+            </div>
+            {% endif %}
+          </div>
+          {% else %}
+          <p class="muted mt-4 text-sm">No draft revision exists yet.</p>
+          {% endif %}
+        </div>
+
+        <div class="card rounded-xl p-6">
+          <h2 class="text-xl font-semibold">Pending Follow-Up Questions</h2>
+          <p class="muted text-sm mt-1">These questions are rendered from persisted backend session state.</p>
+          <div class="mt-4 space-y-4">
+            {% for follow_up in unanswered_follow_ups %}
+            <form action="/planning/sessions/{{ session.session_id }}/follow-ups/{{ follow_up.question_id }}" method="post" class="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <div class="text-sm font-medium text-white">{{ follow_up.question }}</div>
+                  <div class="text-xs muted mt-1">Question ID {{ follow_up.question_id }}{% if follow_up.field_path %} • {{ follow_up.field_path }}{% endif %}</div>
+                </div>
+                <span class="rounded-full border border-white/10 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-white/60">{{ follow_up.status }}</span>
+              </div>
+              {% if session.status == 'active' %}
+              <textarea
+                name="answer"
+                rows="3"
+                required
+                class="w-full rounded-lg border border-white/10 bg-gray-900/70 px-3 py-2 text-sm text-white placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-purple-600"
+                placeholder="Answer this follow-up question."
+              ></textarea>
+              <div class="flex items-center justify-end">
+                <button type="submit" class="btn-purple px-3 py-2 rounded-md text-sm font-medium">Submit Answer</button>
+              </div>
+              {% endif %}
+            </form>
+            {% else %}
+            <div class="rounded-lg border border-dashed border-white/10 px-4 py-6 text-sm muted">No unanswered follow-up questions.</div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="card rounded-xl p-6">
+          <h2 class="text-xl font-semibold">Session Operations</h2>
+          <p class="muted text-sm mt-1">Restart and abandon remain planning-session actions only.</p>
+          <div class="mt-4 flex flex-col gap-3">
+            {% if session.status == 'active' %}
+            <form action="/planning/sessions/{{ session.session_id }}/restart" method="post">
+              <button type="submit" class="btn-outline w-full px-4 py-2.5 rounded-md text-sm font-medium">Restart Session</button>
+            </form>
+            <form action="/planning/sessions/{{ session.session_id }}/abandon" method="post">
+              <button type="submit" class="btn-outline w-full px-4 py-2.5 rounded-md text-sm font-medium">Abandon Session</button>
+            </form>
+            {% else %}
+            <div class="rounded-lg border border-dashed border-white/10 px-4 py-4 text-sm muted">This session is {{ session.status }} and no longer accepts planning turns.</div>
+            {% endif %}
+            <a href="/planning/sessions/{{ session.session_id }}/events" class="btn-outline text-center px-4 py-2.5 rounded-md text-sm font-medium">Open Session State Stream</a>
+          </div>
+        </div>
+      </aside>
+    </section>
+  </main>
+</body>
+</html>

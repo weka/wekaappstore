@@ -80,6 +80,7 @@
           </p>
           <div class="mt-6 flex items-center gap-3">
             <a href="#catalog" class="btn-purple px-5 py-2.5 rounded-md text-sm font-medium shadow-sm">Explore Blueprints</a>
+            <a href="#planning-studio" class="btn-outline px-5 py-2.5 rounded-md text-sm font-medium">Plan With Chat</a>
             <a href="/settings" class="btn-outline px-5 py-2.5 rounded-md text-sm font-medium">Settings</a>
           </div>
         </div>
@@ -101,6 +102,53 @@
               <div id="namespace-error" class="text-xs text-red-400 mt-2 hidden"></div>
             </div>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="planning-studio" class="max-w-6xl mx-auto px-4 pb-6">
+      <div class="card rounded-xl p-6 md:p-8 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div class="lg:col-span-7 space-y-4">
+          <div class="inline-flex items-center gap-2 rounded-full border border-blue-400/20 bg-blue-400/10 px-3 py-1 text-xs font-medium text-blue-100">
+            Conversational planning
+          </div>
+          <h2 class="text-2xl md:text-3xl font-semibold tracking-tight">Describe the deployment you want before you preview or apply anything.</h2>
+          <p class="muted max-w-2xl">
+            Start a planning session for supported WEKA App Store families. The planner keeps transcript history, draft status, and outstanding follow-up questions on the backend so review stays separate from deployment.
+          </p>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+            <div class="rounded-lg border border-white/10 bg-white/5 p-4">
+              <div class="font-medium text-white">Backend-owned state</div>
+              <div class="muted mt-1">Transcript, draft summary, and unanswered questions render from persisted session state.</div>
+            </div>
+            <div class="rounded-lg border border-white/10 bg-white/5 p-4">
+              <div class="font-medium text-white">Restart or abandon</div>
+              <div class="muted mt-1">Session lifecycle actions stay explicit and never cross into preview or apply flows.</div>
+            </div>
+            <div class="rounded-lg border border-white/10 bg-white/5 p-4">
+              <div class="font-medium text-white">Supported families</div>
+              <div class="muted mt-1">AI Agent for Enterprise Research, OpenFold, and NVIDIA VSS.</div>
+            </div>
+          </div>
+        </div>
+        <div class="lg:col-span-5">
+          <form action="/planning/sessions" method="post" class="card rounded-xl p-5 border-white/10 space-y-4">
+            <div>
+              <label for="planning-request-text" class="block text-sm font-medium text-white/90 mb-2">What do you want to deploy?</label>
+              <textarea
+                id="planning-request-text"
+                name="request_text"
+                rows="6"
+                required
+                class="w-full rounded-lg border border-white/10 bg-gray-900/70 px-4 py-3 text-sm text-white placeholder:text-white/35 focus:outline-none focus:ring-2 focus:ring-purple-600"
+                placeholder="Example: Deploy an OpenFold workflow into the ai-platform namespace with WEKA-backed storage."
+              ></textarea>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <p class="text-xs muted">The planner opens a dedicated session page and keeps deployment actions disabled.</p>
+              <button type="submit" class="btn-purple px-4 py-2.5 rounded-md text-sm font-medium whitespace-nowrap">Start Planning Session</button>
+            </div>
+          </form>
         </div>
       </div>
     </section>
