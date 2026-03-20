@@ -39,8 +39,8 @@
 - [ ] **APPLY-03**: User can review validation results, including blocking cluster-fit and storage-fit issues, before apply.
 - [ ] **APPLY-04**: User can see the hardware and storage rationale used for the fit decision, including GPU, CPU, RAM, and WEKA findings.
 - [ ] **APPLY-05**: The system requires explicit user approval before submitting generated YAML to the cluster.
-- [ ] **APPLY-06**: Approved plans are submitted through the existing backend apply path rather than bypassing the current app store/operator contract.
-- [ ] **APPLY-07**: The runtime execution path remains the existing `WekaAppStore` CRD and operator reconciliation flow.
+- [x] **APPLY-06**: Approved plans are submitted through the existing backend apply path rather than bypassing the current app store/operator contract.
+- [x] **APPLY-07**: The runtime execution path remains the existing `WekaAppStore` CRD and operator reconciliation flow.
 
 ### Blueprint Authoring
 
@@ -106,8 +106,8 @@
 | APPLY-03 | Phase 4 | Pending |
 | APPLY-04 | Phase 4 | Pending |
 | APPLY-05 | Phase 4 | Pending |
-| APPLY-06 | Phase 1 | Pending |
-| APPLY-07 | Phase 1 | Pending |
+| APPLY-06 | Phase 1 | Complete |
+| APPLY-07 | Phase 1 | Complete |
 | AUTHR-01 | Phase 5 | Pending |
 | AUTHR-02 | Phase 5 | Pending |
 | AUTHR-03 | Phase 5 | Pending |
