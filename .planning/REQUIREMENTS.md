@@ -64,33 +64,33 @@ Deferred to future milestone after live OpenClaw is available.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MCPS-01 | — | Pending |
-| MCPS-02 | — | Pending |
-| MCPS-03 | — | Pending |
-| MCPS-04 | — | Pending |
-| MCPS-05 | — | Pending |
-| MCPS-06 | — | Pending |
-| MCPS-07 | — | Pending |
-| MCPS-08 | — | Pending |
-| MCPS-09 | — | Pending |
-| MCPS-10 | — | Pending |
-| MCPS-11 | — | Pending |
-| AGNT-01 | — | Pending |
-| AGNT-02 | — | Pending |
-| AGNT-03 | — | Pending |
-| DEPLOY-01 | — | Pending |
-| DEPLOY-02 | — | Pending |
-| DEPLOY-03 | — | Pending |
-| DEPLOY-04 | — | Pending |
-| CLEAN-01 | — | Pending |
-| CLEAN-02 | — | Pending |
-| CLEAN-03 | — | Pending |
+| MCPS-01 | Phase 6 | Pending |
+| MCPS-02 | Phase 6 | Pending |
+| MCPS-03 | Phase 6 | Pending |
+| MCPS-04 | Phase 6 | Pending |
+| MCPS-05 | Phase 6 | Pending |
+| MCPS-06 | Phase 6 | Pending |
+| MCPS-07 | Phase 7 | Pending |
+| MCPS-08 | Phase 7 | Pending |
+| MCPS-09 | Phase 7 | Pending |
+| MCPS-10 | Phase 6 | Pending |
+| MCPS-11 | Phase 6 | Pending |
+| AGNT-01 | Phase 8 | Pending |
+| AGNT-02 | Phase 7 | Pending |
+| AGNT-03 | Phase 8 | Pending |
+| DEPLOY-01 | Phase 9 | Pending |
+| DEPLOY-02 | Phase 9 | Pending |
+| DEPLOY-03 | Phase 9 | Pending |
+| DEPLOY-04 | Phase 9 | Pending |
+| CLEAN-01 | Phase 8 | Pending |
+| CLEAN-02 | Phase 8 | Pending |
+| CLEAN-03 | Phase 8 | Pending |
 
 **Coverage:**
 - v2.0 requirements: 21 total
-- Mapped to phases: 0
-- Unmapped: 21 ⚠️
+- Mapped to phases: 21
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-03-20*
-*Last updated: 2026-03-20 after initial definition*
+*Last updated: 2026-03-20 — traceability mapped to Phases 6-9*
