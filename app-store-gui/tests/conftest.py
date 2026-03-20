@@ -7,9 +7,6 @@ from typing import Any
 
 import pytest
 import yaml
-from fastapi.testclient import TestClient
-
-from webapp.planning import LocalPlanningSessionStore
 
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -535,31 +532,6 @@ def apply_gateway_input(compiled_wekaappstore_document: dict, compiled_wekaappst
 
 
 @pytest.fixture
-def planning_session_store(tmp_path: Path) -> LocalPlanningSessionStore:
-    timestamps = iter(
-        [
-            "2026-03-20T10:00:00Z",
-            "2026-03-20T10:01:00Z",
-            "2026-03-20T10:02:00Z",
-            "2026-03-20T10:03:00Z",
-            "2026-03-20T10:04:00Z",
-            "2026-03-20T10:05:00Z",
-            "2026-03-20T10:06:00Z",
-            "2026-03-20T10:07:00Z",
-        ]
-    )
-    session_ids = iter(["session-001", "session-002", "session-003"])
-    turn_ids = iter(["turn-001", "turn-002", "turn-003", "turn-004", "turn-005"])
-
-    return LocalPlanningSessionStore(
-        tmp_path / "planning-sessions",
-        now=lambda: next(timestamps),
-        session_id_factory=lambda: next(session_ids),
-        turn_id_factory=lambda: next(turn_ids),
-    )
-
-
-@pytest.fixture
 def builtin_manifest_document() -> dict:
     return {
         "apiVersion": "v1",
@@ -574,41 +546,3 @@ def builtin_manifest_document() -> dict:
     }
 
 
-@pytest.fixture
-def planning_test_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    from webapp import main
-
-    async def _cluster_initialized() -> bool:
-        return True
-
-    monkeypatch.setattr(main, "is_cluster_initialized_anywhere", _cluster_initialized)
-    monkeypatch.setattr(
-        main,
-        "get_cluster_status",
-        lambda: {
-            "cpu_nodes": 2,
-            "gpu_nodes": 1,
-            "gpu_operator_installed": True,
-            "k8s_version": "v1.31.0",
-            "default_storage_class": "wekafs",
-        },
-    )
-    monkeypatch.setattr(
-        main,
-        "get_auth_status",
-        lambda: {
-            "authenticated": True,
-            "mode": "kubeconfig",
-            "message": "Connected",
-            "details": {
-                "namespace": "ai-platform",
-                "source": "test",
-                "server": "https://cluster.example.test",
-                "context": "pytest",
-                "user": "planner",
-            },
-        },
-    )
-
-    with TestClient(main.app) as client:
-        yield client

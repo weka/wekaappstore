@@ -199,30 +199,6 @@ def test_apply_gateway_wrapper_keeps_file_and_content_entrypoints_thin(
     ]
 
 
-def test_main_apply_structured_plan_hands_canonical_yaml_to_shared_gateway(
-    monkeypatch: pytest.MonkeyPatch,
-    valid_plan_payload: dict,
-) -> None:
-    import webapp.main as main
-
-    captured: dict[str, str] = {}
-
-    class GatewayStub:
-        def apply_content(self, content: str, namespace: str) -> dict:
-            captured["content"] = content
-            captured["namespace"] = namespace
-            return {"applied": ["WekaAppStore"]}
-
-    monkeypatch.setattr(main, "PLANNING_APPLY_GATEWAY", GatewayStub())
-
-    result = main.apply_structured_plan(valid_plan_payload)
-
-    assert result["result"] == {"applied": ["WekaAppStore"]}
-    assert result["compiled_document"]["kind"] == "WekaAppStore"
-    assert captured["namespace"] == "ai-platform"
-    assert yaml.safe_load(captured["content"]) == result["compiled_document"]
-
-
 def test_main_apply_helpers_delegate_to_shared_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
     import webapp.main as main
 
@@ -248,24 +224,3 @@ def test_main_apply_helpers_delegate_to_shared_gateway(monkeypatch: pytest.Monke
     ]
 
 
-def test_main_apply_structured_plan_allows_namespace_override(
-    monkeypatch: pytest.MonkeyPatch,
-    valid_plan_payload: dict,
-) -> None:
-    import webapp.main as main
-
-    captured: dict[str, str] = {}
-
-    class GatewayStub:
-        def apply_content(self, content: str, namespace: str) -> dict:
-            captured["content"] = content
-            captured["namespace"] = namespace
-            return {"applied": ["WekaAppStore"]}
-
-    monkeypatch.setattr(main, "PLANNING_APPLY_GATEWAY", GatewayStub())
-
-    result = main.apply_structured_plan(valid_plan_payload, namespace_override="review-space")
-
-    assert result["result"] == {"applied": ["WekaAppStore"]}
-    assert captured["namespace"] == "review-space"
-    assert yaml.safe_load(captured["content"])["kind"] == "WekaAppStore"
