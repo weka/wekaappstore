@@ -1,0 +1,60 @@
+{
+  "_comment": "Best-effort format -- may need revision when NemoClaw alpha schema is published.",
+  "name": "weka-app-store-mcp",
+  "description": "MCP server for the WEKA App Store. Provides tools for inspecting cluster and WEKA storage resources, browsing blueprint catalogs, validating WekaAppStore YAML manifests, applying blueprints to the cluster, and monitoring deployment status.",
+  "transport": "stdio",
+  "startup": {
+    "command": "python",
+    "args": [
+      "-m",
+      "server"
+    ],
+    "cwd": "mcp-server/"
+  },
+  "env": {
+    "required": [
+      "BLUEPRINTS_DIR"
+    ],
+    "optional": [
+      "KUBERNETES_AUTH_MODE",
+      "LOG_LEVEL",
+      "KUBECONFIG"
+    ]
+  },
+  "container": "weka-app-store-mcp:latest",
+  "skill": "mcp-server/SKILL.md",
+  "tools": [
+    {
+      "name": "inspect_cluster",
+      "description": "Call this tool FIRST before any other tool when planning a blueprint\n        deployment. Returns a flat snapshot of CPU cores, memory GiB, GPU devices,\n        visible namespaces, and available storage classes. Use the results to determine\n        whether the cluster can host the intended blueprint before calling\n        list_blueprints.\n\n        Also call AGAIN after validate_yaml passes and before calling apply \u2014 cluster\n        resources may have changed since the initial inspection. If resources are now\n        insufficient, do not proceed with apply.\n\n        Returns: captured_at, k8s_version, cpu_cores_free, memory_gib_free,\n        gpu_total, gpu_models, storage_classes, default_storage_class,\n        app_store_crd_installed, warnings.\n\n        Sequencing: inspect_cluster (FIRST) -> inspect_weka -> list_blueprints ->\n        get_blueprint -> get_crd_schema -> validate_yaml ->\n        inspect_cluster (AGAIN before apply) -> apply -> status."
+    },
+    {
+      "name": "inspect_weka",
+      "description": "Call this tool after inspect_cluster when the blueprint requires WEKA\n        filesystems or the cluster uses a 'wekafs' storage class. Returns WEKA cluster\n        capacity (total, used, free in GiB), per-filesystem breakdown, and any\n        warnings about WEKA availability.\n\n        Skip this tool only if the blueprint has no WEKA storage requirements and the\n        storage class is not wekafs.\n\n        Returns: captured_at, weka_cluster_name, weka_cluster_status,\n        total_capacity_gib, free_capacity_gib, filesystems (list), warnings.\n\n        Sequencing: inspect_cluster -> inspect_weka -> list_blueprints."
+    },
+    {
+      "name": "list_blueprints",
+      "description": "Call this after inspect_cluster to discover available blueprints. Returns\n        a catalog of all WekaAppStore blueprint manifests with their names, component\n        counts, and component names. Cross-reference the cluster resources from\n        inspect_cluster to assess which blueprints fit.\n\n        Use the blueprint 'name' field from this list to call get_blueprint for full\n        specification details.\n\n        Returns: captured_at, count, blueprints (list of {name, namespace,\n        component_count, component_names, source_file}), warnings.\n\n        Sequencing: inspect_cluster -> list_blueprints -> get_blueprint -> get_crd_schema."
+    },
+    {
+      "name": "get_blueprint",
+      "description": "Call this after list_blueprints to retrieve full specification for a named\n        blueprint. Returns all components (flat, with helm_chart_* fields), target\n        namespaces, dependencies between components, prerequisites that must exist in\n        the cluster, and any warnings.\n\n        Read the prerequisites list carefully \u2014 some blueprints require existing\n        operator installations or cluster configuration. After reading the full spec,\n        call get_crd_schema to obtain the CRD schema before generating YAML.\n\n        Returns: name, namespace, api_version, components (list), prerequisites\n        (list), warnings.\n\n        Sequencing: list_blueprints -> get_blueprint -> get_crd_schema ->\n        (generate YAML) -> validate_yaml."
+    },
+    {
+      "name": "get_crd_schema",
+      "description": "Call this tool after get_blueprint and BEFORE generating WekaAppStore YAML.\n        Returns the CRD OpenAPI v3 schema defining every valid field, type, and\n        constraint, plus 1-2 example manifests from the blueprint catalog. Study both\n        the schema and examples before writing YAML \u2014 they show correct camelCase field\n        names and required structure.\n\n        After generating YAML using this schema, call validate_yaml before apply to\n        catch any structural errors. Do not skip validation even if the YAML looks\n        correct.\n\n        Returns: captured_at, group, version, kind, schema (OpenAPI v3 dict),\n        examples (list of YAML strings), warnings.\n\n        Sequencing: get_blueprint -> get_crd_schema -> (generate YAML) ->\n        validate_yaml -> apply."
+    },
+    {
+      "name": "validate_yaml",
+      "description": "Call this tool BEFORE apply to verify that generated WekaAppStore YAML\n        is structurally valid per the CRD contract. Never skip this step.\n\n        Checks: correct apiVersion (warp.io/v1alpha1), kind (WekaAppStore),\n        metadata.name present, no v1.0-only snake_case planning fields\n        (blueprint_family, fit_findings, namespace_strategy, reasoning_summary,\n        request_summary, unresolved_questions), and at least one deployment\n        method (helmChart, appStack, or image).\n\n        Returns valid=true with empty errors on success. Returns valid=false with\n        a structured errors list on failure \u2014 each error has code, path, and\n        message to pinpoint the exact issue. Fix the error and call validate_yaml\n        again. Maximum 3 retry attempts before escalating to user.\n\n        After validate_yaml returns valid=true: re-run inspect_cluster to confirm\n        cluster resources haven't changed, then present YAML to user for approval\n        before calling apply.\n\n        Returns: captured_at, valid (bool), errors (list of {code, path, message}),\n        warnings.\n\n        Sequencing: get_crd_schema -> (generate YAML) -> validate_yaml ->\n        inspect_cluster (re-run) -> (user approval) -> apply.\n        Do not call apply if validate_yaml returns valid=false."
+    },
+    {
+      "name": "apply",
+      "description": "Apply a WekaAppStore YAML manifest to the cluster.\n\n        SAFETY RULES \u2014 all three must be satisfied before calling apply:\n        1. validate_yaml must have returned valid=true for this YAML\n        2. inspect_cluster must have been re-run AFTER validate_yaml passed to\n           confirm cluster resources haven't changed since the initial inspection\n        3. The user must have explicitly approved \u2014 show them the resource name,\n           namespace, deployment method, and component list, then wait for approval\n\n        confirmed must be exactly boolean true (not string \"true\" or integer 1).\n        Any other value for confirmed returns error='approval_required' without\n        creating any K8s resources.\n\n        After a successful apply, call status to monitor deployment progress.\n\n        Returns: captured_at, applied (bool), applied_kinds (list), namespace,\n        error (str|None), message (str|None), warnings.\n\n        Sequencing: validate_yaml -> inspect_cluster (re-run) ->\n        (explicit user approval) -> apply (confirmed=True) -> status."
+    },
+    {
+      "name": "status",
+      "description": "Call this tool after apply to monitor deployment progress of a\n        WekaAppStore CR. Pass the resource name and namespace from the applied\n        manifest.\n\n        Returns releaseStatus, releaseName, releaseVersion, appStackPhase,\n        conditions, and componentStatus from the CR's .status subresource.\n\n        When the CR was just created by apply, the operator may not have\n        reconciled yet \u2014 appStackPhase will be null and a warning is included.\n        Call again in 10-30 seconds and repeat until appStackPhase is 'Ready'\n        or 'Failed'. Report the final status to the user.\n\n        Returns found=false with a warning if the named CR does not exist in\n        the specified namespace.\n\n        Returns: captured_at, name, namespace, found (bool), release_status,\n        release_name, app_stack_phase, conditions (list), component_status\n        (list), warnings.\n\n        Sequencing: apply -> status (repeat until appStackPhase is Ready or Failed)."
+    }
+  ]
+}
