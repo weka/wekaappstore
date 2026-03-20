@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+import importlib
+
+import pytest
+
+
+PHASE_ONE_REQUIREMENTS = {"PLAN-06", "PLAN-07"}
+
+
+def test_valid_plan_fixture_matches_phase_one_contract(valid_plan_payload: dict) -> None:
+    assert PHASE_ONE_REQUIREMENTS == {"PLAN-06", "PLAN-07"}
+    assert valid_plan_payload["blueprint_family"] == "ai-agent-enterprise-research"
+    assert valid_plan_payload["namespace_strategy"]["target_namespace"] == "ai-platform"
+    assert valid_plan_payload["unresolved_questions"] == []
+    assert {component["name"] for component in valid_plan_payload["components"]} == {
+        "vector-db",
+        "research-api",
+    }
+
+
+def test_invalid_plan_variants_cover_deterministic_validation_failures(
+    invalid_plan_payloads: dict[str, dict],
+) -> None:
+    assert set(invalid_plan_payloads) == {
+        "blocking_unresolved_question",
+        "both_deployment_methods",
+        "dependency_on_missing_component",
+        "duplicate_component_names",
+        "missing_blueprint_family",
+        "missing_deployment_method",
+    }
+    assert "blueprint_family" not in invalid_plan_payloads["missing_blueprint_family"]
+    assert invalid_plan_payloads["duplicate_component_names"]["components"][0]["name"] == (
+        invalid_plan_payloads["duplicate_component_names"]["components"][1]["name"]
+    )
+    assert invalid_plan_payloads["dependency_on_missing_component"]["components"][1]["depends_on"] == [
+        "missing-component"
+    ]
+    assert "kubernetes_manifest" not in invalid_plan_payloads["missing_deployment_method"]["components"][1]
+    assert "helm_chart" in invalid_plan_payloads["both_deployment_methods"]["components"][1]
+    assert invalid_plan_payloads["blocking_unresolved_question"]["unresolved_questions"][0]["blocking"] is True
+
+
+def test_warning_fixture_only_exercises_safe_normalization(warning_case_payload: dict) -> None:
+    assert warning_case_payload["normalization_candidates"] == [
+        "release_name_defaults_to_component_name",
+        "wait_for_ready_defaults_to_true",
+    ]
+    first_component = warning_case_payload["components"][0]
+    assert "release_name" not in first_component["helm_chart"]
+    assert "wait_for_ready" not in first_component
+
+
+def test_future_plan_validator_module_can_be_added_without_rewriting_contract_fixtures() -> None:
+    planning_models = pytest.importorskip(
+        "webapp.planning.models",
+        reason="Phase 1 contract implementation has not landed yet.",
+    )
+    validator = importlib.import_module("webapp.planning.validator")
+
+    assert hasattr(planning_models, "__file__")
+    assert hasattr(validator, "__file__")
