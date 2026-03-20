@@ -5,7 +5,7 @@ import importlib
 import pytest
 
 
-PHASE_ONE_REQUIREMENTS = {"PLAN-06", "PLAN-07"}
+PHASE_ONE_REQUIREMENTS = {"PLAN-02", "PLAN-03", "PLAN-06", "PLAN-07"}
 OUT_OF_SCOPE_TOPICS = {"chat", "cluster_inspection", "weka_inspection", "coexistence"}
 
 
@@ -35,10 +35,17 @@ def test_invalid_plan_variants_cover_deterministic_validation_failures(
         "both_deployment_methods",
         "dependency_on_missing_component",
         "duplicate_component_names",
+        "invalid_values_file_kind",
+        "malformed_components",
         "missing_blueprint_family",
         "missing_deployment_method",
+        "unsupported_blueprint_family",
+        "unsupported_crds_strategy",
+        "unsupported_readiness_check_type",
+        "unsupported_top_level_field",
     }
     assert "blueprint_family" not in invalid_plan_payloads["missing_blueprint_family"]
+    assert invalid_plan_payloads["unsupported_blueprint_family"]["blueprint_family"] == "unsupported-family"
     assert invalid_plan_payloads["duplicate_component_names"]["components"][0]["name"] == (
         invalid_plan_payloads["duplicate_component_names"]["components"][1]["name"]
     )
@@ -47,6 +54,20 @@ def test_invalid_plan_variants_cover_deterministic_validation_failures(
     ]
     assert "kubernetes_manifest" not in invalid_plan_payloads["missing_deployment_method"]["components"][1]
     assert "helm_chart" in invalid_plan_payloads["both_deployment_methods"]["components"][1]
+    assert invalid_plan_payloads["malformed_components"]["components"] == "vector-db"
+    assert "chat_session" in invalid_plan_payloads["unsupported_top_level_field"]
+    assert (
+        invalid_plan_payloads["unsupported_readiness_check_type"]["components"][0]["readiness_check"]["type"]
+        == "service"
+    )
+    assert (
+        invalid_plan_payloads["invalid_values_file_kind"]["components"][0]["values_files"][0]["kind"]
+        == "PersistentVolumeClaim"
+    )
+    assert (
+        invalid_plan_payloads["unsupported_crds_strategy"]["components"][0]["helm_chart"]["crds_strategy"]
+        == "Always"
+    )
     assert invalid_plan_payloads["blocking_unresolved_question"]["unresolved_questions"][0]["blocking"] is True
 
 
@@ -106,14 +127,80 @@ def test_validator_returns_explicit_normalization_warnings_for_safe_defaults(
 
 
 @pytest.mark.parametrize(
-    ("case_name", "expected_code", "expected_path"),
+    ("case_name", "expected_code", "expected_path", "expected_message"),
     [
-        ("missing_blueprint_family", "missing_required_field", "blueprint_family"),
-        ("duplicate_component_names", "duplicate_component_name", "components[1].name"),
-        ("dependency_on_missing_component", "unknown_dependency", "components[1].depends_on"),
-        ("missing_deployment_method", "invalid_deployment_method", "components[1]"),
-        ("both_deployment_methods", "invalid_deployment_method", "components[1]"),
-        ("blocking_unresolved_question", "blocking_unresolved_question", "unresolved_questions[0]"),
+        (
+            "missing_blueprint_family",
+            "missing_required_field",
+            "blueprint_family",
+            "missing required field 'blueprint_family'",
+        ),
+        (
+            "unsupported_blueprint_family",
+            "unsupported_blueprint_family",
+            "blueprint_family",
+            "unsupported blueprint family 'unsupported-family'; supported families are ai-agent-enterprise-research, nvidia-vss, openfold",
+        ),
+        (
+            "duplicate_component_names",
+            "duplicate_component_name",
+            "components[1].name",
+            "component name 'vector-db' must be unique",
+        ),
+        (
+            "dependency_on_missing_component",
+            "unknown_dependency",
+            "components[1].depends_on",
+            "component 'research-api' depends on unknown component 'missing-component'",
+        ),
+        (
+            "missing_deployment_method",
+            "invalid_deployment_method",
+            "components[1]",
+            "component must define exactly one deployment method: helm_chart or kubernetes_manifest",
+        ),
+        (
+            "both_deployment_methods",
+            "invalid_deployment_method",
+            "components[1]",
+            "component must define exactly one deployment method: helm_chart or kubernetes_manifest",
+        ),
+        (
+            "malformed_components",
+            "invalid_type",
+            "components",
+            "field 'components' must be a list",
+        ),
+        (
+            "unsupported_top_level_field",
+            "unsupported_field",
+            "chat_session",
+            "unsupported field 'chat_session' is not part of the Phase 1 structured plan contract",
+        ),
+        (
+            "unsupported_readiness_check_type",
+            "unsupported_readiness_check_type",
+            "components[0].readiness_check.type",
+            "unsupported readiness_check type 'service'; supported types are custom, deployment, job, pod, statefulset",
+        ),
+        (
+            "invalid_values_file_kind",
+            "unsupported_values_file_kind",
+            "components[0].values_files[0].kind",
+            "values_files kind must be ConfigMap or Secret",
+        ),
+        (
+            "unsupported_crds_strategy",
+            "unsupported_crds_strategy",
+            "components[0].helm_chart.crds_strategy",
+            "unsupported CRDs strategy 'Always'; supported values are Auto, Install, Skip",
+        ),
+        (
+            "blocking_unresolved_question",
+            "blocking_unresolved_question",
+            "unresolved_questions[0]",
+            "install-critical unresolved question blocks YAML generation and apply handoff",
+        ),
     ],
 )
 def test_validator_rejects_deterministic_contract_failures(
@@ -121,17 +208,91 @@ def test_validator_rejects_deterministic_contract_failures(
     case_name: str,
     expected_code: str,
     expected_path: str,
+    expected_message: str,
 ) -> None:
     result = _validator_module().validate_structured_plan(invalid_plan_payloads[case_name])
 
     assert result.valid is False
     assert result.plan is None
-    assert (expected_code, expected_path) in {
-        (error.code, error.path) for error in result.errors
+    assert (expected_code, expected_path, expected_message) in {
+        (error.code, error.path, error.message) for error in result.errors
     }
     assert result.errors == sorted(
         result.errors, key=lambda error: (error.path, error.code, error.message)
     )
+
+
+def test_validator_result_serializes_to_a_stable_contract_payload(valid_plan_payload: dict) -> None:
+    result = _validator_module().validate_structured_plan(valid_plan_payload)
+
+    assert result.valid is True
+    assert result.to_dict() == {
+        "valid": True,
+        "plan": {
+            "request_summary": valid_plan_payload["request_summary"],
+            "blueprint_family": valid_plan_payload["blueprint_family"],
+            "namespace_strategy": valid_plan_payload["namespace_strategy"],
+            "components": [
+                {
+                    "name": "vector-db",
+                    "enabled": True,
+                    "depends_on": [],
+                    "target_namespace": "ai-platform",
+                    "helm_chart": {
+                        "repository": "https://charts.example.com/platform",
+                        "name": "milvus",
+                        "version": "4.2.0",
+                        "release_name": "vector-db",
+                        "crds_strategy": "Auto",
+                    },
+                    "kubernetes_manifest": None,
+                    "values": {"replicaCount": 1},
+                    "values_files": [
+                        {
+                            "kind": "ConfigMap",
+                            "name": "vector-db-values",
+                            "key": "values.yaml",
+                        }
+                    ],
+                    "wait_for_ready": True,
+                    "readiness_check": {
+                        "type": "deployment",
+                        "name": "vector-db",
+                        "selector": None,
+                        "match_labels": {},
+                        "namespace": None,
+                        "timeout": 600,
+                    },
+                },
+                {
+                    "name": "research-api",
+                    "enabled": True,
+                    "depends_on": ["vector-db"],
+                    "target_namespace": "ai-platform",
+                    "helm_chart": None,
+                    "kubernetes_manifest": valid_plan_payload["components"][1]["kubernetes_manifest"],
+                    "values": {},
+                    "values_files": [],
+                    "wait_for_ready": True,
+                    "readiness_check": {
+                        "type": "deployment",
+                        "name": None,
+                        "selector": "app=research-api",
+                        "match_labels": {},
+                        "namespace": None,
+                        "timeout": 300,
+                    },
+                },
+            ],
+            "prerequisites": valid_plan_payload["prerequisites"],
+            "fit_findings": valid_plan_payload["fit_findings"],
+            "unresolved_questions": [],
+            "reasoning_summary": valid_plan_payload["reasoning_summary"],
+            "normalization_warnings": [],
+        },
+        "warnings": [],
+        "errors": [],
+    }
 
 
 def test_plan_contract_suite_excludes_later_phase_topics(

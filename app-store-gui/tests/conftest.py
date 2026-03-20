@@ -100,6 +100,9 @@ def invalid_plan_payloads(valid_plan_payload: dict) -> dict[str, dict]:
     missing_family = deepcopy(valid_plan_payload)
     missing_family.pop("blueprint_family")
 
+    unsupported_blueprint_family = deepcopy(valid_plan_payload)
+    unsupported_blueprint_family["blueprint_family"] = "unsupported-family"
+
     duplicate_component_names = deepcopy(valid_plan_payload)
     duplicate_component_names["components"][1]["name"] = "vector-db"
 
@@ -116,6 +119,21 @@ def invalid_plan_payloads(valid_plan_payload: dict) -> dict[str, dict]:
         "version": "1.0.0",
     }
 
+    malformed_components = deepcopy(valid_plan_payload)
+    malformed_components["components"] = "vector-db"
+
+    unsupported_top_level_field = deepcopy(valid_plan_payload)
+    unsupported_top_level_field["chat_session"] = {"id": "session-123"}
+
+    unsupported_readiness_check_type = deepcopy(valid_plan_payload)
+    unsupported_readiness_check_type["components"][0]["readiness_check"]["type"] = "service"
+
+    invalid_values_file_kind = deepcopy(valid_plan_payload)
+    invalid_values_file_kind["components"][0]["values_files"][0]["kind"] = "PersistentVolumeClaim"
+
+    unsupported_crds_strategy = deepcopy(valid_plan_payload)
+    unsupported_crds_strategy["components"][0]["helm_chart"]["crds_strategy"] = "Always"
+
     blocking_unresolved_question = deepcopy(valid_plan_payload)
     blocking_unresolved_question["unresolved_questions"] = [
         {
@@ -126,10 +144,16 @@ def invalid_plan_payloads(valid_plan_payload: dict) -> dict[str, dict]:
 
     return {
         "missing_blueprint_family": missing_family,
+        "unsupported_blueprint_family": unsupported_blueprint_family,
         "duplicate_component_names": duplicate_component_names,
         "dependency_on_missing_component": dependency_on_missing_component,
         "missing_deployment_method": missing_deployment_method,
         "both_deployment_methods": both_deployment_methods,
+        "malformed_components": malformed_components,
+        "unsupported_top_level_field": unsupported_top_level_field,
+        "unsupported_readiness_check_type": unsupported_readiness_check_type,
+        "invalid_values_file_kind": invalid_values_file_kind,
+        "unsupported_crds_strategy": unsupported_crds_strategy,
         "blocking_unresolved_question": blocking_unresolved_question,
     }
 
@@ -156,6 +180,8 @@ def warning_case_payload(valid_plan_payload: dict) -> dict:
 def phase_one_scope_markers() -> dict[str, set[str]]:
     return {
         "allowed_requirement_ids": {
+            "PLAN-02",
+            "PLAN-03",
             "PLAN-06",
             "PLAN-07",
             "PLAN-08",
