@@ -16,6 +16,7 @@ from .models import (
     ValidationResult,
     ValuesFileReference,
 )
+from .validator import validate_structured_plan
 from .apply_gateway import (
     ApplyGateway,
     ApplyGatewayDependencies,
@@ -43,6 +44,7 @@ __all__ = [
     "UnresolvedQuestion",
     "ValidationResult",
     "ValuesFileReference",
+    "validate_structured_plan",
     "apply_yaml_content_with_namespace",
     "apply_yaml_documents_with_namespace",
     "apply_yaml_file_with_namespace",
