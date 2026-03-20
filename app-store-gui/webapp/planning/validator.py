@@ -6,10 +6,16 @@ from typing import Any, Dict, List, Mapping, Optional
 from .models import (
     SUPPORTED_BLUEPRINT_FAMILIES,
     SUPPORTED_CRDS_STRATEGIES,
+    SUPPORTED_FIT_STATUSES,
+    SUPPORTED_INSPECTION_DOMAIN_STATUSES,
     SUPPORTED_READINESS_CHECK_TYPES,
     ComponentPlan,
     FitFindings,
+    FitBlocker,
     HelmChartPlan,
+    InspectionDomainFinding,
+    InspectionFreshness,
+    InspectionSnapshot,
     NamespaceStrategy,
     NormalizationWarning,
     PlanValidationError,
@@ -50,6 +56,11 @@ _HELM_FIELDS = {"repository", "name", "version", "release_name", "crds_strategy"
 _VALUES_FILE_FIELDS = {"kind", "name", "key"}
 _READINESS_FIELDS = {"type", "name", "selector", "match_labels", "namespace", "timeout"}
 _NAMESPACE_MODES = {"explicit", "default"}
+_FIT_FINDINGS_FIELDS = {"status", "notes", "blockers", "domains", "inspection_snapshot"}
+_FIT_BLOCKER_FIELDS = {"code", "message", "domain"}
+_INSPECTION_DOMAIN_FIELDS = {"status", "required", "freshness", "observed", "notes", "blockers"}
+_INSPECTION_FRESHNESS_FIELDS = {"captured_at", "max_age_seconds", "observed_generation"}
+_REQUIRED_INSPECTION_DOMAINS = {"cpu", "memory", "gpu", "namespaces", "storage_classes", "weka"}
 
 
 def validate_structured_plan(payload: Mapping[str, Any]) -> ValidationResult:
@@ -273,8 +284,19 @@ def _parse_fit_findings(payload: Any, errors: List[PlanValidationError]) -> FitF
         )
         return FitFindings(status="", notes=[])
 
-    _validate_unknown_keys(payload, {"status", "notes"}, "fit_findings", errors)
+    _validate_unknown_keys(payload, _FIT_FINDINGS_FIELDS, "fit_findings", errors)
     status = _require_string(payload.get("status"), "fit_findings.status", errors)
+    if status and status not in SUPPORTED_FIT_STATUSES:
+        errors.append(
+            PlanValidationError(
+                code="unsupported_fit_status",
+                path="fit_findings.status",
+                message=(
+                    f"unsupported fit_findings status '{status}'; supported values are "
+                    f"{', '.join(sorted(SUPPORTED_FIT_STATUSES))}"
+                ),
+            )
+        )
     notes = payload.get("notes", [])
     if not isinstance(notes, list) or any(not isinstance(note, str) for note in notes):
         errors.append(
@@ -285,7 +307,226 @@ def _parse_fit_findings(payload: Any, errors: List[PlanValidationError]) -> FitF
             )
         )
         notes = []
-    return FitFindings(status=status, notes=list(notes))
+    blockers = _parse_fit_blockers(payload.get("blockers", []), "fit_findings.blockers", errors)
+    domains = _parse_inspection_domains(payload.get("domains", {}), "fit_findings.domains", errors)
+    inspection_snapshot = _parse_inspection_snapshot(
+        payload.get("inspection_snapshot"),
+        errors,
+    )
+    fit_findings = FitFindings(
+        status=status,
+        notes=list(notes),
+        blockers=blockers,
+        domains=domains,
+        inspection_snapshot=inspection_snapshot,
+    )
+    _validate_fit_findings_contract(fit_findings, errors)
+    return fit_findings
+
+
+def _parse_fit_blockers(
+    payload: Any,
+    path: str,
+    errors: List[PlanValidationError],
+) -> List[FitBlocker]:
+    if not isinstance(payload, list):
+        errors.append(
+            PlanValidationError(
+                code="invalid_type",
+                path=path,
+                message=f"field '{path}' must be a list",
+            )
+        )
+        return []
+
+    blockers: List[FitBlocker] = []
+    for index, item in enumerate(payload):
+        blocker_path = f"{path}[{index}]"
+        if not isinstance(item, Mapping):
+            errors.append(
+                PlanValidationError(
+                    code="invalid_type",
+                    path=blocker_path,
+                    message=f"field '{blocker_path}' must be an object",
+                )
+            )
+            continue
+        _validate_unknown_keys(item, _FIT_BLOCKER_FIELDS, blocker_path, errors)
+        domain = item.get("domain")
+        if domain is not None and not isinstance(domain, str):
+            errors.append(
+                PlanValidationError(
+                    code="invalid_type",
+                    path=f"{blocker_path}.domain",
+                    message=f"field '{blocker_path}.domain' must be a string when provided",
+                )
+            )
+            domain = None
+        blockers.append(
+            FitBlocker(
+                code=_require_string(item.get("code"), f"{blocker_path}.code", errors),
+                message=_require_string(item.get("message"), f"{blocker_path}.message", errors),
+                domain=domain,
+            )
+        )
+    return blockers
+
+
+def _parse_inspection_domains(
+    payload: Any,
+    path: str,
+    errors: List[PlanValidationError],
+) -> Dict[str, InspectionDomainFinding]:
+    if not isinstance(payload, Mapping):
+        errors.append(
+            PlanValidationError(
+                code="invalid_type",
+                path=path,
+                message=f"field '{path}' must be an object",
+            )
+        )
+        return {}
+
+    domains: Dict[str, InspectionDomainFinding] = {}
+    for domain_name in sorted(payload):
+        domain_path = f"{path}.{domain_name}"
+        domain_payload = payload[domain_name]
+        if not isinstance(domain_payload, Mapping):
+            errors.append(
+                PlanValidationError(
+                    code="invalid_type",
+                    path=domain_path,
+                    message=f"field '{domain_path}' must be an object",
+                )
+            )
+            continue
+
+        _validate_unknown_keys(domain_payload, _INSPECTION_DOMAIN_FIELDS, domain_path, errors)
+        status = _require_string(domain_payload.get("status"), f"{domain_path}.status", errors)
+        if status and status not in SUPPORTED_INSPECTION_DOMAIN_STATUSES:
+            errors.append(
+                PlanValidationError(
+                    code="unsupported_inspection_domain_status",
+                    path=f"{domain_path}.status",
+                    message=(
+                        f"unsupported inspection domain status '{status}'; supported values are "
+                        f"{', '.join(sorted(SUPPORTED_INSPECTION_DOMAIN_STATUSES))}"
+                    ),
+                )
+            )
+        required = _coerce_optional_bool(domain_payload.get("required"), f"{domain_path}.required", errors, True)
+        freshness = _parse_inspection_freshness(
+            domain_payload.get("freshness"),
+            f"{domain_path}.freshness",
+            errors,
+        )
+        observed = clone_mapping(domain_payload.get("observed"))
+        if domain_payload.get("observed") is not None and not isinstance(domain_payload.get("observed"), Mapping):
+            errors.append(
+                PlanValidationError(
+                    code="invalid_type",
+                    path=f"{domain_path}.observed",
+                    message=f"field '{domain_path}.observed' must be an object when provided",
+                )
+            )
+            observed = {}
+        notes = _parse_string_list(domain_payload.get("notes", []), f"{domain_path}.notes", errors)
+        blockers = _parse_fit_blockers(domain_payload.get("blockers", []), f"{domain_path}.blockers", errors)
+        domains[domain_name] = InspectionDomainFinding(
+            status=status,
+            required=required,
+            freshness=freshness,
+            observed=observed,
+            notes=notes,
+            blockers=blockers,
+        )
+    return domains
+
+
+def _parse_inspection_freshness(
+    payload: Any,
+    path: str,
+    errors: List[PlanValidationError],
+) -> Optional[InspectionFreshness]:
+    if payload is None:
+        return None
+    if not isinstance(payload, Mapping):
+        errors.append(
+            PlanValidationError(
+                code="invalid_type",
+                path=path,
+                message=f"field '{path}' must be an object when provided",
+            )
+        )
+        return None
+    _validate_unknown_keys(payload, _INSPECTION_FRESHNESS_FIELDS, path, errors)
+    observed_generation = payload.get("observed_generation")
+    if observed_generation is not None and not isinstance(observed_generation, str):
+        errors.append(
+            PlanValidationError(
+                code="invalid_type",
+                path=f"{path}.observed_generation",
+                message=f"field '{path}.observed_generation' must be a string when provided",
+            )
+        )
+        observed_generation = None
+    max_age_seconds = payload.get("max_age_seconds")
+    if max_age_seconds is not None:
+        max_age_seconds = _require_int(max_age_seconds, f"{path}.max_age_seconds", errors)
+    return InspectionFreshness(
+        captured_at=_require_string(payload.get("captured_at"), f"{path}.captured_at", errors),
+        max_age_seconds=max_age_seconds,
+        observed_generation=observed_generation,
+    )
+
+
+def _parse_inspection_snapshot(
+    payload: Any,
+    errors: List[PlanValidationError],
+) -> Optional[InspectionSnapshot]:
+    if payload is None:
+        return None
+    if not isinstance(payload, Mapping):
+        errors.append(
+            PlanValidationError(
+                code="invalid_type",
+                path="fit_findings.inspection_snapshot",
+                message="field 'fit_findings.inspection_snapshot' must be an object when provided",
+            )
+        )
+        return None
+
+    _validate_unknown_keys(
+        payload,
+        {"captured_at", "correlation_id", "domains"},
+        "fit_findings.inspection_snapshot",
+        errors,
+    )
+    correlation_id = payload.get("correlation_id")
+    if correlation_id is not None and not isinstance(correlation_id, str):
+        errors.append(
+            PlanValidationError(
+                code="invalid_type",
+                path="fit_findings.inspection_snapshot.correlation_id",
+                message=(
+                    "field 'fit_findings.inspection_snapshot.correlation_id' must be a string when provided"
+                ),
+            )
+        )
+        correlation_id = None
+    return InspectionSnapshot(
+        captured_at=_require_string(
+            payload.get("captured_at"),
+            "fit_findings.inspection_snapshot.captured_at",
+            errors,
+        ),
+        correlation_id=correlation_id,
+        domains=_parse_inspection_domains(
+            payload.get("domains", {}),
+            "fit_findings.inspection_snapshot.domains",
+            errors,
+        ),
+    )
 
 
 def _parse_prerequisites(payload: Any, errors: List[PlanValidationError]) -> List[str]:
@@ -739,6 +980,73 @@ def _validate_unresolved_questions(
                     ),
                 )
             )
+
+
+def _validate_fit_findings_contract(
+    fit_findings: FitFindings,
+    errors: List[PlanValidationError],
+) -> None:
+    if not fit_findings.domains:
+        return
+
+    for domain_name in _REQUIRED_INSPECTION_DOMAINS:
+        domain = fit_findings.domains.get(domain_name)
+        if domain is None:
+            errors.append(
+                PlanValidationError(
+                    code="missing_required_field",
+                    path=f"fit_findings.domains.{domain_name}",
+                    message=f"required inspection domain '{domain_name}' is missing from fit_findings.domains",
+                )
+            )
+            continue
+        if domain.required and domain.status != "complete":
+            if fit_findings.status != "blocked":
+                errors.append(
+                    PlanValidationError(
+                        code="fit_requires_blocked_status",
+                        path="fit_findings.status",
+                        message=(
+                            "fit_findings.status must be 'blocked' when required inspection domains are partial or unavailable"
+                        ),
+                    )
+                )
+            if not domain.blockers:
+                errors.append(
+                    PlanValidationError(
+                        code="missing_fit_blocker",
+                        path=f"fit_findings.domains.{domain_name}.blockers",
+                        message=(
+                            f"required inspection domain '{domain_name}' must declare at least one blocker when status is not complete"
+                        ),
+                    )
+                )
+
+    if fit_findings.inspection_snapshot is not None:
+        snapshot_domains = fit_findings.inspection_snapshot.domains
+        for domain_name, domain in fit_findings.domains.items():
+            snapshot_domain = snapshot_domains.get(domain_name)
+            if snapshot_domain is None:
+                errors.append(
+                    PlanValidationError(
+                        code="missing_snapshot_domain",
+                        path=f"fit_findings.inspection_snapshot.domains.{domain_name}",
+                        message=(
+                            f"inspection snapshot is missing fit domain '{domain_name}'"
+                        ),
+                    )
+                )
+                continue
+            if snapshot_domain.status != domain.status:
+                errors.append(
+                    PlanValidationError(
+                        code="inspection_status_mismatch",
+                        path=f"fit_findings.inspection_snapshot.domains.{domain_name}.status",
+                        message=(
+                            f"inspection snapshot domain '{domain_name}' must match fit_findings.domains status"
+                        ),
+                    )
+                )
 
 
 def _sort_issues(issues: List[Any]) -> List[Any]:
