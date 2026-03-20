@@ -241,11 +241,27 @@ def compiled_wekaappstore_yaml(compiled_wekaappstore_document: dict) -> str:
 def apply_gateway_input(compiled_wekaappstore_document: dict, compiled_wekaappstore_yaml: str) -> dict:
     return {
         "namespace_override": "ai-platform",
+        "no_namespace_override": "",
         "yaml_text": compiled_wekaappstore_yaml,
         "document": compiled_wekaappstore_document,
         "expected_runtime_kind": "WekaAppStore",
         "expected_runtime_api_version": "warp.io/v1alpha1",
         "expected_apply_result": {
             "applied": ["WekaAppStore"],
+        },
+    }
+
+
+@pytest.fixture
+def builtin_manifest_document() -> dict:
+    return {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+            "name": "research-api-settings",
+            "namespace": "embedded-namespace",
+        },
+        "data": {
+            "MODEL_PROVIDER": "weka",
         },
     }

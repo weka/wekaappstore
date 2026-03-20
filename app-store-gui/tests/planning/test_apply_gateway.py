@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 import yaml
 
@@ -59,6 +61,88 @@ def test_apply_gateway_routes_wekaappstore_documents_through_custom_objects_api(
     assert payload["plural"] == "wekaappstores"
     assert payload["body"]["metadata"]["namespace"] == "ai-platform"
     assert payload["body"]["spec"]["appStack"]["components"][0]["targetNamespace"] == "ai-platform"
+
+
+def test_apply_gateway_preserves_existing_namespaces_when_no_override_is_provided(
+    apply_gateway_input: dict,
+) -> None:
+    operations: list[tuple] = []
+
+    class CustomObjectsApiStub:
+        def create_namespaced_custom_object(self, **kwargs):
+            operations.append(("create_namespaced_custom_object", kwargs))
+
+    dependencies = ApplyGatewayDependencies(
+        load_kube_config=lambda: None,
+        ensure_namespace_exists=lambda namespace: operations.append(("ensure_namespace_exists", namespace)),
+        is_cluster_scoped=lambda doc: False,
+        crd_scope_for=lambda group, plural: "Namespaced",
+        with_last_applied_annotation=lambda doc: doc,
+        api_client_factory=lambda: object(),
+        custom_objects_api_factory=lambda api_client: CustomObjectsApiStub(),
+    )
+
+    result = apply_yaml_content_with_namespace(
+        apply_gateway_input["yaml_text"],
+        apply_gateway_input["no_namespace_override"],
+        dependencies=dependencies,
+    )
+
+    assert result == {"applied": ["WekaAppStore"]}
+    assert operations[0] == ("ensure_namespace_exists", "ai-platform")
+    body = operations[1][1]["body"]
+    assert body["metadata"]["namespace"] == "ai-platform"
+    assert body["spec"]["appStack"]["components"][0]["targetNamespace"] == "ai-platform"
+
+
+def test_apply_gateway_falls_back_to_builtin_resource_apply_for_non_cr_documents(
+    builtin_manifest_document: dict,
+) -> None:
+    operations: list[tuple] = []
+
+    class CustomObjectsApiStub:
+        def create_namespaced_custom_object(self, **kwargs):
+            operations.append(("unexpected_custom_object_call", kwargs))
+
+    def create_from_dict_stub(api_client, *, data, namespace, verbose):
+        operations.append(("create_from_dict", data, namespace, verbose))
+        return [(SimpleNamespace(kind=data["kind"]), None)]
+
+    dependencies = ApplyGatewayDependencies(
+        load_kube_config=lambda: None,
+        ensure_namespace_exists=lambda namespace: operations.append(("ensure_namespace_exists", namespace)),
+        is_cluster_scoped=lambda doc: False,
+        with_last_applied_annotation=lambda doc: doc,
+        api_client_factory=lambda: object(),
+        custom_objects_api_factory=lambda api_client: CustomObjectsApiStub(),
+        create_from_dict=create_from_dict_stub,
+    )
+
+    yaml_text = yaml.safe_dump(builtin_manifest_document, sort_keys=False)
+    result = apply_yaml_content_with_namespace(
+        yaml_text,
+        "ai-platform",
+        dependencies=dependencies,
+    )
+
+    assert result == {"applied": ["ConfigMap"]}
+    assert operations[0] == ("ensure_namespace_exists", "ai-platform")
+    assert operations[1] == (
+        "create_from_dict",
+        {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {
+                "name": "research-api-settings",
+                "namespace": "ai-platform",
+            },
+            "data": {
+                "MODEL_PROVIDER": "weka",
+            },
+        },
+        "ai-platform",
+        False,
+    )
 
 
 def test_apply_gateway_scope_stays_off_chat_and_inspection_paths(
