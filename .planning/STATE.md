@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-last_updated: "2026-03-20T03:10:26Z"
+last_updated: "2026-03-20T03:22:24.332Z"
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 12
-  completed_plans: 9
+  completed_plans: 10
 ---
 
 # STATE.md
 
 **Initialized:** 2026-03-20
-**Current status:** Phase 3 plan 01 complete
+**Current status:** Phase 3 plan 02 complete
 
 ## Project Reference
 
@@ -36,9 +36,9 @@ See: `.planning/PROJECT.md` (updated 2026-03-20)
 ## Current Execution Position
 
 - Current phase: `03-conversational-planning-sessions`
-- Current plan: `03-02`
-- Completed plans this phase: `03-01`
-- Last completed plan: `03-01`
+- Current plan: `03-03`
+- Completed plans this phase: `03-01`, `03-02`
+- Last completed plan: `03-02`
 
 ## Decisions
 
@@ -57,15 +57,31 @@ See: `.planning/PROJECT.md` (updated 2026-03-20)
 - [Phase 02]: Classify preview and apply failures by explicit stages instead of ad hoc error strings so later UI flows can surface deterministic diagnostics.
 - [Phase 03]: Represent restart as a replacement session linked to the original so audit history stays intact.
 - [Phase 03]: Keep the initial planning-session seam file-backed with injected clocks and ID factories for deterministic pytest coverage.
+- [Phase 03]: Keep supported-family routing backend-owned via an explicit keyword catalog derived from repo blueprint metadata.
+- [Phase 03]: Preserve the previously matched family across follow-up turns so short answers do not re-route the session.
+- [Phase 03]: Inject the latest inspection snapshot and fit findings into every draft revision before validation.
 
 ## Recent Progress
 
+- Completed `03-02-PLAN.md` and wrote `.planning/phases/03-conversational-planning-sessions/03-02-SUMMARY.md`.
 - Completed `03-01-PLAN.md` and wrote `.planning/phases/03-conversational-planning-sessions/03-01-SUMMARY.md`.
 - Completed `02-02-PLAN.md` and wrote `.planning/phases/02-cluster-and-weka-inspection-signals/02-02-SUMMARY.md`.
 - Completed `02-03-PLAN.md` and wrote `.planning/phases/02-cluster-and-weka-inspection-signals/02-03-SUMMARY.md`.
 - Completed `02-04-PLAN.md` and wrote `.planning/phases/02-cluster-and-weka-inspection-signals/02-04-SUMMARY.md`.
 - Integrated bounded inspection snapshots into planner fit findings and stage-classified preview/apply diagnostics with deterministic mocked coverage.
 - Added backend-owned planning-session models, a replayable local session store, and deterministic restart or abandon lifecycle tests for Phase 3.
+- Added deterministic supported-family matching plus a backend session service that replays each turn against bounded inspection evidence and stores correlation-aware draft revisions.
+
+## Performance Metrics
+
+| Phase | Plan | Duration | Tasks | Files | Recorded |
+|-------|------|----------|-------|-------|----------|
+| 03 | 02 | 9 min | 3 | 6 | 2026-03-20T03:20:26Z |
+
+## Session Info
+
+- Last session: `2026-03-20T03:20:26Z`
+- Stopped At: `Completed 03-02-PLAN.md`
 
 ## Latest Completed Setup
 
@@ -78,8 +94,8 @@ See: `.planning/PROJECT.md` (updated 2026-03-20)
 
 ## Next Action
 
-- Execute `03-02-PLAN.md` to build chat-facing session routes and planner orchestration on top of the new replayable session seam.
-- Preserve the Phase 2 bounded-tool and correlation diagnostics patterns while adding turn-by-turn chat behavior.
+- Execute `03-03-PLAN.md` to expose the conversational planning service through chat-facing routes and templates.
+- Preserve the backend-owned family routing and correlation-aware inspection evidence patterns while adding the UI/API surface.
 
 ---
-*Last updated: 2026-03-20 after completing 03-01-PLAN.md*
+*Last updated: 2026-03-20 after completing 03-02-PLAN.md*

@@ -8,8 +8,8 @@
 ### Chat Planning
 
 - [ ] **CHAT-01**: User can start a NemoClaw planning session from the WEKA App Store UI.
-- [ ] **CHAT-02**: User can submit a free-text install request in a chat-style interface.
-- [ ] **CHAT-03**: User can answer follow-up questions from NemoClaw within the same planning session.
+- [x] **CHAT-02**: User can submit a free-text install request in a chat-style interface.
+- [x] **CHAT-03**: User can answer follow-up questions from NemoClaw within the same planning session.
 - [x] **CHAT-04**: User can see prior prompts, agent responses, and unanswered follow-up questions for the current session.
 - [x] **CHAT-05**: User can restart or abandon a draft planning session without applying changes.
 
@@ -23,7 +23,7 @@
 
 ### Planning And Fit Validation
 
-- [ ] **PLAN-01**: The system can map a natural-language request to a supported blueprint family or explicitly report that no supported family fits the request.
+- [x] **PLAN-01**: The system can map a natural-language request to a supported blueprint family or explicitly report that no supported family fits the request.
 - [x] **PLAN-02**: The system can produce a structured installation plan before producing or previewing YAML.
 - [x] **PLAN-03**: The structured plan includes blueprint family, namespace strategy, component configuration, prerequisites, unresolved questions, and reasoning summary.
 - [x] **PLAN-04**: The structured plan includes cluster-fit findings for GPU type, GPU count, GPU memory, CPU, RAM, and WEKA storage.
@@ -84,8 +84,8 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | CHAT-01 | Phase 3 | Pending |
-| CHAT-02 | Phase 3 | Pending |
-| CHAT-03 | Phase 3 | Pending |
+| CHAT-02 | Phase 3 | Complete |
+| CHAT-03 | Phase 3 | Complete |
 | CHAT-04 | Phase 3 | Complete |
 | CHAT-05 | Phase 3 | Complete |
 | CLSTR-01 | Phase 2 | Complete |
@@ -93,7 +93,7 @@
 | CLSTR-03 | Phase 2 | Complete |
 | CLSTR-04 | Phase 2 | Complete |
 | CLSTR-05 | Phase 2 | Complete |
-| PLAN-01 | Phase 3 | Pending |
+| PLAN-01 | Phase 3 | Complete |
 | PLAN-02 | Phase 1 | Complete |
 | PLAN-03 | Phase 1 | Complete |
 | PLAN-04 | Phase 2 | Complete |
