@@ -19,6 +19,7 @@ def test_apply_gateway_fixture_targets_existing_runtime_path(apply_gateway_input
     assert payload["kind"] == apply_gateway_input["expected_runtime_kind"]
     assert payload["apiVersion"] == apply_gateway_input["expected_runtime_api_version"]
     assert apply_gateway_input["expected_apply_result"] == {"applied": ["WekaAppStore"]}
+    assert list(payload) == ["apiVersion", "kind", "metadata", "spec"]
 
 
 def test_existing_apply_helpers_remain_the_phase_one_handoff_seam() -> None:
@@ -29,6 +30,14 @@ def test_existing_apply_helpers_remain_the_phase_one_handoff_seam() -> None:
     assert "CustomObjectsApi" in file_apply_source
     assert "WekaAppStore" in content_apply_source
     assert "CustomObjectsApi" in content_apply_source
+
+
+def test_apply_gateway_scope_stays_off_chat_and_inspection_paths(
+    phase_one_scope_markers: dict[str, set[str]],
+) -> None:
+    assert {"APPLY-06", "APPLY-07"}.issubset(phase_one_scope_markers["allowed_requirement_ids"])
+    assert "chat" in phase_one_scope_markers["excluded_topics"]
+    assert "cluster_inspection" in phase_one_scope_markers["excluded_topics"]
 
 
 def test_future_apply_gateway_module_can_wrap_existing_helpers() -> None:

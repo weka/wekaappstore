@@ -6,10 +6,14 @@ import pytest
 
 
 PHASE_ONE_REQUIREMENTS = {"PLAN-06", "PLAN-07"}
+OUT_OF_SCOPE_TOPICS = {"chat", "cluster_inspection", "weka_inspection", "coexistence"}
 
 
-def test_valid_plan_fixture_matches_phase_one_contract(valid_plan_payload: dict) -> None:
-    assert PHASE_ONE_REQUIREMENTS == {"PLAN-06", "PLAN-07"}
+def test_valid_plan_fixture_matches_phase_one_contract(
+    valid_plan_payload: dict,
+    phase_one_scope_markers: dict[str, set[str]],
+) -> None:
+    assert PHASE_ONE_REQUIREMENTS.issubset(phase_one_scope_markers["allowed_requirement_ids"])
     assert valid_plan_payload["blueprint_family"] == "ai-agent-enterprise-research"
     assert valid_plan_payload["namespace_strategy"]["target_namespace"] == "ai-platform"
     assert valid_plan_payload["unresolved_questions"] == []
@@ -43,13 +47,25 @@ def test_invalid_plan_variants_cover_deterministic_validation_failures(
 
 
 def test_warning_fixture_only_exercises_safe_normalization(warning_case_payload: dict) -> None:
-    assert warning_case_payload["normalization_candidates"] == [
-        "release_name_defaults_to_component_name",
-        "wait_for_ready_defaults_to_true",
+    assert warning_case_payload["expected_normalization_warnings"] == [
+        {
+            "path": "components[0].helm_chart.release_name",
+            "message": "release_name defaults to the component name when omitted",
+        },
+        {
+            "path": "components[0].wait_for_ready",
+            "message": "wait_for_ready defaults to true when omitted",
+        },
     ]
     first_component = warning_case_payload["components"][0]
     assert "release_name" not in first_component["helm_chart"]
     assert "wait_for_ready" not in first_component
+
+
+def test_plan_contract_suite_excludes_later_phase_topics(
+    phase_one_scope_markers: dict[str, set[str]],
+) -> None:
+    assert OUT_OF_SCOPE_TOPICS == phase_one_scope_markers["excluded_topics"]
 
 
 def test_future_plan_validator_module_can_be_added_without_rewriting_contract_fixtures() -> None:

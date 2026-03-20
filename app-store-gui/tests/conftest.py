@@ -139,11 +139,36 @@ def warning_case_payload(valid_plan_payload: dict) -> dict:
     payload = deepcopy(valid_plan_payload)
     payload["components"][0]["helm_chart"].pop("release_name")
     payload["components"][0].pop("wait_for_ready")
-    payload["normalization_candidates"] = [
-        "release_name_defaults_to_component_name",
-        "wait_for_ready_defaults_to_true",
+    payload["expected_normalization_warnings"] = [
+        {
+            "path": "components[0].helm_chart.release_name",
+            "message": "release_name defaults to the component name when omitted",
+        },
+        {
+            "path": "components[0].wait_for_ready",
+            "message": "wait_for_ready defaults to true when omitted",
+        },
     ]
     return payload
+
+
+@pytest.fixture
+def phase_one_scope_markers() -> dict[str, set[str]]:
+    return {
+        "allowed_requirement_ids": {
+            "PLAN-06",
+            "PLAN-07",
+            "PLAN-08",
+            "APPLY-06",
+            "APPLY-07",
+        },
+        "excluded_topics": {
+            "chat",
+            "cluster_inspection",
+            "weka_inspection",
+            "coexistence",
+        },
+    }
 
 
 @pytest.fixture

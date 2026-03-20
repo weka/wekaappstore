@@ -11,8 +11,9 @@ PHASE_ONE_REQUIREMENTS = {"PLAN-08"}
 
 def test_compiled_fixture_is_single_wekaappstore_resource(
     compiled_wekaappstore_document: dict,
+    phase_one_scope_markers: dict[str, set[str]],
 ) -> None:
-    assert PHASE_ONE_REQUIREMENTS == {"PLAN-08"}
+    assert PHASE_ONE_REQUIREMENTS.issubset(phase_one_scope_markers["allowed_requirement_ids"])
     assert compiled_wekaappstore_document["apiVersion"] == "warp.io/v1alpha1"
     assert compiled_wekaappstore_document["kind"] == "WekaAppStore"
     assert compiled_wekaappstore_document["metadata"]["namespace"] == "ai-platform"
@@ -29,6 +30,14 @@ def test_compiled_yaml_fixture_round_trips_with_stable_runtime_fields(
     assert loaded_document == compiled_wekaappstore_document
     assert list(loaded_document) == ["apiVersion", "kind", "metadata", "spec"]
     assert list(loaded_document["spec"]["appStack"]) == ["defaultNamespace", "components"]
+
+
+def test_compiler_fixture_stays_within_single_resource_phase_one_scope(
+    compiled_wekaappstore_document: dict,
+) -> None:
+    assert "fitFindings" not in compiled_wekaappstore_document["spec"]
+    assert "chatSession" not in compiled_wekaappstore_document["spec"]
+    assert "coexistenceAnalysis" not in compiled_wekaappstore_document["spec"]
 
 
 def test_future_compiler_module_can_target_fixture_shape() -> None:
