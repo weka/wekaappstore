@@ -24,12 +24,16 @@ from jinja2 import Environment
 from webapp.inspection import collect_cluster_inspection, collect_weka_inspection, flatten_cluster_status
 from webapp.planning import (
     ApplyGateway,
+    LocalPlanningSessionStore,
     PlanCompilationError,
+    PlanningSessionNotFoundError,
+    PlanningSessionService,
     build_stage_error,
     compile_plan_to_wekaappstore,
     compile_plan_to_yaml,
     derive_fit_findings_from_snapshot,
     merge_inspection_results,
+    supported_family_catalog,
     validate_structured_plan,
 )
 from webapp.planning.inspection_tools import PlanningInspectionTools
@@ -187,6 +191,7 @@ if os.path.isdir(STATIC_DIR):
 
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 PLANNING_APPLY_GATEWAY = ApplyGateway(project_root=PROJECT_ROOT)
+PLANNING_SESSIONS_DIR = os.path.join(PROJECT_ROOT, ".planning-sessions")
 
 # Load logo as base64 once for reuse in templates
 LOGO_B64 = None
@@ -296,6 +301,114 @@ PLANNING_INSPECTION_TOOLS = PlanningInspectionTools(
     cluster_collector=lambda: collect_cluster_inspection(load_kube_config=load_kube_config),
     weka_collector=lambda: collect_weka_inspection(load_kube_config=load_kube_config),
 )
+
+
+def build_default_planning_draft(
+    *,
+    session: Any,
+    request_summary: str,
+    conversation: List[Dict[str, Any]],
+    family_match: Any,
+    inspection_snapshot: Dict[str, Any],
+    fit_findings: Dict[str, Any],
+) -> Dict[str, Any]:
+    requested_namespace = None
+    for turn in reversed(conversation):
+        if turn.get("role") != "user":
+            continue
+        message = str(turn.get("message") or "")
+        for token in message.replace(",", " ").split():
+            if token.endswith("-namespace"):
+                requested_namespace = token.strip(".!?")
+                break
+        if requested_namespace:
+            break
+
+    family_catalog = supported_family_catalog()
+    family_metadata = family_catalog.get(family_match.family) if family_match.family else None
+    display_name = (
+        family_metadata.display_name if family_metadata is not None else (family_match.family or "this blueprint")
+    )
+    namespace_value = requested_namespace or "ai-platform"
+    unresolved_questions: list[dict[str, Any]] = []
+    assistant_message = (
+        f"I mapped this request to {display_name} and drafted a backend-owned planning session."
+    )
+    draft_summary = (
+        f"Drafted a {display_name} session using the latest inspection snapshot and current conversation state."
+    )
+    if requested_namespace is None:
+        unresolved_questions.append(
+            {
+                "question": "Which namespace should receive this deployment?",
+                "field_path": "namespace_strategy.target_namespace",
+                "blocking": True,
+                "install_critical": True,
+            }
+        )
+        assistant_message = (
+            f"I mapped this request to {display_name}, but I still need the target namespace before the draft can validate."
+        )
+        draft_summary = "Waiting for the deployment namespace before the draft can validate."
+
+    return {
+        "assistant_message": assistant_message,
+        "draft_summary": draft_summary,
+        "plan": {
+            "request_summary": request_summary,
+            "blueprint_family": family_match.family,
+            "namespace_strategy": {
+                "mode": "explicit",
+                "target_namespace": namespace_value if not unresolved_questions else None,
+            },
+            "components": [],
+            "prerequisites": [
+                "Review the generated plan before preview or apply.",
+            ],
+            "fit_findings": fit_findings,
+            "unresolved_questions": unresolved_questions,
+            "reasoning_summary": draft_summary,
+        },
+        "follow_ups": unresolved_questions,
+        "inspection_snapshot": inspection_snapshot,
+    }
+
+
+def create_planning_session_service() -> PlanningSessionService:
+    return PlanningSessionService(
+        session_store=LocalPlanningSessionStore(PLANNING_SESSIONS_DIR),
+        inspection_tools=PLANNING_INSPECTION_TOOLS,
+        planner=build_default_planning_draft,
+    )
+
+
+def get_planning_session_service() -> PlanningSessionService:
+    service = getattr(app.state, "planning_session_service", None)
+    if service is None:
+        service = create_planning_session_service()
+        app.state.planning_session_service = service
+    return service
+
+
+def _planning_session_not_found(session_id: str) -> HTTPException:
+    return HTTPException(status_code=404, detail=f"Planning session '{session_id}' was not found.")
+
+
+def _planning_session_context(session: Any) -> Dict[str, Any]:
+    latest_revision = session.latest_revision
+    draft_plan = latest_revision.structured_plan if latest_revision is not None else None
+    return {
+        "session": session,
+        "draft_revision": latest_revision,
+        "draft_plan": draft_plan,
+        "unanswered_follow_ups": session.unanswered_follow_ups,
+        "transcript": session.turns,
+        "session_history": {
+            "restarted_from_session_id": session.restarted_from_session_id,
+            "replacement_session_id": session.replacement_session_id,
+            "restart_count": session.restart_count,
+        },
+    }
 
 
 def ensure_namespace_exists(namespace: Optional[str]) -> None:
@@ -681,12 +794,16 @@ def infer_requirements_from_yaml(file_path: str) -> Dict[str, int]:
 async def index(request: Request):
     status = await asyncio.to_thread(get_cluster_status)
     auth = await asyncio.to_thread(get_auth_status)
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "status": status,
-        "auth": auth,
-        "logo_b64": LOGO_B64,
-    })
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {
+            "request": request,
+            "status": status,
+            "auth": auth,
+            "logo_b64": LOGO_B64,
+        },
+    )
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -695,13 +812,210 @@ async def settings_page(request: Request):
     status = await asyncio.to_thread(get_cluster_status)
     # Use detected namespace if available, else default
     detected_ns = (auth.get("details", {}) or {}).get("namespace") if isinstance(auth, dict) else None
-    return templates.TemplateResponse("settings.html", {
-        "request": request,
-        "auth": auth,
-        "status": status,
-        "detected_namespace": detected_ns or "default",
-        "logo_b64": LOGO_B64,
-    })
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {
+            "request": request,
+            "auth": auth,
+            "status": status,
+            "detected_namespace": detected_ns or "default",
+            "logo_b64": LOGO_B64,
+        },
+    )
+
+
+@app.post("/planning/sessions")
+async def create_planning_session(
+    request: Request,
+    request_text: str = Form(...),
+):
+    service = get_planning_session_service()
+    transition = await asyncio.to_thread(
+        service.start_session,
+        request_text,
+        metadata={"source": "web"},
+    )
+    wants_json = "application/json" in request.headers.get("accept", "").lower()
+    if wants_json:
+        return JSONResponse(
+            {
+                "ok": True,
+                "session_id": transition.session.session_id,
+                "status": transition.session.status,
+                "redirect_url": f"/planning/sessions/{transition.session.session_id}",
+            }
+        )
+    return RedirectResponse(
+        url=f"/planning/sessions/{transition.session.session_id}",
+        status_code=303,
+    )
+
+
+@app.get("/planning/sessions/{session_id}", response_class=HTMLResponse)
+async def planning_session_page(request: Request, session_id: str):
+    service = get_planning_session_service()
+    try:
+        session = await asyncio.to_thread(service._session_store.load_session, session_id)
+    except PlanningSessionNotFoundError as exc:
+        raise _planning_session_not_found(session_id) from exc
+
+    context = _planning_session_context(session)
+    return templates.TemplateResponse(
+        request,
+        "planning_session.html",
+        {
+            "request": request,
+            "logo_b64": LOGO_B64,
+            **context,
+        },
+    )
+
+
+@app.post("/planning/sessions/{session_id}/message")
+async def planning_session_message(
+    request: Request,
+    session_id: str,
+    message: str = Form(...),
+):
+    service = get_planning_session_service()
+    try:
+        transition = await asyncio.to_thread(
+            service.process_turn,
+            session_id,
+            message=message,
+            metadata={"source": "web"},
+        )
+    except PlanningSessionNotFoundError as exc:
+        raise _planning_session_not_found(session_id) from exc
+
+    wants_json = "application/json" in request.headers.get("accept", "").lower()
+    if wants_json:
+        return JSONResponse(
+            {
+                "ok": True,
+                "session_id": transition.session.session_id,
+                "status": transition.session.status,
+                "assistant_message": transition.assistant_message,
+            }
+        )
+    return RedirectResponse(url=f"/planning/sessions/{session_id}", status_code=303)
+
+
+@app.post("/planning/sessions/{session_id}/follow-ups/{question_id}")
+async def answer_planning_follow_up(
+    request: Request,
+    session_id: str,
+    question_id: str,
+    answer: str = Form(...),
+):
+    service = get_planning_session_service()
+    try:
+        transition = await asyncio.to_thread(
+            service.answer_follow_up,
+            session_id,
+            question_id=question_id,
+            answer=answer,
+            metadata={"source": "web"},
+        )
+    except PlanningSessionNotFoundError as exc:
+        raise _planning_session_not_found(session_id) from exc
+
+    wants_json = "application/json" in request.headers.get("accept", "").lower()
+    if wants_json:
+        return JSONResponse(
+            {
+                "ok": True,
+                "session_id": transition.session.session_id,
+                "status": transition.session.status,
+                "assistant_message": transition.assistant_message,
+            }
+        )
+    return RedirectResponse(url=f"/planning/sessions/{session_id}", status_code=303)
+
+
+@app.post("/planning/sessions/{session_id}/restart")
+async def restart_planning_session(
+    request: Request,
+    session_id: str,
+):
+    service = get_planning_session_service()
+    try:
+        replacement = await asyncio.to_thread(
+            service._session_store.restart_session,
+            session_id,
+            metadata={"source": "web", "action": "restart"},
+        )
+    except PlanningSessionNotFoundError as exc:
+        raise _planning_session_not_found(session_id) from exc
+
+    wants_json = "application/json" in request.headers.get("accept", "").lower()
+    if wants_json:
+        return JSONResponse(
+            {
+                "ok": True,
+                "session_id": replacement.session_id,
+                "status": replacement.status,
+                "redirect_url": f"/planning/sessions/{replacement.session_id}",
+                "restarted_from_session_id": replacement.restarted_from_session_id,
+            }
+        )
+    return RedirectResponse(url=f"/planning/sessions/{replacement.session_id}", status_code=303)
+
+
+@app.post("/planning/sessions/{session_id}/abandon")
+async def abandon_planning_session(
+    request: Request,
+    session_id: str,
+):
+    service = get_planning_session_service()
+    try:
+        session = await asyncio.to_thread(
+            service._session_store.abandon_session,
+            session_id,
+            metadata={"source": "web", "action": "abandon"},
+        )
+    except PlanningSessionNotFoundError as exc:
+        raise _planning_session_not_found(session_id) from exc
+
+    wants_json = "application/json" in request.headers.get("accept", "").lower()
+    if wants_json:
+        return JSONResponse(
+            {
+                "ok": True,
+                "session_id": session.session_id,
+                "status": session.status,
+            }
+        )
+    return RedirectResponse(url=f"/planning/sessions/{session_id}", status_code=303)
+
+
+@app.get("/planning/sessions/{session_id}/events")
+async def planning_session_events(session_id: str):
+    service = get_planning_session_service()
+    try:
+        session = await asyncio.to_thread(service._session_store.load_session, session_id)
+    except PlanningSessionNotFoundError as exc:
+        raise _planning_session_not_found(session_id) from exc
+
+    context = _planning_session_context(session)
+    payload = {
+        "type": "session-state",
+        "session_id": session.session_id,
+        "status": session.status,
+        "draft_status": (
+            None if context["draft_revision"] is None else context["draft_revision"].status
+        ),
+        "pending_follow_up_ids": [
+            follow_up.question_id for follow_up in context["unanswered_follow_ups"]
+        ],
+        "turn_count": len(context["transcript"]),
+    }
+
+    async def event_generator():
+        yield f"data: {json.dumps(payload)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.get("/status")
