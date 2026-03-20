@@ -93,7 +93,7 @@
 | CLSTR-03 | Phase 2 | Pending |
 | CLSTR-04 | Phase 2 | Pending |
 | CLSTR-05 | Phase 2 | Pending |
-| PLAN-01 | Phase 2 | Pending |
+| PLAN-01 | Phase 3 | Pending |
 | PLAN-02 | Phase 1 | Pending |
 | PLAN-03 | Phase 1 | Pending |
 | PLAN-04 | Phase 2 | Pending |
@@ -101,11 +101,11 @@
 | PLAN-06 | Phase 1 | Pending |
 | PLAN-07 | Phase 1 | Pending |
 | PLAN-08 | Phase 1 | Pending |
-| APPLY-01 | Phase 3 | Pending |
-| APPLY-02 | Phase 3 | Pending |
-| APPLY-03 | Phase 3 | Pending |
-| APPLY-04 | Phase 3 | Pending |
-| APPLY-05 | Phase 3 | Pending |
+| APPLY-01 | Phase 4 | Pending |
+| APPLY-02 | Phase 4 | Pending |
+| APPLY-03 | Phase 4 | Pending |
+| APPLY-04 | Phase 4 | Pending |
+| APPLY-05 | Phase 4 | Pending |
 | APPLY-06 | Phase 1 | Pending |
 | APPLY-07 | Phase 1 | Pending |
 | AUTHR-01 | Phase 5 | Pending |
@@ -115,7 +115,7 @@
 | SAFE-02 | Phase 2 | Pending |
 | SAFE-03 | Phase 2 | Pending |
 | SAFE-04 | Phase 2 | Pending |
-| SAFE-05 | Phase 6 | Pending |
+| SAFE-05 | Phase 5 | Pending |
 
 **Coverage:**
 - v1 requirements: 33 total
@@ -124,4 +124,4 @@
 
 ---
 *Requirements defined: 2026-03-20*
-*Last updated: 2026-03-20 after initial definition*
+*Last updated: 2026-03-20 after roadmap traceability update*
