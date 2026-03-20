@@ -14,9 +14,9 @@ Requirements for the OpenClaw MCP Tool Integration milestone. Each maps to roadm
 - [x] **MCPS-03**: `inspect_weka` tool returns WEKA capacity, filesystems, and mount data
 - [x] **MCPS-04**: `list_blueprints` tool returns blueprint catalog with names, descriptions, and resource requirements
 - [x] **MCPS-05**: `get_blueprint` tool returns full blueprint detail including Helm values schema and defaults
-- [ ] **MCPS-06**: `get_crd_schema` tool returns the `WekaAppStore` CRD spec for agent YAML generation
-- [ ] **MCPS-07**: `validate_yaml` tool checks generated YAML against CRD and operator contract, returns structured errors
-- [ ] **MCPS-08**: `apply` tool creates `WekaAppStore` CRs with hard approval gate enforced in code
+- [x] **MCPS-06**: `get_crd_schema` tool returns the `WekaAppStore` CRD spec for agent YAML generation
+- [x] **MCPS-07**: `validate_yaml` tool checks generated YAML against CRD and operator contract, returns structured errors
+- [x] **MCPS-08**: `apply` tool creates `WekaAppStore` CRs with hard approval gate enforced in code
 - [ ] **MCPS-09**: `status` tool returns deployment status of `WekaAppStore` resources
 - [x] **MCPS-10**: All tool responses use flat agent-friendly JSON, not nested v1.0 planning models
 - [x] **MCPS-11**: All logging goes to stderr, never stdout (stdio transport requirement)
@@ -69,9 +69,9 @@ Deferred to future milestone after live OpenClaw is available.
 | MCPS-03 | Phase 6 | Complete |
 | MCPS-04 | Phase 6 | Complete |
 | MCPS-05 | Phase 6 | Complete |
-| MCPS-06 | Phase 6 | Pending |
-| MCPS-07 | Phase 7 | Pending |
-| MCPS-08 | Phase 7 | Pending |
+| MCPS-06 | Phase 6 | Complete |
+| MCPS-07 | Phase 7 | Complete |
+| MCPS-08 | Phase 7 | Complete |
 | MCPS-09 | Phase 7 | Pending |
 | MCPS-10 | Phase 6 | Complete |
 | MCPS-11 | Phase 6 | Complete |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: OpenClaw MCP Tool Integration
 status: planning
-stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-03-20T06:20:55.265Z"
+stopped_at: Completed 07-01-PLAN.md
+last_updated: "2026-03-20T06:45:23.107Z"
 last_activity: 2026-03-20 — v2.0 roadmap created; Phases 6-9 defined
 progress:
   total_phases: 9
   completed_phases: 4
-  total_plans: 19
-  completed_plans: 15
+  total_plans: 21
+  completed_plans: 16
   percent: 0
 ---
 
@@ -49,6 +49,7 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 | Phase 06-mcp-scaffold-and-read-only-tools P06-01 | 4min | 2 tasks | 13 files |
 | Phase 06-mcp-scaffold-and-read-only-tools P06-02 | 8min | 2 tasks | 5 files |
 | Phase 06-mcp-scaffold-and-read-only-tools P06-03 | 3min | 2 tasks | 5 files |
+| Phase 07-validation-apply-and-status-tools P01 | 2min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,8 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 - [Phase Phase 06-03]: _get_crd_schema_impl() injectable pattern matches inspect tools — same testability approach
 - [Phase Phase 06-03]: 'schema' field is documented exception to 2-key depth rule — pass-through K8s CRD OpenAPI data, not our domain model
 - [Phase Phase 06-03]: check_depth() shared helper in test_response_depth.py enforces depth contract globally across all tools
+- [Phase Phase 07-01]: validate_yaml only rejects known v1.0 snake_case fields (blueprint_family, fit_findings, etc.) — camelCase CRD fields pass through to avoid false positives
+- [Phase Phase 07-01]: confirmed is not True (identity check) in apply tool — prevents string 'true' or int 1 from bypassing confirmation gate
 
 ### Pending Todos
 
@@ -79,6 +82,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T06:17:42.637Z
-Stopped at: Completed 06-03-PLAN.md
+Last session: 2026-03-20T06:45:23.104Z
+Stopped at: Completed 07-01-PLAN.md
 Resume file: None
