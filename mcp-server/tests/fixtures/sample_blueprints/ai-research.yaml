@@ -1,0 +1,45 @@
+apiVersion: warp.io/v1alpha1
+kind: WekaAppStore
+metadata:
+  name: ai-research
+  namespace: ai-platform
+spec:
+  appStack:
+    components:
+      - name: vector-db
+        enabled: true
+        depends_on: []
+        target_namespace: ai-platform
+        helm_chart:
+          repository: https://charts.qdrant.tech
+          name: qdrant
+          version: "0.9.0"
+          release_name: qdrant
+          crds_strategy: Auto
+        values:
+          replicaCount: 1
+        wait_for_ready: true
+        readiness_check:
+          type: deployment
+          name: qdrant
+          timeout: 600
+      - name: research-api
+        enabled: true
+        depends_on:
+          - vector-db
+        target_namespace: ai-platform
+        helm_chart:
+          repository: https://charts.example.io
+          name: research-api
+          version: "1.2.0"
+          release_name: research-api
+          crds_strategy: Auto
+        values:
+          image:
+            tag: "latest"
+        wait_for_ready: true
+        readiness_check:
+          type: deployment
+          name: research-api
+          timeout: 300
+  prerequisites: []

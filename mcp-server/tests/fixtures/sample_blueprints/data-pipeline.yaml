@@ -1,0 +1,28 @@
+apiVersion: warp.io/v1alpha1
+kind: WekaAppStore
+metadata:
+  name: data-pipeline
+  namespace: data-platform
+spec:
+  appStack:
+    components:
+      - name: spark-operator
+        enabled: true
+        depends_on: []
+        target_namespace: data-platform
+        helm_chart:
+          repository: https://googlecloudplatform.github.io/spark-on-k8s-operator
+          name: spark-operator
+          version: "1.1.27"
+          release_name: spark-operator
+          crds_strategy: Auto
+        values:
+          webhook:
+            enable: true
+        wait_for_ready: true
+        readiness_check:
+          type: deployment
+          name: spark-operator
+          timeout: 600
+  prerequisites:
+    - WekaFS CSI driver installed
