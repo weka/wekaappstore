@@ -90,6 +90,30 @@ def test_build_structured_plan_preview_tags_yaml_generation_failures(
     assert "corr-yaml" in preview["errors"][0]["message"]
 
 
+def test_build_structured_plan_preview_tags_inspection_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    valid_plan_payload: dict,
+) -> None:
+    main = importlib.import_module("webapp.main")
+
+    monkeypatch.setattr(
+        main,
+        "build_fit_findings_from_inspection",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("inspection snapshot unreadable")),
+    )
+
+    preview = main.build_structured_plan_preview(
+        valid_plan_payload,
+        inspection_snapshot={"captured_at": "2026-03-20T00:00:00Z", "domains": {}},
+        correlation_id="corr-inspection",
+    )
+
+    assert preview["valid"] is False
+    assert preview["failure_stage"] == "inspection"
+    assert preview["errors"][0]["stage"] == "inspection"
+    assert "corr-inspection" in preview["errors"][0]["message"]
+
+
 def test_execute_structured_plan_apply_tags_apply_handoff_failures(
     monkeypatch: pytest.MonkeyPatch,
     valid_plan_payload: dict,
