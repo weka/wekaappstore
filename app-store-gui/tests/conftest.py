@@ -192,6 +192,15 @@ def valid_plan_payload() -> dict:
 
 
 @pytest.fixture
+def planning_snapshot_payload() -> dict:
+    return {
+        "captured_at": "2026-03-20T00:00:00Z",
+        "correlation_id": None,
+        "domains": _complete_inspection_domains(),
+    }
+
+
+@pytest.fixture
 def invalid_plan_payloads(valid_plan_payload: dict) -> dict[str, dict]:
     missing_family = deepcopy(valid_plan_payload)
     missing_family.pop("blueprint_family")
