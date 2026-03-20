@@ -15,10 +15,10 @@
 
 ### Cluster Inspection
 
-- [ ] **CLSTR-01**: The backend can provide a bounded cluster summary for planning sessions, including namespaces and storage classes.
-- [ ] **CLSTR-02**: The backend can provide bounded GPU inventory data including available GPU count, GPU model, and GPU memory capacity.
-- [ ] **CLSTR-03**: The backend can provide bounded CPU and RAM availability data relevant to blueprint scheduling decisions.
-- [ ] **CLSTR-04**: The backend can provide WEKA storage inspection data including storage capacity, available space, and existing filesystems.
+- [x] **CLSTR-01**: The backend can provide a bounded cluster summary for planning sessions, including namespaces and storage classes.
+- [x] **CLSTR-02**: The backend can provide bounded GPU inventory data including available GPU count, GPU model, and GPU memory capacity.
+- [x] **CLSTR-03**: The backend can provide bounded CPU and RAM availability data relevant to blueprint scheduling decisions.
+- [x] **CLSTR-04**: The backend can provide WEKA storage inspection data including storage capacity, available space, and existing filesystems.
 - [x] **CLSTR-05**: The backend can distinguish complete versus partial inspection data and expose confidence or freshness signals to the planner and UI.
 
 ### Planning And Fit Validation
@@ -50,9 +50,9 @@
 
 ### Observability And Safety
 
-- [ ] **SAFE-01**: Planning sessions, validation runs, and apply handoffs include stable correlation identifiers.
-- [ ] **SAFE-02**: Failure responses identify whether the failure came from inspection, agent output, plan validation, YAML generation, or cluster apply.
-- [ ] **SAFE-03**: Agent-callable tools are bounded and auditable, with no unrestricted direct `kubectl`, `helm`, or shell execution.
+- [x] **SAFE-01**: Planning sessions, validation runs, and apply handoffs include stable correlation identifiers.
+- [x] **SAFE-02**: Failure responses identify whether the failure came from inspection, agent output, plan validation, YAML generation, or cluster apply.
+- [x] **SAFE-03**: Agent-callable tools are bounded and auditable, with no unrestricted direct `kubectl`, `helm`, or shell execution.
 - [x] **SAFE-04**: The system fails closed when required inspection data is missing or too incomplete to make a reliable fit decision.
 - [ ] **SAFE-05**: The integration can be tested with mocked NemoClaw responses and mocked Kubernetes and WEKA inspection results.
 
@@ -88,10 +88,10 @@
 | CHAT-03 | Phase 3 | Pending |
 | CHAT-04 | Phase 3 | Pending |
 | CHAT-05 | Phase 3 | Pending |
-| CLSTR-01 | Phase 2 | Pending |
-| CLSTR-02 | Phase 2 | Pending |
-| CLSTR-03 | Phase 2 | Pending |
-| CLSTR-04 | Phase 2 | Pending |
+| CLSTR-01 | Phase 2 | Complete |
+| CLSTR-02 | Phase 2 | Complete |
+| CLSTR-03 | Phase 2 | Complete |
+| CLSTR-04 | Phase 2 | Complete |
 | CLSTR-05 | Phase 2 | Complete |
 | PLAN-01 | Phase 3 | Pending |
 | PLAN-02 | Phase 1 | Complete |
@@ -111,9 +111,9 @@
 | AUTHR-01 | Phase 5 | Pending |
 | AUTHR-02 | Phase 5 | Pending |
 | AUTHR-03 | Phase 5 | Pending |
-| SAFE-01 | Phase 2 | Pending |
-| SAFE-02 | Phase 2 | Pending |
-| SAFE-03 | Phase 2 | Pending |
+| SAFE-01 | Phase 2 | Complete |
+| SAFE-02 | Phase 2 | Complete |
+| SAFE-03 | Phase 2 | Complete |
 | SAFE-04 | Phase 2 | Complete |
 | SAFE-05 | Phase 5 | Pending |
 

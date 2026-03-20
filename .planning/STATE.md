@@ -3,42 +3,42 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-last_updated: "2026-03-20T02:21:11.276Z"
+last_updated: "2026-03-20T02:38:41Z"
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 8
-  completed_plans: 5
+  completed_plans: 8
 ---
 
 # STATE.md
 
 **Initialized:** 2026-03-20
-**Current status:** Phase 2 in progress
+**Current status:** Phase 2 complete
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-03-20)
 
 **Core value:** Users can describe what they want to deploy, and the system turns that into a safe, validated WEKA App Store installation plan that actually fits the target cluster before anything is applied.
-**Current focus:** Phase 2 - Cluster And WEKA Inspection Signals
+**Current focus:** Phase 3 - Conversational Planning Sessions
 
 ## Current Roadmap Status
 
 | Phase | Name | Status |
 |-------|------|--------|
 | 1 | Plan Contract And YAML Translation | Complete |
-| 2 | Cluster And WEKA Inspection Signals | In Progress |
+| 2 | Cluster And WEKA Inspection Signals | Complete |
 | 3 | Conversational Planning Sessions | Pending |
 | 4 | Review, Approval, And Apply Gating | Pending |
 | 5 | Maintainer Draft Authoring And Test Hardening | Pending |
 
 ## Current Execution Position
 
-- Current phase: `02-cluster-and-weka-inspection-signals`
-- Current plan: `02-02`
-- Completed plans this phase: `02-01`
-- Last completed plan: `02-01`
+- Current phase: `03-conversational-planning-sessions`
+- Current plan: `not started`
+- Completed plans this phase: `n/a`
+- Last completed plan: `02-04`
 
 ## Decisions
 
@@ -49,12 +49,19 @@ See: `.planning/PROJECT.md` (updated 2026-03-20)
 - Reuse the shared `ApplyGateway` for both legacy YAML apply helpers and structured-plan handoff so planner output stays on the existing CRD/operator path.
 - [Phase 02]: Keep Phase 1 payloads valid by allowing fit_findings to omit domain metadata while requiring fail-closed semantics once Phase 2 domains are present.
 - [Phase 02]: Model inspection freshness and blockers per domain so later cluster and WEKA services can report partial GPU or storage facts without inventing ad hoc fields.
+- [Phase 02]: Keep the existing cluster-status response contract by flattening planner-grade inspection snapshots for current UI consumers.
+- [Phase 02]: Inject Kubernetes client seams into cluster inspection so bounded read-only behavior stays deterministic under pytest.
+- [Phase 02]: Use only WekaCluster custom resources as the WEKA inspection source so planner inspection stays bounded to operator-visible state.
+- [Phase 02]: Restrict the planner tool surface to explicit inspection intents and append audit metadata for every inspection call.
+- [Phase 02]: Merge cluster and WEKA inspection domains into one correlation-scoped planner snapshot so fit reasoning shares stable provenance.
+- [Phase 02]: Classify preview and apply failures by explicit stages instead of ad hoc error strings so later UI flows can surface deterministic diagnostics.
 
 ## Recent Progress
 
-- Completed `02-01-PLAN.md` and wrote `.planning/phases/02-cluster-and-weka-inspection-signals/02-01-SUMMARY.md`.
-- Extended the planning contract with typed inspection freshness, blocker, domain, and snapshot models for Phase 2 fit signals.
-- Added fail-closed validator rules and reusable inspection fixtures with targeted Phase 2 contract coverage passing.
+- Completed `02-02-PLAN.md` and wrote `.planning/phases/02-cluster-and-weka-inspection-signals/02-02-SUMMARY.md`.
+- Completed `02-03-PLAN.md` and wrote `.planning/phases/02-cluster-and-weka-inspection-signals/02-03-SUMMARY.md`.
+- Completed `02-04-PLAN.md` and wrote `.planning/phases/02-cluster-and-weka-inspection-signals/02-04-SUMMARY.md`.
+- Integrated bounded inspection snapshots into planner fit findings and stage-classified preview/apply diagnostics with deterministic mocked coverage.
 
 ## Latest Completed Setup
 
@@ -67,8 +74,8 @@ See: `.planning/PROJECT.md` (updated 2026-03-20)
 
 ## Next Action
 
-- Execute `02-02-PLAN.md` and `02-03-PLAN.md` in parallel to extract bounded cluster and WEKA inspection services.
-- Build Phase 2 inspection services on the typed fit contract instead of adding ad hoc response fields.
+- Plan and execute Phase 3 conversational planning work on top of the new Phase 2 inspection and fit-finding seam.
+- Preserve the Phase 2 bounded-tool and correlation diagnostics patterns while adding chat-session behavior.
 
 ---
-*Last updated: 2026-03-20 after completing 02-01-PLAN.md*
+*Last updated: 2026-03-20 after completing 02-04-PLAN.md*

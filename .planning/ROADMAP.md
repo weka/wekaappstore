@@ -51,7 +51,7 @@ This roadmap adds a NemoClaw-driven planning workflow to the existing WEKA App S
 
 **Goal:** Build the bounded inspection layer and safety signals needed for trustworthy cluster-fit and storage-fit decisions.
 
-**Plan progress:** 1 of 4 plans completed (`02-01`)
+**Plan progress:** 4 of 4 plans completed (`02-01`, `02-02`, `02-03`, `02-04`)
 
 **Requirements:**
 - CLSTR-01
@@ -73,6 +73,9 @@ This roadmap adds a NemoClaw-driven planning workflow to the existing WEKA App S
 
 **Completed plan highlights:**
 - `02-01` established the typed inspection-domain contract, per-domain blocker semantics, and fail-closed validation rules for partial or unavailable required inspection data.
+- `02-02` extracted bounded Kubernetes inspection into a shared service with planner-grade namespace, storage, CPU, RAM, and GPU inventory snapshots.
+- `02-03` added a read-only WEKA inspection seam and a narrow auditable planning tool wrapper for supported inspection intents.
+- `02-04` merged cluster and WEKA inspection into planner-facing fit findings, stable correlation IDs, and stage-classified preview/apply diagnostics.
 
 ### Phase 3: Conversational Planning Sessions
 
