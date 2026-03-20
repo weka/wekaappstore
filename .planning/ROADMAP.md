@@ -149,7 +149,7 @@ v2.0 phases execute in numeric order: 6 → 7 → 8 → 9
 | 3. Conversational Planning Sessions | v1.0 | 4/4 | Complete | 2026-03-20 |
 | 4. Review, Approval, And Apply Gating | v1.0 | -/- | Complete | 2026-03-20 |
 | 5. Maintainer Draft Authoring And Test Hardening | v1.0 | -/- | Complete | 2026-03-20 |
-| 6. MCP Scaffold and Read-Only Tools | 1/3 | In Progress|  | - |
+| 6. MCP Scaffold and Read-Only Tools | 2/3 | In Progress|  | - |
 | 7. Validation, Apply, and Status Tools | v2.0 | 0/TBD | Not started | - |
 | 8. SKILL.md, Agent Context, and Cleanup | v2.0 | 0/TBD | Not started | - |
 | 9. Deployment and Registration | v2.0 | 0/TBD | Not started | - |
