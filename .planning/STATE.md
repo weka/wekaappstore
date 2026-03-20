@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: OpenClaw MCP Tool Integration
 status: planning
-stopped_at: Phase 6 context gathered
-last_updated: "2026-03-20T05:41:36.211Z"
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-03-20T06:07:35.884Z"
 last_activity: 2026-03-20 — v2.0 roadmap created; Phases 6-9 defined
 progress:
   total_phases: 9
   completed_phases: 3
-  total_plans: 16
-  completed_plans: 12
+  total_plans: 19
+  completed_plans: 13
   percent: 0
 ---
 
@@ -46,6 +46,7 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 | - | - | - | - |
 
 *Updated after each plan completion*
+| Phase 06-mcp-scaffold-and-read-only-tools P06-01 | 4min | 2 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -56,6 +57,9 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 - [v2.0]: Develop with mock agent harness since NemoClaw not yet available in environment
 - [v2.0]: Remove deprecated v1.0 backend-brain code in Phase 8 (not earlier — needs stable tools first)
 - [v2.0]: Output schemas defined in Phase 6 before any wrapper written — prevents retroactive flattening
+- [Phase 06]: mcp-server/ placed at repo root for clean container separation; imports app-store-gui via PYTHONPATH
+- [Phase 06]: Separate flatten_inspect_*_for_mcp() functions never expose inspection_snapshot or domain wrappers to agents
+- [Phase 06]: register_*(mcp) pattern for tool registration enables isolated test instances
 
 ### Pending Todos
 
@@ -69,6 +73,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T05:41:36.203Z
-Stopped at: Phase 6 context gathered
-Resume file: .planning/phases/06-mcp-scaffold-and-read-only-tools/06-CONTEXT.md
+Last session: 2026-03-20T06:07:35.881Z
+Stopped at: Completed 06-01-PLAN.md
+Resume file: None
