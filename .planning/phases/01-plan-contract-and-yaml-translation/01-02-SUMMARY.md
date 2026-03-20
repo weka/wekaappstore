@@ -57,7 +57,7 @@ Each task was committed atomically:
 
 1. **Task 1: Add typed planning contract models and validation result types** - `99a2675` (feat)
 2. **Task 2: Implement layered validator entry points** - `afad2c1` (feat)
-3. **Task 3: Establish pytest contract tests for plan validation** - `to-be-recorded in current branch after fixture expansion commit`
+3. **Task 3: Establish pytest contract tests for plan validation** - `06ca47f` (test)
 
 ## Files Created/Modified
 
