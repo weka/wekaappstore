@@ -246,3 +246,26 @@ def test_main_apply_helpers_delegate_to_shared_gateway(monkeypatch: pytest.Monke
         ("file", "planner-output.yaml", "ai-platform"),
         ("content", "kind: ConfigMap\n", "ai-platform"),
     ]
+
+
+def test_main_apply_structured_plan_allows_namespace_override(
+    monkeypatch: pytest.MonkeyPatch,
+    valid_plan_payload: dict,
+) -> None:
+    import webapp.main as main
+
+    captured: dict[str, str] = {}
+
+    class GatewayStub:
+        def apply_content(self, content: str, namespace: str) -> dict:
+            captured["content"] = content
+            captured["namespace"] = namespace
+            return {"applied": ["WekaAppStore"]}
+
+    monkeypatch.setattr(main, "PLANNING_APPLY_GATEWAY", GatewayStub())
+
+    result = main.apply_structured_plan(valid_plan_payload, namespace_override="review-space")
+
+    assert result["result"] == {"applied": ["WekaAppStore"]}
+    assert captured["namespace"] == "review-space"
+    assert yaml.safe_load(captured["content"])["kind"] == "WekaAppStore"

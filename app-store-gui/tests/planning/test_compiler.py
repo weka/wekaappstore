@@ -96,3 +96,13 @@ def test_compiler_refuses_to_compile_invalid_structured_plans(
     assert validation.valid is False
     assert document is None
     assert rendered_yaml is None
+
+
+def test_compiler_emits_a_single_yaml_document(valid_plan_payload: dict) -> None:
+    compiler = importlib.import_module("webapp.planning.compiler")
+
+    _, _, rendered_yaml = compiler.validate_and_compile_plan(valid_plan_payload)
+
+    assert rendered_yaml is not None
+    assert list(yaml.safe_load_all(rendered_yaml))[0]["kind"] == "WekaAppStore"
+    assert len(list(yaml.safe_load_all(rendered_yaml))) == 1
