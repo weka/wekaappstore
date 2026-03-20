@@ -18,6 +18,10 @@ SUPPORTED_CRDS_STRATEGIES = frozenset({"Auto", "Install", "Skip"})
 SUPPORTED_READINESS_CHECK_TYPES = frozenset(
     {"pod", "deployment", "statefulset", "job", "custom"}
 )
+SUPPORTED_FIT_STATUSES = frozenset({"assumed-fit", "fit", "blocked"})
+SUPPORTED_INSPECTION_DOMAIN_STATUSES = frozenset(
+    {"complete", "partial", "unavailable", "not-required"}
+)
 
 
 @dataclass(slots=True)
@@ -107,12 +111,74 @@ class NamespaceStrategy:
 
 
 @dataclass(slots=True)
-class FitFindings:
-    status: str
-    notes: List[str] = field(default_factory=list)
+class InspectionFreshness:
+    captured_at: str
+    max_age_seconds: Optional[int] = None
+    observed_generation: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class FitBlocker:
+    code: str
+    message: str
+    domain: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Optional[str]]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class InspectionDomainFinding:
+    status: str
+    required: bool = True
+    freshness: Optional[InspectionFreshness] = None
+    observed: Dict[str, Any] = field(default_factory=dict)
+    notes: List[str] = field(default_factory=list)
+    blockers: List[FitBlocker] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        payload = asdict(self)
+        if self.freshness is None:
+            payload["freshness"] = None
+        payload["blockers"] = [blocker.to_dict() for blocker in self.blockers]
+        return payload
+
+
+@dataclass(slots=True)
+class InspectionSnapshot:
+    captured_at: str
+    correlation_id: Optional[str] = None
+    domains: Dict[str, InspectionDomainFinding] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "captured_at": self.captured_at,
+            "correlation_id": self.correlation_id,
+            "domains": {name: domain.to_dict() for name, domain in self.domains.items()},
+        }
+
+
+@dataclass(slots=True)
+class FitFindings:
+    status: str
+    notes: List[str] = field(default_factory=list)
+    blockers: List[FitBlocker] = field(default_factory=list)
+    domains: Dict[str, InspectionDomainFinding] = field(default_factory=dict)
+    inspection_snapshot: Optional[InspectionSnapshot] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "status": self.status,
+            "notes": list(self.notes),
+            "blockers": [blocker.to_dict() for blocker in self.blockers],
+            "domains": {name: domain.to_dict() for name, domain in self.domains.items()},
+            "inspection_snapshot": (
+                None if self.inspection_snapshot is None else self.inspection_snapshot.to_dict()
+            ),
+        }
 
 
 @dataclass(slots=True)
