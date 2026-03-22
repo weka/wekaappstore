@@ -6,7 +6,7 @@
 ## Milestones
 
 - ✅ **v1.0 NemoClaw Agent Planning** - Phases 1-5 (completed 2026-03-20)
-- 🚧 **v2.0 OpenClaw MCP Tool Integration** - Phases 6-9 (in progress)
+- 🚧 **v2.0 OpenClaw MCP Tool Integration** - Phases 6-10 (in progress)
 
 ## Phases
 
@@ -150,10 +150,22 @@ Plans:
 - [ ] 09-01-PLAN.md — Dockerfile, .dockerignore, and startup env var validation
 - [ ] 09-02-PLAN.md — GitHub Actions CI/CD workflow and README registration documentation
 
+### Phase 10: Integration Bug Fixes
+**Goal**: Fix 3 integration defects found by milestone audit — blueprints.py logger crash, LOG_LEVEL env var not wired, PYTHONPATH missing from openclaw.json startup
+**Depends on**: Phase 9
+**Requirements**: MCPS-04, MCPS-05, MCPS-10, MCPS-11, DEPLOY-03, AGNT-03, DEPLOY-04
+**Gap Closure**: Closes gaps from v2.0 audit
+**Success Criteria** (what must be TRUE):
+  1. `scan_blueprints()` skips malformed YAML files with a warning instead of crashing
+  2. Setting `LOG_LEVEL=DEBUG` at runtime changes the MCP server's logging verbosity
+  3. `openclaw.json` startup block includes PYTHONPATH so non-container registration works
+  4. All 100+ existing tests still pass
+**Plans**: TBD
+
 ## Progress
 
 **Execution Order:**
-v2.0 phases execute in numeric order: 6 → 7 → 8 → 9
+v2.0 phases execute in numeric order: 6 → 7 → 8 → 9 → 10
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -166,6 +178,7 @@ v2.0 phases execute in numeric order: 6 → 7 → 8 → 9
 | 7. Validation, Apply, and Status Tools | 1/2 | In Progress|  | - |
 | 8. SKILL.md, Agent Context, and Cleanup | 3/3 | Complete   | 2026-03-20 | - |
 | 9. Deployment and Registration | 2/2 | Complete   | 2026-03-22 | - |
+| 10. Integration Bug Fixes | 0/TBD | Not started | - | - |
 
 ---
 *Roadmap created: 2026-03-20 (v1.0)*
