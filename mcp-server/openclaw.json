@@ -9,7 +9,10 @@
       "-m",
       "server"
     ],
-    "cwd": "mcp-server/"
+    "cwd": "mcp-server/",
+    "env": {
+      "PYTHONPATH": ".:../app-store-gui"
+    }
   },
   "env": {
     "required": [

@@ -128,6 +128,9 @@ def build_openclaw_config(tool_descriptions: dict[str, str]) -> dict:
             "command": "python",
             "args": ["-m", "server"],
             "cwd": "mcp-server/",
+            "env": {
+                "PYTHONPATH": ".:../app-store-gui",
+            },
         },
         "env": {
             "required": ["BLUEPRINTS_DIR"],

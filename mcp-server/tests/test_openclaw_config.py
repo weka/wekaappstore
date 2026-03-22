@@ -118,6 +118,26 @@ def test_openclaw_json_all_tools_have_descriptions(openclaw_config: dict):
     )
 
 
+def test_startup_env_includes_pythonpath():
+    """build_openclaw_config() startup block includes PYTHONPATH containing ../app-store-gui."""
+    import sys
+
+    sys.path.insert(0, str(MCP_SERVER_ROOT))
+    from generate_openclaw_config import collect_tool_descriptions, build_openclaw_config
+
+    tool_descriptions = collect_tool_descriptions()
+    config = build_openclaw_config(tool_descriptions)
+
+    startup = config.get("startup", {})
+    env = startup.get("env", {})
+    assert "PYTHONPATH" in env, (
+        f"Expected 'PYTHONPATH' in startup.env, got keys: {list(env.keys())}"
+    )
+    assert "../app-store-gui" in env["PYTHONPATH"], (
+        f"Expected '../app-store-gui' in PYTHONPATH value, got: {env['PYTHONPATH']!r}"
+    )
+
+
 def test_openclaw_json_matches_generation():
     """openclaw.json matches what generate_openclaw_config.py produces.
 
