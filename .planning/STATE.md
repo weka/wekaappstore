@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: OpenClaw MCP Tool Integration
 status: planning
-stopped_at: Completed 09-deployment-and-registration/09-02-PLAN.md
-last_updated: "2026-03-22T23:03:28.095Z"
+stopped_at: Completed 10-integration-bug-fixes/10-01-PLAN.md
+last_updated: "2026-03-22T23:30:51.811Z"
 last_activity: 2026-03-20 — v2.0 roadmap created; Phases 6-9 defined
 progress:
-  total_phases: 9
-  completed_phases: 7
-  total_plans: 26
-  completed_plans: 22
+  total_phases: 10
+  completed_phases: 8
+  total_plans: 27
+  completed_plans: 23
   percent: 0
 ---
 
@@ -56,6 +56,7 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 | Phase 08-skill-md-agent-context-and-cleanup P02 | 2min | 2 tasks | 3 files |
 | Phase 09-deployment-and-registration PP01 | 2min | 2 tasks | 5 files |
 | Phase 09-deployment-and-registration P02 | 2min | 2 tasks | 2 files |
+| Phase 10-integration-bug-fixes PP01 | 12min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -88,6 +89,9 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 - [Phase Phase 09-01]: Non-root user mcpuser (uid 10001) in Dockerfile for runtime security
 - [Phase Phase 09-02]: build-push job guarded by needs: test and if: startsWith(github.ref, refs/tags/v) — tag push without passing tests cannot publish image
 - [Phase Phase 09-02]: NemoClaw registration section uses best-effort fields with visible TODO marker — schema not yet published as of 2026-03-22
+- [Phase Phase 10-01]: Remove import sys from blueprints.py entirely — no other usage existed after the logger.warning fix
+- [Phase Phase 10-01]: config imported before logging.basicConfig in server.py using noqa: E402 pattern consistent with FastMCP import
+- [Phase Phase 10-01]: PYTHONPATH value '.:../app-store-gui' in openclaw.json startup.env matches usage docstring in generate_openclaw_config.py
 
 ### Pending Todos
 
@@ -101,6 +105,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T23:00:31.352Z
-Stopped at: Completed 09-deployment-and-registration/09-02-PLAN.md
+Last session: 2026-03-22T23:30:51.808Z
+Stopped at: Completed 10-integration-bug-fixes/10-01-PLAN.md
 Resume file: None
