@@ -1,0 +1,24 @@
+# Build artifacts
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+
+# Test directories (not needed in production image)
+**/tests/
+
+# Environment files
+.env
+.env.*
+
+# Version control and planning
+.git
+.planning
+.github
+
+# Build configuration directories
+docker/
+
+# Local OS artifacts
+.DS_Store
+**/.DS_Store

@@ -37,4 +37,6 @@ register_apply(mcp)
 register_status(mcp)
 
 if __name__ == "__main__":
+    from config import validate_required
+    validate_required()
     mcp.run()
