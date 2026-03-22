@@ -144,7 +144,11 @@ Plans:
   2. All K8s endpoints, WEKA endpoints, and credentials are configurable via environment variables with no hardcoded values in the image
   3. An `openclaw.json` registration snippet is provided that, when placed in the OpenClaw config, causes `tools/list` to return all 8 tools
   4. Documentation describes every step required to register the MCP server with both OpenClaw and NemoClaw
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 09-01-PLAN.md — Dockerfile, .dockerignore, and startup env var validation
+- [ ] 09-02-PLAN.md — GitHub Actions CI/CD workflow and README registration documentation
 
 ## Progress
 
@@ -161,7 +165,7 @@ v2.0 phases execute in numeric order: 6 → 7 → 8 → 9
 | 6. MCP Scaffold and Read-Only Tools | 3/3 | Complete   | 2026-03-20 | - |
 | 7. Validation, Apply, and Status Tools | 1/2 | In Progress|  | - |
 | 8. SKILL.md, Agent Context, and Cleanup | 3/3 | Complete   | 2026-03-20 | - |
-| 9. Deployment and Registration | v2.0 | 0/TBD | Not started | - |
+| 9. Deployment and Registration | v2.0 | 0/2 | Not started | - |
 
 ---
 *Roadmap created: 2026-03-20 (v1.0)*
