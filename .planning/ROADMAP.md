@@ -165,7 +165,7 @@ v2.0 phases execute in numeric order: 6 → 7 → 8 → 9
 | 6. MCP Scaffold and Read-Only Tools | 3/3 | Complete   | 2026-03-20 | - |
 | 7. Validation, Apply, and Status Tools | 1/2 | In Progress|  | - |
 | 8. SKILL.md, Agent Context, and Cleanup | 3/3 | Complete   | 2026-03-20 | - |
-| 9. Deployment and Registration | v2.0 | 0/2 | Not started | - |
+| 9. Deployment and Registration | 1/2 | In Progress|  | - |
 
 ---
 *Roadmap created: 2026-03-20 (v1.0)*
