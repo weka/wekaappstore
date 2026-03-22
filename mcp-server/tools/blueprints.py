@@ -9,7 +9,6 @@ Provides:
 from __future__ import annotations
 
 import logging
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -57,7 +56,7 @@ def scan_blueprints(blueprints_dir: str) -> list[dict[str, Any]]:
             with yaml_file.open("r", encoding="utf-8") as fh:
                 docs = list(yaml.safe_load_all(fh))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to parse %s: %s", yaml_file, exc, file=sys.stderr)
+            logger.warning("Failed to parse %s: %s", yaml_file, exc)
             continue
 
         for doc in docs:

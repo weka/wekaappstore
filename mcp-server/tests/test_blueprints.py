@@ -79,6 +79,41 @@ def test_scan_blueprints_missing_dir():
     assert results == []
 
 
+def test_scan_blueprints_skips_malformed_yaml(tmp_path: Path):
+    """Malformed YAML files are skipped with a warning; valid entries still returned."""
+    from tools.blueprints import scan_blueprints
+
+    # Write a malformed YAML file (invalid syntax)
+    (tmp_path / "broken.yaml").write_text(
+        "key: [\nnot closed: properly\n  bad indentation: : :\n",
+        encoding="utf-8",
+    )
+
+    # Write a valid WekaAppStore YAML file
+    (tmp_path / "valid.yaml").write_text(
+        textwrap.dedent("""\
+            apiVersion: warp.io/v1alpha1
+            kind: WekaAppStore
+            metadata:
+              name: valid-blueprint
+              namespace: default
+            spec:
+              appStack:
+                components:
+                  - name: my-component
+                    target_namespace: default
+        """),
+        encoding="utf-8",
+    )
+
+    # Should not raise — malformed file is skipped, valid file is included
+    results = scan_blueprints(str(tmp_path))
+    assert len(results) == 1, (
+        f"Expected 1 result (valid blueprint), got {len(results)}"
+    )
+    assert results[0]["manifest"]["metadata"]["name"] == "valid-blueprint"
+
+
 # ===========================================================================
 # list_blueprints tool response contract tests
 # ===========================================================================

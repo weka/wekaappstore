@@ -9,10 +9,12 @@ from __future__ import annotations
 import logging
 import sys
 
+import config  # noqa: E402 — read env vars before basicConfig
+
 # Configure logging to stderr BEFORE any FastMCP import
 logging.basicConfig(
     stream=sys.stderr,
-    level=logging.INFO,
+    level=getattr(logging, config.LOG_LEVEL, logging.INFO),
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
 )
 

@@ -26,6 +26,19 @@ def test_no_stdout_on_import():
     assert result.stdout == "", f"Expected no stdout on import, got: {result.stdout!r}"
 
 
+def test_log_level_env_var():
+    """LOG_LEVEL env var is read by config.py and reflects the expected value."""
+    import importlib
+    import unittest.mock
+
+    with unittest.mock.patch.dict(os.environ, {"LOG_LEVEL": "DEBUG"}, clear=False):
+        import config as cfg
+        importlib.reload(cfg)
+        assert cfg.LOG_LEVEL == "DEBUG", (
+            f"Expected config.LOG_LEVEL == 'DEBUG', got {cfg.LOG_LEVEL!r}"
+        )
+
+
 def test_logging_goes_to_stderr():
     """Logging calls after server import write to stderr, not stdout."""
     mcp_server_dir = os.path.join(os.path.dirname(__file__), "..")
