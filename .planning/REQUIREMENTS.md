@@ -32,7 +32,7 @@ Requirements for the OpenClaw MCP Tool Integration milestone. Each maps to roadm
 - [x] **DEPLOY-01**: Dockerfile packages MCP server as a container image
 - [x] **DEPLOY-02**: Container includes all dependencies and runs MCP server on stdio
 - [x] **DEPLOY-03**: Configuration interface for NemoClaw sandbox (environment variables for K8s/WEKA endpoints, credentials)
-- [ ] **DEPLOY-04**: Documentation for registering MCP server with OpenClaw/NemoClaw
+- [x] **DEPLOY-04**: Documentation for registering MCP server with OpenClaw/NemoClaw
 
 ### Code Cleanup
 
@@ -81,7 +81,7 @@ Deferred to future milestone after live OpenClaw is available.
 | DEPLOY-01 | Phase 9 | Complete |
 | DEPLOY-02 | Phase 9 | Complete |
 | DEPLOY-03 | Phase 9 | Complete |
-| DEPLOY-04 | Phase 9 | Pending |
+| DEPLOY-04 | Phase 9 | Complete |
 | CLEAN-01 | Phase 8 | Complete |
 | CLEAN-02 | Phase 8 | Complete |
 | CLEAN-03 | Phase 8 | Complete |

@@ -82,7 +82,7 @@ Plans:
 - [x] **Phase 6: MCP Scaffold and Read-Only Tools** - Runnable MCP server with 5 read-only tools and flat agent-facing response schemas (completed 2026-03-20)
 - [ ] **Phase 7: Validation, Apply, and Status Tools** - Remaining 3 tools with approval gate, correct validator contract, and full mock harness
 - [x] **Phase 8: SKILL.md, Agent Context, and Cleanup** - Agent workflow definition, tool description tuning, deprecated code deleted (completed 2026-03-20)
-- [ ] **Phase 9: Deployment and Registration** - Container image, OpenClaw/NemoClaw registration config, deployment documentation
+- [x] **Phase 9: Deployment and Registration** - Container image, OpenClaw/NemoClaw registration config, deployment documentation (completed 2026-03-22)
 
 ## Phase Details
 
@@ -165,7 +165,7 @@ v2.0 phases execute in numeric order: 6 → 7 → 8 → 9
 | 6. MCP Scaffold and Read-Only Tools | 3/3 | Complete   | 2026-03-20 | - |
 | 7. Validation, Apply, and Status Tools | 1/2 | In Progress|  | - |
 | 8. SKILL.md, Agent Context, and Cleanup | 3/3 | Complete   | 2026-03-20 | - |
-| 9. Deployment and Registration | 1/2 | In Progress|  | - |
+| 9. Deployment and Registration | 2/2 | Complete   | 2026-03-22 | - |
 
 ---
 *Roadmap created: 2026-03-20 (v1.0)*
