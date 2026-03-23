@@ -10,6 +10,17 @@ The primary users are platform users and cluster admins who interact with OpenCl
 
 OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
 
+## Current Milestone: v3.0 Live EKS Deployment and Agent Testing
+
+**Goal:** Deploy OpenClaw/NemoClaw and the MCP server to Chris's EKS cluster, register the MCP tools via Streamable HTTP sidecar, and validate the full agent chat experience with a happy-path blueprint deployment.
+
+**Target features:**
+- Streamable HTTP transport added to MCP server (alongside existing stdio)
+- NemoClaw/OpenClaw deployed to EKS
+- MCP server running as sidecar container alongside NemoClaw pod
+- Agent can chat, inspect cluster, browse blueprints, validate YAML, and deploy a blueprint end-to-end
+- Happy-path E2E validation against real K8s and WEKA resources
+
 ## Current State (after v2.0)
 
 The MCP server is complete and container-ready. 8 tools are registered and tested (103 tests). SKILL.md defines the agent workflow. Deprecated v1.0 backend-brain code has been removed.
@@ -21,8 +32,6 @@ The MCP server is complete and container-ready. 8 tools are registered and teste
 - Dockerfile, GitHub Actions CI/CD to `wekachrisjen/weka-app-store-mcp`
 - OpenClaw registration config (`openclaw.json`) with drift detection
 - README with full registration docs for OpenClaw and NemoClaw (placeholder)
-
-**What's next:** Live OpenClaw/NemoClaw integration testing (v3.0)
 
 ## Requirements
 
@@ -43,7 +52,11 @@ The MCP server is complete and container-ready. 8 tools are registered and teste
 
 ### Active
 
-(None — next milestone not yet defined)
+- [ ] Streamable HTTP transport for MCP server (sidecar deployment pattern)
+- [ ] NemoClaw/OpenClaw deployed and running in EKS
+- [ ] MCP server registered with OpenClaw as sidecar via Streamable HTTP
+- [ ] Agent can complete happy-path blueprint deployment through chat
+- [ ] SKILL.md and openclaw.json updated for HTTP transport and real deployment
 
 ### Out of Scope
 
@@ -85,4 +98,4 @@ OpenClaw connects via WebSocket Gateway, uses OpenAI-compatible model API, and r
 | Container image on wekachrisjen Docker Hub | Chris's corporate Docker Hub account for all WEKA images | ✓ Good — CI/CD wired |
 
 ---
-*Last updated: 2026-03-23 after v2.0 milestone completion*
+*Last updated: 2026-03-23 after v3.0 milestone start*

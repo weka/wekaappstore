@@ -25,9 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-03-23)
 
 ## Current Position
 
-Milestone: v2.0 complete (shipped 2026-03-23)
-Next: `/gsd:new-milestone` to start v3.0
-Status: Between milestones
+Milestone: v3.0 Live EKS Deployment and Agent Testing
+Phase: Not started (defining requirements)
+Status: Defining requirements
+Last activity: 2026-03-23 — Milestone v3.0 started
 Last activity: 2026-03-20 — v2.0 roadmap created; Phases 6-9 defined
 
 Progress: [░░░░░░░░░░] 0% (v2.0)
