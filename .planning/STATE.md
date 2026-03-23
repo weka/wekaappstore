@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
-milestone_name: OpenClaw MCP Tool Integration
+milestone: v3.0
+milestone_name: Live EKS Deployment and Agent Testing
 status: planning
-stopped_at: Completed 10-integration-bug-fixes/10-01-PLAN.md
-last_updated: "2026-03-22T23:47:30.021Z"
-last_activity: 2026-03-20 — v2.0 roadmap created; Phases 6-9 defined
+stopped_at: Roadmap created for v3.0; Phase 11 ready to plan
+last_updated: "2026-03-23T00:00:00.000Z"
+last_activity: 2026-03-23 — v3.0 roadmap created; Phases 11-14 defined
 progress:
-  total_phases: 10
-  completed_phases: 8
-  total_plans: 27
-  completed_plans: 23
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
   percent: 0
 ---
 
@@ -21,22 +21,22 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-03-23)
 
 **Core value:** OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
-**Current focus:** v2.0 complete — planning next milestone
+**Current focus:** Phase 11 — Streamable HTTP Transport
 
 ## Current Position
 
 Milestone: v3.0 Live EKS Deployment and Agent Testing
-Phase: Not started (defining requirements)
-Status: Defining requirements
-Last activity: 2026-03-23 — Milestone v3.0 started
-Last activity: 2026-03-20 — v2.0 roadmap created; Phases 6-9 defined
+Phase: 11 of 14 (Streamable HTTP Transport)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-03-23 — v3.0 roadmap created; Phases 11-14 defined
 
-Progress: [░░░░░░░░░░] 0% (v2.0)
+Progress: [░░░░░░░░░░] 0% (v3.0)
 
 ## Performance Metrics
 
-**Velocity:**
-- Total plans completed: 0 (v2.0)
+**Velocity (v3.0):**
+- Total plans completed: 0
 - Average duration: —
 - Total execution time: —
 
@@ -47,52 +47,17 @@ Progress: [░░░░░░░░░░] 0% (v2.0)
 | - | - | - | - |
 
 *Updated after each plan completion*
-| Phase 06-mcp-scaffold-and-read-only-tools P06-01 | 4min | 2 tasks | 13 files |
-| Phase 06-mcp-scaffold-and-read-only-tools P06-02 | 8min | 2 tasks | 5 files |
-| Phase 06-mcp-scaffold-and-read-only-tools P06-03 | 3min | 2 tasks | 5 files |
-| Phase 07-validation-apply-and-status-tools P01 | 2min | 2 tasks | 4 files |
-| Phase 07-validation-apply-and-status-tools PP02 | 4min | 2 tasks | 8 files |
-| Phase 08-skill-md-agent-context-and-cleanup PP03 | 18min | 2 tasks | 17 files |
-| Phase 08-skill-md-agent-context-and-cleanup PP01 | 8min | 2 tasks | 11 files |
-| Phase 08-skill-md-agent-context-and-cleanup P02 | 2min | 2 tasks | 3 files |
-| Phase 09-deployment-and-registration PP01 | 2min | 2 tasks | 5 files |
-| Phase 09-deployment-and-registration P02 | 2min | 2 tasks | 2 files |
-| Phase 10-integration-bug-fixes PP01 | 12min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
 ### Decisions
 
+- [v3.0]: NemoClaw deployment uses experimental agent-sandbox CRD approach (user decision; not dedicated EC2 VM)
+- [v3.0]: MCP server runs as native Kubernetes sidecar init container (restartPolicy: Always) to guarantee startup ordering
+- [v3.0]: Streamable HTTP transport selected via MCP_TRANSPORT env var; stdio remains default for CI and local dev
+- [v3.0]: openclaw.json generated at pod startup from env vars via init container; never baked into image
 - [v2.0]: Pivot from backend-brain to OpenClaw-native MCP tool registration
-- [v2.0]: MCP server in Python reusing `inspection/cluster.py`, `planning/apply_gateway.py`, `planning/validator.py`
-- [v2.0]: Develop with mock agent harness since NemoClaw not yet available in environment
-- [v2.0]: Remove deprecated v1.0 backend-brain code in Phase 8 (not earlier — needs stable tools first)
-- [v2.0]: Output schemas defined in Phase 6 before any wrapper written — prevents retroactive flattening
-- [Phase 06]: mcp-server/ placed at repo root for clean container separation; imports app-store-gui via PYTHONPATH
-- [Phase 06]: Separate flatten_inspect_*_for_mcp() functions never expose inspection_snapshot or domain wrappers to agents
-- [Phase 06]: register_*(mcp) pattern for tool registration enables isolated test instances
-- [Phase Phase 06-02]: scan_blueprints() returns internal wrapper dicts — flatten functions shape agent-facing JSON; helm_chart sub-dict hoisted to flat component fields for 2-key depth contract
-- [Phase Phase 06-03]: _get_crd_schema_impl() injectable pattern matches inspect tools — same testability approach
-- [Phase Phase 06-03]: 'schema' field is documented exception to 2-key depth rule — pass-through K8s CRD OpenAPI data, not our domain model
-- [Phase Phase 06-03]: check_depth() shared helper in test_response_depth.py enforces depth contract globally across all tools
-- [Phase Phase 07-01]: validate_yaml only rejects known v1.0 snake_case fields (blueprint_family, fit_findings, etc.) — camelCase CRD fields pass through to avoid false positives
-- [Phase Phase 07-01]: confirmed is not True (identity check) in apply tool — prevents string 'true' or int 1 from bypassing confirmation gate
-- [Phase Phase 07-02]: Harness calls flatten_* functions directly with pre-built snapshot dicts (avoids mocking K8s collection stack)
-- [Phase Phase 07-02]: ops_log pattern: mock side-effecting methods append (op_type, kwargs) tuples to shared list for assertion
-- [Phase Phase 08-03]: Kept PLANNING_APPLY_GATEWAY in main.py — apply_blueprint_with_namespace is actively used by blueprint deploy routes, not part of planning session removal
-- [Phase Phase 08-03]: build_structured_plan_preview / execute_structured_plan_apply / apply_structured_plan removed as dead code — no route callers, depended on deleted compiler.py
-- [Phase 08-skill-md-agent-context-and-cleanup]: SKILL.md uses 12 numbered steps with explicit validate-retry loop (max 3 attempts) and re-inspect-before-apply as mandatory rule
-- [Phase 08-skill-md-agent-context-and-cleanup]: _RegistryCapture stub builds description registry by calling register_* with minimal MCP shim — description-based routing without hardcoded tool names
-- [Phase 08]: _RegistryCapture pattern reused in generate_openclaw_config.py to extract tool names/descriptions without FastMCP startup
-- [Phase 08]: openclaw.json includes skill field pointing to SKILL.md so OpenClaw agent loads workflow before calling tools
-- [Phase Phase 09-01]: validate_required() NOT called at import time — avoids side effects during pytest collection
-- [Phase Phase 09-01]: Dockerfile import sanity check (python -c 'import server') during build fails the image if deps are missing
-- [Phase Phase 09-01]: Non-root user mcpuser (uid 10001) in Dockerfile for runtime security
-- [Phase Phase 09-02]: build-push job guarded by needs: test and if: startsWith(github.ref, refs/tags/v) — tag push without passing tests cannot publish image
-- [Phase Phase 09-02]: NemoClaw registration section uses best-effort fields with visible TODO marker — schema not yet published as of 2026-03-22
-- [Phase Phase 10-01]: Remove import sys from blueprints.py entirely — no other usage existed after the logger.warning fix
-- [Phase Phase 10-01]: config imported before logging.basicConfig in server.py using noqa: E402 pattern consistent with FastMCP import
-- [Phase Phase 10-01]: PYTHONPATH value '.:../app-store-gui' in openclaw.json startup.env matches usage docstring in generate_openclaw_config.py
+- [v2.0]: Flat 2-key depth contract enforced by check_depth() across all 8 tools; 103 tests as regression safety net
 
 ### Pending Todos
 
@@ -100,12 +65,13 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 6]: Blueprint catalog source (`list_blueprints`/`get_blueprint`) is TBD — confirm file path and schema from `weka-app-store-operator-chart/` before Phase 6 planning completes
-- [Phase 6]: Verify `apply_gateway.py` K8s client initialization is not import-time (would fail in CI) before writing apply tool wrapper
-- [Phase 9]: NemoClaw alpha config schema not yet published as of 2026-03-20 — may require SKILL.md format revision; monitor release notes
+- [Phase 12 gate]: NemoClaw EKS topology must be validated before Phase 13 manifests are written — wrong topology = full Phase 13 rewrite
+- [Phase 13 gate]: NemoClaw container image name on NVIDIA NGC is a placeholder; confirm before writing Deployment manifest
+- [Phase 13 gate]: NemoClaw ConfigMap schema for mcpServers.url must be verified against the deployed version
+- [Phase 13 gate]: Blueprint catalog size must be measured; if >1MB, ConfigMap strategy replaced with PVC or git-sync
 
 ## Session Continuity
 
-Last session: 2026-03-22T23:30:51.808Z
-Stopped at: Completed 10-integration-bug-fixes/10-01-PLAN.md
+Last session: 2026-03-23
+Stopped at: v3.0 roadmap created; Phase 11 ready to plan
 Resume file: None

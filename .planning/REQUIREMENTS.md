@@ -60,29 +60,29 @@ Deferred to v3.1+ after live agent behavior is observed.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| XPORT-01 | TBD | Pending |
-| XPORT-02 | TBD | Pending |
-| XPORT-03 | TBD | Pending |
-| XPORT-04 | TBD | Pending |
-| K8S-01 | TBD | Pending |
-| K8S-02 | TBD | Pending |
-| K8S-03 | TBD | Pending |
-| K8S-04 | TBD | Pending |
-| K8S-05 | TBD | Pending |
-| NCLAW-01 | TBD | Pending |
-| NCLAW-02 | TBD | Pending |
-| NCLAW-03 | TBD | Pending |
-| NCLAW-04 | TBD | Pending |
-| E2E-01 | TBD | Pending |
-| E2E-02 | TBD | Pending |
-| E2E-03 | TBD | Pending |
-| E2E-04 | TBD | Pending |
+| XPORT-01 | Phase 11 | Pending |
+| XPORT-02 | Phase 11 | Pending |
+| XPORT-03 | Phase 11 | Pending |
+| XPORT-04 | Phase 11 | Pending |
+| K8S-01 | Phase 13 | Pending |
+| K8S-02 | Phase 13 | Pending |
+| K8S-03 | Phase 13 | Pending |
+| K8S-04 | Phase 13 | Pending |
+| K8S-05 | Phase 13 | Pending |
+| NCLAW-01 | Phase 12 | Pending |
+| NCLAW-02 | Phase 13 | Pending |
+| NCLAW-03 | Phase 12 | Pending |
+| NCLAW-04 | Phase 13 | Pending |
+| E2E-01 | Phase 14 | Pending |
+| E2E-02 | Phase 14 | Pending |
+| E2E-03 | Phase 14 | Pending |
+| E2E-04 | Phase 14 | Pending |
 
 **Coverage:**
 - v3.0 requirements: 17 total
-- Mapped to phases: 0
-- Unmapped: 17 (pending roadmap creation)
+- Mapped to phases: 17
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-23*
-*Last updated: 2026-03-23 after initial definition*
+*Last updated: 2026-03-23 after v3.0 roadmap creation*
