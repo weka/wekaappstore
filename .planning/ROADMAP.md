@@ -20,7 +20,7 @@ See MILESTONES.md for full v2.0 summary.
 
 **Milestone Goal:** Deploy OpenClaw/NemoClaw and the MCP server to EKS, register tools via Streamable HTTP sidecar, and validate the full agent chat experience with a happy-path blueprint deployment.
 
-- [ ] **Phase 11: Streamable HTTP Transport** - Add HTTP transport mode to MCP server (code-only, no cluster needed)
+- [x] **Phase 11: Streamable HTTP Transport** - Add HTTP transport mode to MCP server (code-only, no cluster needed) (completed 2026-03-23)
 - [ ] **Phase 12: NemoClaw EKS Topology** - Deploy NemoClaw/OpenClaw to EKS using agent-sandbox CRD; validate topology before manifests
 - [ ] **Phase 13: Kubernetes Manifests and Sidecar Wiring** - Author complete K8s manifest set; wire MCP sidecar into OpenClaw pod
 - [ ] **Phase 14: End-to-End Validation** - Validate full happy-path blueprint deployment through live agent chat
@@ -37,7 +37,7 @@ See MILESTONES.md for full v2.0 summary.
   3. `MCP_TRANSPORT=http` starts the server in Streamable HTTP mode on the port set by `MCP_PORT`
   4. Tool calls over HTTP return the same flat JSON responses as stdio (depth contract preserved)
   5. `openclaw.json` points to `http://localhost:8080/mcp` with `"transport": "streamable-http"` replacing the stdio startup block
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 
 Plans:
 - [ ] 11-01-PLAN.md — Dual-mode transport in config.py and server.py with health endpoint and tests
@@ -97,7 +97,7 @@ Plans:
 | 8. SKILL.md, Agent Context, and Cleanup | v2.0 | 3/3 | Complete | 2026-03-22 |
 | 9. Deployment and Registration | v2.0 | 2/2 | Complete | 2026-03-22 |
 | 10. Integration Bug Fixes | v2.0 | 1/1 | Complete | 2026-03-22 |
-| 11. Streamable HTTP Transport | v3.0 | 0/2 | Not started | - |
+| 11. Streamable HTTP Transport | 2/2 | Complete   | 2026-03-23 | - |
 | 12. NemoClaw EKS Topology | v3.0 | 0/TBD | Not started | - |
 | 13. Kubernetes Manifests and Sidecar Wiring | v3.0 | 0/TBD | Not started | - |
 | 14. End-to-End Validation | v3.0 | 0/TBD | Not started | - |
