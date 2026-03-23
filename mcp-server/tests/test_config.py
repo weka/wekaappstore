@@ -67,3 +67,44 @@ def test_validate_required_passes_when_blueprints_dir_set(monkeypatch, tmp_path)
     cfg = _reload_config()
     # Should not raise
     cfg.validate_required()
+
+
+# --- MCP_TRANSPORT tests ---
+
+
+def test_mcp_transport_default(monkeypatch):
+    """config.MCP_TRANSPORT defaults to 'stdio' when env var is not set."""
+    monkeypatch.delenv("MCP_TRANSPORT", raising=False)
+    cfg = _reload_config()
+    assert cfg.MCP_TRANSPORT == "stdio"
+
+
+def test_mcp_transport_http(monkeypatch):
+    """config.MCP_TRANSPORT reads 'http' when env var is set to 'http'."""
+    monkeypatch.setenv("MCP_TRANSPORT", "http")
+    cfg = _reload_config()
+    assert cfg.MCP_TRANSPORT == "http"
+
+
+# --- MCP_PORT tests ---
+
+
+def test_mcp_port_default(monkeypatch):
+    """config.MCP_PORT defaults to 8080 (int) when env var is not set."""
+    monkeypatch.delenv("MCP_PORT", raising=False)
+    cfg = _reload_config()
+    assert cfg.MCP_PORT == 8080
+
+
+def test_mcp_port_custom(monkeypatch):
+    """config.MCP_PORT reads custom value as int when env var is set."""
+    monkeypatch.setenv("MCP_PORT", "9090")
+    cfg = _reload_config()
+    assert cfg.MCP_PORT == 9090
+
+
+def test_mcp_port_is_int(monkeypatch):
+    """config.MCP_PORT is always int type, not str."""
+    monkeypatch.delenv("MCP_PORT", raising=False)
+    cfg = _reload_config()
+    assert isinstance(cfg.MCP_PORT, int)

@@ -30,6 +30,12 @@ WEKA_ENDPOINT: str | None = os.environ.get("WEKA_ENDPOINT") or None
 # None if unset — kubernetes client falls back to in-cluster or default kubeconfig.
 KUBECONFIG: str | None = os.environ.get("KUBECONFIG") or None
 
+# Transport mode — 'stdio' (default, CI-safe) or 'http' (sidecar deployment)
+MCP_TRANSPORT: str = os.environ.get("MCP_TRANSPORT", "stdio")
+
+# HTTP listening port — only relevant when MCP_TRANSPORT=http
+MCP_PORT: int = int(os.environ.get("MCP_PORT", "8080"))
+
 
 def validate_required() -> None:
     """Validate that all required env vars are set.
