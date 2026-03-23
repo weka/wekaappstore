@@ -4,8 +4,11 @@ Verifies:
 - File exists and is valid JSON
 - Contains all 8 registered tools
 - Tool names match server.py registrations
-- Transport is 'stdio'
+- Transport is 'streamable-http'
+- URL points to localhost MCP endpoint
+- No startup block (HTTP transport uses url, not subprocess)
 - Required env vars are declared
+- Optional env vars include MCP_TRANSPORT and MCP_PORT
 - All tools have non-empty descriptions
 - File matches what generate_openclaw_config.py would produce (drift detection)
 """
@@ -86,11 +89,36 @@ def test_openclaw_json_tool_names_match_server(openclaw_config: dict):
     )
 
 
-def test_openclaw_json_has_stdio_transport(openclaw_config: dict):
-    """openclaw.json transport field is 'stdio'."""
+def test_openclaw_json_has_http_transport(openclaw_config: dict):
+    """openclaw.json transport field is 'streamable-http'."""
     transport = openclaw_config.get("transport")
-    assert transport == "stdio", (
-        f"Expected transport='stdio', got {transport!r}"
+    assert transport == "streamable-http", (
+        f"Expected transport='streamable-http', got {transport!r}"
+    )
+
+
+def test_openclaw_json_has_url(openclaw_config: dict):
+    """openclaw.json url points to localhost MCP endpoint."""
+    assert openclaw_config.get("url") == "http://localhost:8080/mcp", (
+        f"Expected url='http://localhost:8080/mcp', got {openclaw_config.get('url')!r}"
+    )
+
+
+def test_openclaw_json_no_startup_block(openclaw_config: dict):
+    """openclaw.json has no startup block (HTTP transport uses url, not subprocess)."""
+    assert "startup" not in openclaw_config, (
+        "openclaw.json must not have a 'startup' block when using streamable-http transport"
+    )
+
+
+def test_openclaw_json_optional_env_includes_transport_vars(openclaw_config: dict):
+    """openclaw.json env.optional includes MCP_TRANSPORT and MCP_PORT."""
+    optional = openclaw_config.get("env", {}).get("optional", [])
+    assert "MCP_TRANSPORT" in optional, (
+        f"'MCP_TRANSPORT' must be in env.optional. Got: {optional}"
+    )
+    assert "MCP_PORT" in optional, (
+        f"'MCP_PORT' must be in env.optional. Got: {optional}"
     )
 
 
@@ -115,26 +143,6 @@ def test_openclaw_json_all_tools_have_descriptions(openclaw_config: dict):
 
     assert not missing_descriptions, (
         f"These tools are missing descriptions in openclaw.json: {missing_descriptions}"
-    )
-
-
-def test_startup_env_includes_pythonpath():
-    """build_openclaw_config() startup block includes PYTHONPATH containing ../app-store-gui."""
-    import sys
-
-    sys.path.insert(0, str(MCP_SERVER_ROOT))
-    from generate_openclaw_config import collect_tool_descriptions, build_openclaw_config
-
-    tool_descriptions = collect_tool_descriptions()
-    config = build_openclaw_config(tool_descriptions)
-
-    startup = config.get("startup", {})
-    env = startup.get("env", {})
-    assert "PYTHONPATH" in env, (
-        f"Expected 'PYTHONPATH' in startup.env, got keys: {list(env.keys())}"
-    )
-    assert "../app-store-gui" in env["PYTHONPATH"], (
-        f"Expected '../app-store-gui' in PYTHONPATH value, got: {env['PYTHONPATH']!r}"
     )
 
 
