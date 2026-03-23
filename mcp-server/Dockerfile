@@ -29,5 +29,7 @@ RUN python -c "import server"
 RUN useradd -u 10001 -m mcpuser
 USER mcpuser
 
-# MCP stdio transport — OpenClaw spawns this process and communicates via stdin/stdout
+EXPOSE 8080
+
+# MCP transport — selected at runtime by MCP_TRANSPORT env var (stdio default, http for sidecar)
 CMD ["python", "-m", "server"]
