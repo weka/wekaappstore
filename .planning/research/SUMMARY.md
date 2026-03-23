@@ -1,177 +1,180 @@
 # Project Research Summary
 
-**Project:** WEKA App Store — OpenClaw MCP Tool Server Integration
-**Domain:** Brownfield MCP server addition to an existing Python/Kubernetes operator backend
-**Researched:** 2026-03-20
-**Confidence:** HIGH
+**Project:** WEKA App Store — v3.0 NemoClaw/OpenClaw EKS Integration
+**Domain:** MCP tool server Streamable HTTP transport + EKS sidecar deployment alongside NemoClaw/OpenClaw
+**Researched:** 2026-03-23
+**Confidence:** MEDIUM-HIGH — transport mechanics are HIGH; NemoClaw EKS topology is a known open question
 
 ## Executive Summary
 
-This project adds an MCP (Model Context Protocol) tool server to an existing WEKA App Store operator system, enabling an OpenClaw AI agent to inspect Kubernetes clusters, discover blueprints, generate and validate WekaAppStore CRDs, and deploy them through a gated apply workflow. The key architectural decision — already made in the PRD — is that OpenClaw owns all reasoning, YAML generation, conversation state, and approval UX. The MCP server is a stateless toolbox of 8 thin wrappers over already-built business logic. No new business logic belongs in the MCP layer.
+The v3.0 milestone adds a single critical capability to an already-complete 8-tool MCP server: Streamable HTTP transport so the server can run as a pod sidecar alongside a NemoClaw/OpenClaw agent on EKS. The existing tools, tests, Dockerfile, and business logic are all transport-agnostic and require no changes. The only code changes are approximately 10 lines in `server.py` (transport branch + health route) and a config update to `openclaw.json`. Everything else is new Kubernetes manifests — deployment spec, RBAC, and ConfigMaps.
 
-The recommended implementation uses the official Anthropic Python `mcp` SDK (v1.9.x, FastMCP API) with stdio transport, deployed as a standalone process that shares a Python path with the existing `app-store-gui/webapp/` modules. All 8 tools are P1 for this milestone — none can be deferred — because the agent workflow breaks without any single one of them. The complete feature set (tools + SKILL.md + mock harness) should be delivered together before live OpenClaw registration is attempted.
+The recommended architecture is a dual-mode server: stdio remains the default for local dev and CI, while `MCP_TRANSPORT=streamable-http` activates HTTP mode for EKS. The MCP server runs as a native Kubernetes sidecar (init container with `restartPolicy: Always`) to guarantee startup ordering before OpenClaw attempts tool registration, binds to `0.0.0.0:8080` inside the pod (required for same-pod networking), and registers with OpenClaw via `http://localhost:8080/mcp`. FastMCP handles session management, SSE, and Origin validation automatically. No new Python dependencies are required — Streamable HTTP is included in `mcp>=1.9`.
 
-The highest-risk area is not implementation complexity — the wrappers are straightforward — but contract correctness. Three critical errors can silently corrupt the agent loop: passing deeply nested internal inspection models as tool responses (agent wastes context budget decoding structure), routing agent YAML through the old `validate_structured_plan()` entrypoint (wrong contract), and implementing the apply approval gate only in SKILL.md rather than in tool code (single point of failure). These must be resolved in Phase 1 and Phase 2 respectively, before any tools are wired up to a live agent.
-
----
+The primary deployment risk is NemoClaw's EKS compatibility. NemoClaw is early-preview software (announced March 16, 2026) that runs OpenClaw inside an embedded k3s-in-Docker stack, not as a native EKS pod. Direct `nemoclaw install` on EKS worker nodes does not work without privileged mode and nested container runtimes. Two mitigations exist: deploy NemoClaw on a dedicated EC2 VM alongside the EKS cluster (stable but loses the localhost sidecar topology), or use the community `agent-sandbox` CRD (experimental, GitHub Issue #407). This topology decision must be made and validated before any Kubernetes manifests are written — wrong topology means rewriting all of Phase 3.
 
 ## Key Findings
 
 ### Recommended Stack
 
-The only new dependencies required are `mcp[cli]>=1.9,<2` (the official Anthropic SDK with FastMCP bundled) and `pytest-asyncio>=1.3.0` for async test support. All existing stack components — FastAPI, kubernetes-client, PyYAML, pytest — are reused unmodified. The MCP server is a new top-level module (`mcp-server/`) at the repo root, not wired into the FastAPI app. OpenClaw spawns it as a child process via stdio using a `mcpServers` entry in `~/.openclaw/openclaw.json`.
+The v3.0 stack requires no new Python packages. `mcp[cli]>=1.26.0` (already pinned from v2.0) includes Streamable HTTP transport since `mcp>=1.9`. The OpenClaw operator is installed via Helm from `oci://ghcr.io/openclaw-rocks/charts/openclaw-operator` and manages pod assembly via the `OpenClawInstance` CRD. The agent container image is `alpine/openclaw:2026.3.11`. All existing v2.0 dependencies — `kubernetes>=27.0.0`, `PyYAML>=6.0.1`, `pytest>=8.0.0`, `pytest-asyncio` — remain unchanged.
 
 **Core technologies:**
-- `mcp[cli]>=1.9,<2`: MCP server framework — official SDK, FastMCP bundled, `@mcp.tool()` decorator, stdio transport by default; pin `<2` because v2 is pre-alpha as of March 2026
-- `pytest-asyncio>=1.3.0`: Async test execution — required because FastMCP in-memory test client calls are coroutines; configure `asyncio_mode = strict` to avoid event loop conflict with anyio transitive dependency
-- `mcp dev server.py` (CLI tool via `mcp[cli]`): Browser-based MCP Inspector for interactive tool testing — use before writing automated tests to verify tool schemas and response shapes
+- `mcp[cli]>=1.26.0`: Streamable HTTP transport — already installed; `mcp.run(transport="streamable-http", host="0.0.0.0", port=8080)` is the complete API; no new package needed
+- `openclaw-rocks/k8s-operator` (Helm): OpenClawInstance CRD management — handles StatefulSet, Service, RBAC, NetworkPolicy, PVC, and sidecar injection via `spec.sidecars`
+- `alpine/openclaw:2026.3.11`: Agent runtime container — exposes OpenClaw gateway on port 18789; MCP tools registered via `mcpServers.url` in the OpenClaw config
+- `helm` v3.x: Operator install tool — one-time cluster setup
 
-**What NOT to add:**
-- `pip install fastmcp` (PyPI community fork — not the official SDK)
-- `mcp>=2` (pre-alpha, breaking API changes)
-- HTTP/SSE transport (adds operational complexity; stdio is correct for single-agent stdio spawn)
-- Session or conversation state in any tool (OpenClaw owns this; duplicating it causes divergence bugs)
+**Critical version notes:**
+- Transport string is `"streamable-http"` with a hyphen, not underscore
+- MCP endpoint is always at `/mcp` path: `http://localhost:8080/mcp`
+- SSE transport is deprecated effective April 2026 — do not implement it; `transport="sse"` is the wrong string
 
 ### Expected Features
 
-All 8 tools are table stakes — every one is P1. Missing any breaks the agent loop. See `FEATURES.md` for full dependency graph.
+The feature set for this milestone is narrow and well-defined. Everything centers on enabling the 8 existing tools to be called from an EKS-deployed agent over HTTP.
 
-**Must have (table stakes — this milestone):**
-- `weka_appstore_inspect_cluster` — cluster GPU/CPU/RAM/namespace snapshot; wraps existing `inspection/cluster.py`
-- `weka_appstore_inspect_weka` — WEKA filesystem capacity; wraps existing `inspection/weka.py`
-- `weka_appstore_list_blueprints` — machine-consumable catalog with resource requirement hints; NOT a copy of the human UI
-- `weka_appstore_get_blueprint` — full values schema and defaults for a named blueprint
-- `weka_appstore_get_crd_schema` — static WekaAppStore CRD spec for agent YAML generation context
-- `weka_appstore_validate_yaml` — CRD-contract validation with structured, field-keyed errors; wraps (but does NOT pass through) `planning/validator.py`
-- `weka_appstore_apply` — submits WekaAppStore CR with hard approval gate enforced in tool code; wraps `planning/apply_gateway.py`
-- `weka_appstore_status` — read-only CR status query
-- Tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) on all 8 tools — machine-readable approval signals
-- Freshness timestamps (`captured_at`) at the top level of every inspection response
-- `SKILL.md` — OpenClaw workflow instructions with embedded CRD reference, validate-retry loop, re-inspect-before-apply instruction
-- Mock harness — pytest fixtures + in-process FastMCP client exercising the full tool chain
+**Must have (table stakes — required for milestone acceptance):**
+- Streamable HTTP transport in `server.py` — without it the agent cannot reach the tools in a pod-based deployment; this is the prerequisite for everything else
+- `MCP_TRANSPORT` and `MCP_PORT` env vars in `config.py` — transport selected at runtime without image rebuild
+- Dockerfile `EXPOSE 8080` and env var entrypoint override — enables the existing image to run in HTTP mode without a new Dockerfile
+- `openclaw.json` updated to `"transport": "streamable-http"` with `"url": "http://localhost:8080/mcp"` — replaces the stdio `startup` command/args block
+- Kubernetes manifests: pod spec with NemoClaw + MCP sidecar (native sidecar init container pattern), ServiceAccount, RBAC ClusterRole/Binding, ConfigMap for OpenClaw config, ConfigMap for blueprints
+- NemoClaw running on EKS (or dedicated VM) with the MCP sidecar registered and reachable
+- Happy-path E2E validation: `inspect_cluster` → `inspect_weka` → `list_blueprints` → `get_blueprint` → `get_crd_schema` → `validate_yaml` → `apply` → `status` against a real cluster and real WEKA
 
-**Should have (v1.x after core is stable):**
-- Preflight re-inspect inside `apply` tool (`skip_preflight: bool = False`) — guards against stale inspection state
-- Resource requirement hints in `list_blueprints` — lets agent prefilter without calling `get_blueprint` for each entry
-- Blueprint catalog hot-reload — only if blueprint updates are frequent
+**Should have (add after core works — v3.x):**
+- Health endpoint at `/healthz` — effectively mandatory for Kubernetes liveness/readiness probes; low effort and required before production stability
+- `docker-compose` for local HTTP mode testing — enables local E2E simulation before EKS deployment
+- RBAC narrowing — start permissive, narrow after observing actual API calls
 
-**Defer (v2+):**
-- Async status streaming — requires operator webhook support
-- Multi-cluster support — requires OpenClaw session tracking across cluster contexts
-- `weka_appstore_audit` — requires a persistent store not currently in the system
+**Defer (v4+):**
+- TLS on MCP endpoint — only if MCP server is ever exposed outside the pod
+- Multi-NemoClaw instance deployment — requires centralized tool registration
+- Webhook-based status streaming — only if the WEKA operator adds push notifications
 
 **Anti-features to avoid:**
-- Session/conversation state in the MCP server (OpenClaw owns this)
-- YAML generation inside the MCP server (agent's job)
-- Natural language tool inputs (ambiguous contract)
-- Streaming tool responses (not stable in MCP spec for tool invocation)
-- Unrestricted `kubectl exec` or `helm install` passthrough (PRD explicitly forbids)
-- Auto-apply without approval gate (PRD requirement OC-13)
+- Exposing MCP server as a Kubernetes Service with NodePort/LoadBalancer — breaks the localhost model and opens a security surface; the apply tool has no auth middleware
+- Running both stdio and HTTP simultaneously in one process — protocol conflict; select transport via env var at startup
+- Adding YAML generation or planning logic to the MCP server — reintroduces the v1.0 backend-brain anti-pattern that was explicitly removed
+- Removing the existing 103 stdio tests — they are the only tool-logic regression safety net; HTTP transport tests are additive, not replacements
 
 ### Architecture Approach
 
-The MCP server runs as a standalone process that imports the existing `webapp/` business logic via a shared Python path. OpenClaw spawns it as a child process via stdio. The FastAPI app and MCP server run independently and are unaware of each other at runtime. All 8 tool implementations are thin wrappers — they validate incoming arguments, call existing functions, and map results to Pydantic response schemas defined in `mcp-server/schemas/responses.py`. Zero business logic lives in the wrapper layer.
+The v3.0 architecture is a sidecar pod pattern: the MCP server container and the NemoClaw/OpenClaw container share a pod's network namespace. The MCP server binds to `0.0.0.0:8080` inside the pod (required — both containers share the pod's loopback interface, so the server must bind to all interfaces to be reachable from the OpenClaw container). OpenClaw registers the tools via `http://localhost:8080/mcp` configured in a Kubernetes ConfigMap injected as `openclaw.json`. Blueprint YAML files are mounted via a Kubernetes ConfigMap (with PVC or git-sync init container as fallback if the catalog exceeds 1MB). All 8 tool modules, all webapp business logic imports, the Dockerfile, and all 103 tests are unchanged.
 
 **Major components:**
-1. `mcp-server/server.py` — FastMCP instance; registers all 8 tools via `@mcp.tool()` decorator
-2. `mcp-server/tools/*.py` — one file per tool group; thin adapters over existing business logic; no business logic here
-3. `mcp-server/schemas/responses.py` — Pydantic models for stable tool output contracts; what the agent reasons against
-4. `mcp-server/context/kube_client.py` — shared Kubernetes client with explicit read-only vs. read-write separation
-5. `mcp-server/tests/mock_agent.py` — simulates OpenClaw tool-use loop for CI without a live agent
-6. `SKILL.md` (repo root) — agent workflow instructions for OpenClaw; orchestrates tool call sequence
+1. `server.py` transport branch + `/health` route — ~10 lines; the entire code change in the MCP server
+2. `k8s/deployment.yaml` — pod spec with NemoClaw container + MCP sidecar defined as native sidecar init container with startup/readiness/liveness probes
+3. `k8s/rbac.yaml` — dedicated `weka-mcp-server-sa` ServiceAccount with scoped ClusterRole (get/list nodes, namespaces, storageclasses, pods; create/list WekaAppStore CRs)
+4. `k8s/openclaw-config.yaml` ConfigMap — contains the HTTP `mcpServers.url` registration replacing the stdio startup block; generated at pod startup from env vars
+5. `k8s/blueprints-configmap.yaml` ConfigMap — blueprint YAML files mounted as volume into the sidecar at `BLUEPRINTS_DIR`
 
-**Existing code to deprecate after MCP tools stabilize:**
-- `planning/session_service.py`, `session_store.py` — OpenClaw owns state
-- `planning/family_matcher.py`, `compiler.py` — OpenClaw reasons about this
-- Planning session routes in `main.py` and `planning_session.html` template
+**Build order (dependency-driven):**
+Phase 1 (server code changes) can be completed and fully validated locally — no cluster access needed. Phases 2+ require EKS. Do not proceed to Phase 3 (manifests) until the NemoClaw deployment topology is confirmed from Phase 2.
 
 ### Critical Pitfalls
 
-1. **Tool responses expose internal domain model structure** — `collect_cluster_inspection()` returns a deeply nested domain structure designed for the old backend contract, not agent consumption. Use `flatten_cluster_status()` (already exists) as tool output. Define flat, agent-facing Pydantic schemas in `responses.py` before writing any wrapper. Guard: answer extractable in 2 key traversals or fewer; response JSON under 2000 tokens.
+1. **NemoClaw does not run natively on EKS** — NemoClaw's installer creates a k3s-in-Docker stack requiring privileged containers and nested container runtimes not available on EKS worker nodes. Validate the topology decision (dedicated EC2 VM vs. experimental `agent-sandbox` CRD) before writing any Kubernetes manifests. Recovery cost is HIGH if topology is wrong — it requires rewriting all of Phase 3.
 
-2. **Apply approval gate lives only in SKILL.md** — a SKILL.md instruction is a single point of failure bypassed by misconfigured agents, direct test calls, or future model versions. The `apply` tool must enforce a hard code-level check (`confirmed: true` parameter or `approval_token`) that rejects any call without the signal. Guard: a direct test call to apply without the approval signal must return an error, never a created CR.
+2. **FastMCP lifespan failure when mounted on existing FastAPI** — `app.mount("/mcp", mcp.streamable_http_app())` fails with `RuntimeError: Task group is not initialized` because the MCP Starlette app's lifespan is never invoked by the outer FastAPI app. Run the MCP server as a standalone process on its own port; never mount it onto an existing FastAPI app.
 
-3. **Validator reused against the wrong contract** — `validate_structured_plan()` validates the v1.0 `StructuredPlan` contract (with `blueprint_family`, `fit_findings`, etc.), not a `WekaAppStore` CRD. Routing agent YAML through the old entrypoint rejects valid CRDs and accepts wrong-format documents. Write a new `validate_wekaappstore_yaml()` function; extract and reuse only the component-level helpers from the old validator. Guard: validator accepts valid WekaAppStore YAML and rejects YAML with `blueprint_family` or `fit_findings` fields.
+3. **Sidecar startup race condition** — Kubernetes starts all `spec.containers` concurrently by default. If OpenClaw attempts tool registration before the MCP server is ready, it marks tools unavailable with no automatic retry. Define the MCP server as a native sidecar init container (`restartPolicy: Always`, Kubernetes 1.29+) with a `startupProbe` on `/health`. This guarantees ordering.
 
-4. **Deprecated session code creates parallel authority** — leaving `session_service.py`, `family_matcher.py`, and `compiler.py` active means two deployment paths exist. Developers will add features to the old path. Treat deprecation as a phased milestone deliverable: mark in Phase 1, disable FastAPI routes in Phase 2, delete in Phase 3.
+4. **NemoClaw deny-all egress blocks the sidecar** — NemoClaw's OpenShell sandbox enforces egress policy at the application layer, including loopback. Without explicitly adding `127.0.0.1:8080` to `openclaw-sandbox.yaml`, every tool call is blocked. The policy file must be prepared and `nemoclaw onboard` run before the agent pod starts.
 
-5. **Tool descriptions written for developers, not agents** — descriptions that explain what a tool does ("queries Kubernetes CoreV1Api") cause wrong tool selection and wrong call sequencing. Each description must start with when and why to call it, include sequencing guidance, and stay under 200 tokens. Guard: mock harness agent simulation selects the correct tool from the description alone.
+5. **RBAC over-permission via operator service account reuse** — Reusing the WEKA operator's service account gives the MCP sidecar full cluster-write permissions. Create `weka-mcp-server-sa` with a scoped ClusterRole. This is a one-time setup task, not a "harden later" item — treat it as a Phase 3 hard gate.
+
+6. **Session ID not forwarded by all MCP clients** — Some OpenClaw/NemoClaw client implementations do not forward the `Mcp-Session-Id` header (confirmed SDK Issue #808), causing the server to treat each tool call as a new session. Design the server for stateless operation from the start; do not rely on session continuity for any tool.
+
+7. **`openclaw.json` baked into the image at build time** — The OpenClaw registration config must be generated at pod startup from environment variables (via init container or startup script writing to an `emptyDir` volume), not baked into the container image. A hardcoded URL breaks on port or namespace changes and requires an image rebuild to fix.
 
 ---
 
 ## Implications for Roadmap
 
-All research converges on a 4-phase structure that matches the architectural dependency graph exactly. The phases are ordered to defer all mutation risk until the read path is validated, and to ensure the approval gate and correct validator contract are in place before any write operation is enabled.
+Based on research, the work falls into four phases with a hard dependency gate between Phase 1 (fully local, no EKS required) and Phase 2+ (requires EKS cluster access and topology validation).
 
-### Phase 1: MCP Server Scaffold and Read-Only Tools
+### Phase 1: Streamable HTTP Transport
 
-**Rationale:** Foundation must be in place before any tool is callable. Read-only tools carry zero mutation risk and can be tested immediately with mocked K8s responses. The output schema contracts defined here constrain every subsequent phase — getting them right first prevents retrofitting all wrappers later. The approval gate and validator contract issues (Pitfalls 1, 3, 5) must be resolved before any code is written.
+**Rationale:** HTTP transport is the prerequisite for every other milestone deliverable. It can be built and fully validated locally before any cluster access is available. All pitfalls in this phase are code-level and avoidable with explicit implementation choices. FastMCP documentation is HIGH confidence.
 
-**Delivers:** Runnable MCP server with 5 read-only tools (`inspect_cluster`, `inspect_weka`, `list_blueprints`, `get_blueprint`, `get_crd_schema`), per-tool tests with mocked backends, `mcp dev server.py` verification of all tool schemas and response shapes.
+**Delivers:** Working MCP server running in both stdio (default) and Streamable HTTP mode, selected by `MCP_TRANSPORT` env var. `/health` endpoint returning 200. `openclaw.json` updated for HTTP registration with `"url"` field replacing the stdio `startup` block. All 103 existing tests still pass unchanged. Smoke test: `curl localhost:8080/health` and `mcp dev server.py --transport streamable-http` both work.
 
-**Addresses features:** `inspect_cluster`, `inspect_weka`, `list_blueprints`, `get_blueprint`, `get_crd_schema`, tool annotations on all 5 tools, freshness timestamps.
+**Addresses:** HTTP transport mode in server.py (P1), Dockerfile EXPOSE and env var entrypoint (P1), config.py MCP_PORT/MCP_TRANSPORT vars (P1), openclaw.json HTTP transport config (P1)
 
-**Avoids pitfalls:** Tool response over-engineering (define flat Pydantic schemas in `responses.py` first); tool descriptions written for humans (draft agent-facing descriptions with sequencing guidance before implementation); deprecated code authority conflict (add `# DEPRECATED` markers to `session_service.py`, `family_matcher.py`, `compiler.py`).
+**Avoids:**
+- FastMCP lifespan failure — MCP server runs as standalone process, not mounted on FastAPI
+- SSE transport trap — explicitly use `transport="streamable-http"` and verify in code review
+- Session ID forwarding failure — initialize server in stateless mode; do not rely on `Mcp-Session-Id`
+- Origin header rejection — configure binding address to `0.0.0.0` with explicit pod NetworkPolicy restriction
 
-**Build order within phase:** `pyproject.toml` + `kube_client.py` → `schemas/responses.py` → tool wrappers → `server.py` registration → tests.
+**Research flag:** Standard patterns, well-documented FastMCP API — skip research-phase. The FastMCP docs at gofastmcp.com are HIGH confidence. No unknowns.
 
-**Gate to Phase 2:** All 5 read-only tools callable via `mcp dev server.py`; mocked K8s responses produce correct agent-facing output; answer extractable in 2 key traversals or fewer.
+### Phase 2: NemoClaw Topology Decision and EKS Deployment
 
-### Phase 2: Validation, Apply, and Status Tools
+**Rationale:** NemoClaw's EKS incompatibility (Pitfall 1) is the highest-risk item in the milestone. The topology decision determines the entire Kubernetes manifest structure. Writing manifests before this is resolved wastes effort and requires a full rewrite if the wrong approach is chosen.
 
-**Rationale:** Mutation tools (`validate_yaml`, `apply`) depend on the read tools being stable — the agent must be able to inspect and discover before validating or applying. The apply approval gate and the correct validator contract are the highest-risk items in the project and must be resolved before the tool is callable by anyone. Status tool is read-only but logically follows apply.
+**Delivers:** A running NemoClaw/OpenClaw instance accessible on EKS (or an alongside EC2 VM). A documented, tested topology decision. GPU node group and NVIDIA GPU Operator confirmed operational. The NemoClaw container image name confirmed from NVIDIA NGC. NemoClaw startup behavior with sidecar readiness probes confirmed (does it wait, or does it need an init container guard?).
 
-**Delivers:** Remaining 3 tools (`validate_yaml`, `apply`, `status`), full mock harness (`mock_agent.py`) exercising the complete inspect → validate → apply chain including error paths, FastAPI planning session routes disabled (return 410).
+**Addresses:** NemoClaw deployed to EKS (P1 prerequisite), EKS GPU node group setup
 
-**Addresses features:** `validate_yaml` with structured field-keyed errors, `apply` with hard approval gate, `status`, `destructiveHint` annotation on apply, all 8 tools callable.
+**Avoids:**
+- NemoClaw EKS incompatibility — validate deployment approach before manifests are written
+- Wasted manifest work from wrong topology assumption — Phase 3 cannot start until this gate passes
 
-**Avoids pitfalls:** Approval gate in code not SKILL.md (tool-level `confirmed` parameter check); wrong validator contract (`validate_wekaappstore_yaml()` against CRD, not `StructuredPlan`); stale inspection at apply time (staleness check / `inspection_age_warning` in apply tool); mock harness exercises error paths and approval bypass rejection.
+**Research flag:** NEEDS research-phase. The `agent-sandbox` CRD approach is documented only in GitHub Issue #407 and is not officially supported. The dedicated VM approach is stable but changes the sidecar networking model. Must validate against the actual NemoClaw version available.
 
-**Gate to Phase 3:** Direct call to apply without `confirmed: true` returns error. `validate_yaml` accepts valid WekaAppStore YAML. Mock harness runs full loop against mocked backends without errors.
+### Phase 3: Kubernetes Manifests and Sidecar Wiring
 
-### Phase 3: Skill Definition and Agent Context
+**Rationale:** With transport working (Phase 1) and topology confirmed (Phase 2), the Kubernetes artifacts can be built correctly once. All manifest decisions depend on topology. RBAC, startup ordering, ConfigMap structure, and the NemoClaw egress policy must all be addressed here — not deferred to post-deployment hardening.
 
-**Rationale:** SKILL.md cannot be written authoritatively until all 8 tools exist and their response shapes are finalized. CRD schema content (from `get_crd_schema`) must be verified complete before embedding in SKILL.md. Tool descriptions should be reviewed and tuned based on mock harness evidence before an agent ever sees them.
+**Delivers:** Complete Kubernetes manifest set: Deployment/StatefulSet or OpenClawInstance CRD YAML with native sidecar init container, `weka-mcp-server-sa` ServiceAccount, ClusterRole with scoped permissions, ClusterRoleBinding, OpenClaw config ConfigMap (generated at pod startup), blueprints ConfigMap. NemoClaw egress policy updated to allow `127.0.0.1:8080`. Both containers running, `/health` returning 200, `kubectl logs` clean.
 
-**Delivers:** `SKILL.md` with full workflow instructions, embedded CRD reference, validate-retry loop, re-inspect-before-apply instruction, explicit negative YAML examples; tool description review pass; deprecated code deleted (`session_service.py`, `session_store.py`, `family_matcher.py`, `compiler.py` removed from repo).
+**Addresses:** Kubernetes deployment manifests (P1), ServiceAccount + RBAC (P1), blueprint data strategy, sidecar startup ordering, openclaw.json runtime generation
 
-**Addresses features:** SKILL.md, structured validation errors, agent YAML hallucination prevention, blueprint catalog verified as LLM-friendly.
+**Avoids:**
+- Sidecar startup race — native sidecar init container with `startupProbe` on `/health`
+- RBAC over-permission — dedicated `weka-mcp-server-sa` with scoped ClusterRole
+- NemoClaw egress blocking sidecar — `openclaw-sandbox.yaml` updated before pod start
+- Build-time `openclaw.json` — generated at pod startup from env vars via init container writing to emptyDir
+- Pod IP hardcoded in config — URL is env-var-generated at startup, no dotted-decimal IPs in any config file
 
-**Avoids pitfalls:** Agent YAML hallucination (SKILL.md includes negative examples and retry loop); stale inspection (SKILL.md instructs re-inspect immediately before apply); tool descriptions tuned based on harness evidence; deprecated code fully deleted (not just marked).
+**Uses:** OpenClaw operator `spec.sidecars` or equivalent NemoClaw pod spec; `MCP_TRANSPORT=streamable-http`; `KUBERNETES_AUTH_MODE=in-cluster`
 
-**Gate to Phase 4:** Mock harness agent simulation selects correct tools from descriptions. SKILL.md includes validate-retry instruction. Deprecated files absent from repo.
+**Research flag:** NEEDS research-phase for the NemoClaw ConfigMap field path for `mcpServers.url` (official NemoClaw Kubernetes docs do not confirm the schema) and NemoClaw startup behavior with sidecar readiness probes. Standard Kubernetes RBAC and ConfigMap patterns are well-documented and do not need research.
 
-### Phase 4: Live OpenClaw Integration
+### Phase 4: End-to-End Validation
 
-**Rationale:** Only attempt live registration after all tools are tested end-to-end with the mock harness. Registration is configuration, not code. SKILL.md will need tuning based on actual agent behavior — expect 1-2 iteration cycles.
+**Rationale:** With all components deployed, validate the full happy path against a real cluster and real WEKA. This is the milestone acceptance criterion. Validation is functional testing — no research or design uncertainty remains at this point.
 
-**Delivers:** Server registered in `~/.openclaw/openclaw.json`; tools/list discovery verified; each tool exercised via OpenClaw chat; approval gate firing confirmed; SKILL.md tuned based on live agent behavior; `openclaw.json` registration snippet documented.
+**Delivers:** Agent completes the full tool chain (`inspect_cluster` → `inspect_weka` → `list_blueprints` → `get_blueprint` → `get_crd_schema` → `validate_yaml` → `apply` → `status`) against a live EKS cluster and live WEKA storage. SKILL.md reviewed and any stdio-specific transport language removed.
 
-**Addresses features:** Live OpenClaw integration, approval gate verification, NemoClaw alpha compatibility check.
+**Addresses:** Happy-path E2E validation (P1), SKILL.md transport reference cleanup
 
-**Avoids pitfalls:** Registering before end-to-end test passes (gate enforced by Phase 3 completion criterion).
+**Avoids:**
+- Tool registration failures from startup race — pod start logs confirm MCP server ready before OpenClaw init
+- Stale `openclaw.json` — confirm URL was generated at pod startup, not from image
 
-**Note on NemoClaw:** NemoClaw alpha (announced March 16 2026) does not yet have a published configuration schema. Plan for a possible second SKILL.md format iteration when NemoClaw reaches stable release.
+**Research flag:** Standard execution — no research-phase needed. Validation is functional testing against live infrastructure.
 
 ### Phase Ordering Rationale
 
-- Read tools precede write tools because the agent cannot reason about fit without inspection data, and because read tools carry zero mutation risk — a safe way to validate the stack and schema contracts.
-- Output schemas are defined in Phase 1 before any wrapper is written — this prevents retroactive flattening across all 8 tools.
-- Apply approval gate and validator contract are resolved in Phase 2, not deferred — these are the highest-consequence errors and have HIGH recovery cost if discovered later.
-- SKILL.md is written in Phase 3 after tools are stable — authoring it earlier would require revision every time a tool response shape changes.
-- Deprecated code deletion is a Phase 3 hard deliverable, not cleanup — this closes the dual-authority risk permanently.
-- Live OpenClaw registration is last — it is configuration that depends on all code being proven correct.
+- **Phase 1 is fully local and independent:** Transport code changes are ~10 lines with HIGH-confidence documentation. Completing this first creates a validated artifact before any cluster cost is incurred.
+- **Phase 2 before Phase 3:** The NemoClaw EKS compatibility issue (recovery cost HIGH) makes topology discovery non-negotiable before manifest authoring begins. A wrong topology assumption means rewriting all of Phase 3.
+- **Phase 3 is where the unknown complexity lives:** RBAC, startup ordering, egress policy, and config generation are all Kubernetes problems with known solutions — but the correct solutions depend on topology from Phase 2.
+- **Phase 4 is validation, not development:** No design decisions remain. It confirms the deployment works end-to-end.
+- **Phases 2 and 3 carry the schedule risk:** Phase 1 (code) and Phase 4 (validation) are predictable. Phase 2 (NemoClaw topology) and Phase 3 (manifests) are where unexpected iterations are most likely given NemoClaw's early-preview status.
 
 ### Research Flags
 
-Phases with well-documented patterns (skip research-phase):
-- **Phase 1:** Tool scaffold, FastMCP `@mcp.tool()` decorator, stdio transport, pytest-asyncio setup — all well-documented in official MCP SDK and FastMCP docs; patterns are explicit in STACK.md.
-- **Phase 2:** Apply approval gate pattern, K8s RBAC scoping — documented in PITFALLS.md and ARCHITECTURE.md with code examples.
-- **Phase 3:** SKILL.md format — official OpenClaw docs and real skill registry examples available; format is explicit in FEATURES.md.
+Phases needing `/gsd:research-phase` during planning:
+- **Phase 2:** NemoClaw EKS deployment topology — `agent-sandbox` CRD (experimental, Issue #407 only) vs. dedicated EC2 VM; neither approach is officially documented for production EKS use
+- **Phase 3:** NemoClaw ConfigMap field path for `mcpServers.url`; NemoClaw startup behavior with sidecar readiness probes; exact NemoClaw container image name on NVIDIA NGC (placeholder only in current research)
 
-Phases likely needing deeper research during planning:
-- **Phase 4 (NemoClaw):** NemoClaw alpha does not yet publish an official config schema as of March 16 2026. The OpenClaw YAML registration format is MEDIUM confidence (community docs only). Plan a research step before Phase 4 planning if NemoClaw stabilizes.
-- **Phase 2 (blueprint catalog source):** `list_blueprints` and `get_blueprint` depend on a catalog source identified as "TBD" in FEATURES.md. The exact file path and schema for the existing blueprint catalog must be confirmed from the live codebase before Phase 2 planning completes.
+Phases with standard patterns (skip research-phase):
+- **Phase 1:** FastMCP Streamable HTTP API is fully documented; dual-mode transport pattern is explicit; no unknowns
+- **Phase 4:** Functional E2E testing; no design uncertainty
 
 ---
 
@@ -179,50 +182,56 @@ Phases likely needing deeper research during planning:
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Official Anthropic MCP SDK confirmed on PyPI (v1.9.4); FastMCP API verified against official docs; pytest-asyncio v1.3.0 confirmed; one LOW-confidence item: NemoClaw config schema not yet published |
-| Features | HIGH | PRD is precise and directly inspectable; MCP spec is current; existing codebase is inspectable; 8-tool surface is unambiguous |
-| Architecture | HIGH | Official MCP SDK docs, FastMCP deployment guide, PRD analysis, and direct codebase inspection all converge on the same pattern |
-| Pitfalls | HIGH | Verified against MCP specification, Anthropic engineering guidance, and the actual codebase; contract boundary issues identified from direct code inspection |
+| Stack | HIGH | `mcp[cli]>=1.26.0` Streamable HTTP verified via PyPI and official FastMCP docs; OpenClaw operator verified via official docs and GitHub; no new packages needed |
+| Features | HIGH | Feature set is narrow and well-bounded; transport mechanics confirmed against official MCP spec; NemoClaw EKS-specific features are MEDIUM due to early-preview status |
+| Architecture | MEDIUM | FastMCP HTTP API is HIGH confidence; sidecar `mcpServers.url` registration format is MEDIUM (multiple community sources, no official NemoClaw Kubernetes example found); NemoClaw EKS pod spec is LOW-MEDIUM |
+| Pitfalls | HIGH | Critical pitfalls sourced from official SDK issue tracker (Issues #1367, #808, #737), official NemoClaw network policy docs, official Kubernetes native sidecar KEP, and EKS security best practices |
 
-**Overall confidence:** HIGH
+**Overall confidence:** MEDIUM-HIGH — The code changes (Phase 1) are HIGH confidence with no implementation uncertainty. The deployment topology (Phase 2) has one known unresolved question that is a known unknown, not a surprise discovery. The manifest work (Phase 3) is HIGH confidence once topology is resolved.
 
 ### Gaps to Address
 
-- **Blueprint catalog schema (resolve before Phase 1 ends):** `list_blueprints` and `get_blueprint` wrap a catalog source identified as "TBD" in FEATURES.md. Before Phase 1 wraps these tools, confirm what files constitute the blueprint catalog, where they live in the repo, and whether existing metadata includes resource requirements or needs enrichment. Action: read `weka-app-store-operator-chart/` and any existing catalog-browsing code in `webapp/` before Phase 1 planning.
-
-- **NemoClaw config schema (LOW priority for current milestone):** NemoClaw alpha has no published configuration schema as of March 16 2026. The OpenClaw registration format in STACK.md is MEDIUM confidence (community docs). This does not block Phase 1-3 development but may require a SKILL.md format revision for NemoClaw in Phase 4. Monitor NemoClaw release notes.
-
-- **`apply_gateway.py` initialization side effects (resolve in Phase 1):** ARCHITECTURE.md notes that `apply_gateway.py` K8s client initialization behavior at import time vs. call time should be verified before the MCP server imports it. If it has import-time side effects, the MCP server startup will attempt to reach the K8s API in CI. Action: read `apply_gateway.py` initialization pattern before writing the apply tool wrapper.
-
-- **RBAC service account (resolve before Phase 4):** The MCP server should use a separate service account with least-privilege RBAC — read-only for inspect tools, write scoped to `wekaappstores` for apply. This is a pre-Phase 4 deployment prerequisite, not a code change.
+- **NemoClaw EKS deployment topology (block on Phase 3):** Must select between VM+Service approach and experimental `agent-sandbox` CRD before Phase 3 manifests are written. Confirm via hands-on test with the actual NemoClaw version available. This is the single highest-risk item in the milestone.
+- **NemoClaw container image name (block on Phase 3):** `nvcr.io/nvidia/nemoclaw:latest` is a placeholder. Confirm the actual NGC image name and tag before writing the Deployment manifest.
+- **NemoClaw ConfigMap schema (block on Phase 3):** The exact YAML key path for `mcpServers.url` in NemoClaw's runtime config must be verified against the deployed version. Community sources agree on `mcpServers.<name>.url` with `transport: streamable-http` but official NemoClaw Kubernetes docs do not confirm this schema.
+- **NemoClaw sidecar startup behavior (block on Phase 3):** Whether NemoClaw/OpenClaw waits for sidecar readiness probes or starts immediately is not confirmed. If it does not retry, a startup guard is needed. Validate during Phase 2 deployment.
+- **Blueprint catalog size (resolve before Phase 3):** If the blueprint YAML catalog exceeds ConfigMap's 1MB limit, a PVC or git-sync init container is needed instead of a ConfigMap. Measure actual blueprint directory size before committing to the ConfigMap strategy.
 
 ---
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- [PyPI `mcp` package](https://pypi.org/project/mcp/) — v1.9.4 confirmed latest stable, v2 pre-alpha
-- [GitHub `modelcontextprotocol/python-sdk`](https://github.com/modelcontextprotocol/python-sdk) — FastMCP API, `@mcp.tool()` decorator, in-process test client
-- [MCP Tools Specification 2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) — response format, `isError`, output schema requirements
-- [FastMCP testing guide](https://gofastmcp.com/servers/testing) — in-process client test pattern
-- [Tool Annotations — MCP Blog 2026-03-16](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/) — `readOnlyHint`, `destructiveHint`, `idempotentHint`
-- [OpenClaw Skills Documentation](https://docs.openclaw.ai/tools/skills) — SKILL.md frontmatter fields and format
-- [Anthropic Engineering: Writing Tools for Agents](https://www.anthropic.com/engineering/writing-tools-for-agents) — tool description quality, response design
-- [MCP Security — Elastic Security Labs](https://www.elastic.co/security-labs/mcp-tools-attack-defense-recommendations) — approval bypass risk
-- [pytest-asyncio PyPI](https://pypi.org/project/pytest-asyncio/) — v1.3.0 released November 2025
-- `.planning/PRD-openclaw-integration.md` — tool specifications OC-01 through OC-18, authoritative for this project
-- Codebase direct inspection: `inspection/cluster.py`, `planning/validator.py`, `planning/apply_gateway.py`, `planning/models.py`, `planning/session_service.py`
+- PyPI `mcp` package — v1.26.0 confirmed latest stable: https://pypi.org/project/mcp/
+- FastMCP Running Server docs — `mcp.run(transport="streamable-http", host, port)` signature: https://gofastmcp.com/deployment/running-server
+- MCP Transports Specification 2025-03-26 — Streamable HTTP session management, Origin validation: https://modelcontextprotocol.io/specification/2025-03-26/basic/transports
+- MCP Python SDK Issue #1367 — FastAPI mount lifespan failure root cause: https://github.com/modelcontextprotocol/python-sdk/issues/1367
+- MCP Python SDK Issue #808 — Session ID header recognition bug: https://github.com/modelcontextprotocol/python-sdk/issues/808
+- MCP Python SDK Issue #737 — RuntimeError on premature session manager shutdown: https://github.com/modelcontextprotocol/python-sdk/issues/737
+- NVIDIA NemoClaw Network Policies docs — deny-all egress default, allowlist config: https://docs.nvidia.com/nemoclaw/latest/reference/network-policies.html
+- Kubernetes native sidecar KEP + community guide — startup ordering guarantee: https://scalefactory.com/blog/2025/06/19/start-sidecar-first-in-kubernetes/
+- OpenClaw K8s operator official docs — `spec.sidecars`, reserved container names: https://docs.openclaw.ai/install/kubernetes
+- openclaw-rocks/k8s-operator GitHub — sidecar architecture, reserved names: https://github.com/openclaw-rocks/k8s-operator
+- SSE Transport Deprecation rationale and timeline: https://blog.fka.dev/blog/2025-06-06-why-mcp-deprecated-sse-and-go-with-streamable-http/
 
 ### Secondary (MEDIUM confidence)
-- [OpenClaw MCP server YAML config format](https://www.clawctl.com/blog/mcp-server-setup-guide) — registration format (community guide, consistent with MCP spec)
-- [OpenClaw `openclaw.json` configuration](https://openclawvps.io/blog/add-mcp-openclaw) — mcpServers format
-- [MCPcat unit testing guide](https://mcpcat.io/guides/writing-unit-tests-mcp-servers/) — mock dependency injection, in-memory transport
-- [MCP Tool Schema Bloat](https://layered.dev/mcp-tool-schema-bloat-the-hidden-token-tax-and-how-to-fix-it/) — token bloat patterns
-- [NearForm: MCP tips and pitfalls](https://nearform.com/digital-community/implementing-model-context-protocol-mcp-tips-tricks-and-pitfalls/) — approval gates, testing without live agents
+- OpenClaw k8s-operator sidecar DeepWiki — sidecar categories, naming constraints: https://deepwiki.com/openclaw-rocks/k8s-operator/5.1-sidecar-containers
+- openclaw.rocks deploy guide — `OpenClawInstance` CRD YAML with `spec.sidecars`: https://openclaw.rocks/blog/deploy-openclaw-kubernetes
+- community openclaw-mcp-server — `streamable-http` URL format `http://HOST:PORT/mcp`: https://github.com/rodgco/openclaw-mcp-server
+- masteryodaa/openclaw-sdk DeepWiki — `HttpMcpServer` `transport: "streamable-http"`, `url` field: https://deepwiki.com/masteryodaa/openclaw-sdk/2.15-mcp-server-integration
+- NVIDIA NemoClaw Quickstart — installer script, early preview caveats: https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html
+- NVIDIA GPU Operator for EKS — Helm installation, EKS compatibility: https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html
+- dev.to OpenClaw on Kubernetes — `alpine/openclaw:2026.3.11` image, port 18789: https://dev.to/thenjdevopsguy/running-openclaw-on-kubernetes-57ki
+- MCPcat Streamable HTTP guide — endpoint path, production config: https://mcpcat.io/guides/building-streamablehttp-mcp-server/
+- openclawvps.io — `mcpServers` block with `streamable-http` transport and `url` field: https://openclawvps.io/blog/add-mcp-openclaw
+- Scaling HTTP Streamable MCP Servers — stateless mode recommendation: https://zhimin-wen.medium.com/scaling-http-streamable-mcp-servers-on-kubernetes-handling-sticky-sessions-24212857c8ca
+- EKS Security Best Practices — IRSA least-privilege, instance role inheritance pitfall: https://www.wiz.io/academy/container-security/eks-security-best-practices
 
-### Tertiary (LOW confidence — needs validation)
-- NemoClaw alpha announcement — NVIDIA, March 16 2026 — NemoClaw config schema not yet published; OpenClaw compatibility details TBD
+### Tertiary (LOW confidence — needs validation during implementation)
+- NVIDIA/NemoClaw GitHub Issue #407 — `agent-sandbox` CRD community workaround for EKS (experimental, not officially supported): https://github.com/NVIDIA/NemoClaw/issues/407
+- NemoClaw GitHub — Kubernetes deployment docs absent; local-deploy focus only; EKS config schema not published: https://github.com/NVIDIA/NemoClaw
 
 ---
-*Research completed: 2026-03-20*
+*Research completed: 2026-03-23*
+*Extends: .planning/research/SUMMARY.md v2.0 (2026-03-20) — v3.0 HTTP transport and EKS sidecar additions*
 *Ready for roadmap: yes*

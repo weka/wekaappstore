@@ -1,245 +1,231 @@
 # Stack Research
 
 **Domain:** MCP server in Python — WEKA App Store OpenClaw tool integration
-**Researched:** 2026-03-20
-**Confidence:** MEDIUM-HIGH — MCP SDK verified via PyPI/GitHub (HIGH); OpenClaw stdio config format verified via community docs (MEDIUM); NemoClaw is alpha as of March 16 2026, official config schema not yet published (LOW on NemoClaw-specific details)
+**Researched:** 2026-03-23
+**Confidence:** MEDIUM-HIGH — MCP SDK Streamable HTTP verified via PyPI and gofastmcp.com docs (HIGH); OpenClaw K8s operator sidecar pattern verified via official docs (HIGH); openclaw.json HTTP mcpServers format verified via multiple community sources (MEDIUM); NemoClaw-specific EKS details still LOW due to alpha status
 
 ---
 
-## Context: This Is A Brownfield Addition
+## Context: Milestone Scope — v3.0 Additions Only
 
-The existing validated stack is **not changing**. Everything below is what needs to be added for the MCP server milestone only.
+This document **extends** the v2.0 STACK.md. Everything in the previous STACK.md remains valid and is not repeated here. The v2.0 validated stack is:
 
-**Existing stack (already in `requirements.txt`, do not re-research):**
-- `fastapi>=0.111.0`, `uvicorn[standard]>=0.30.0`, `Jinja2>=3.1.4` — web UI (keep as-is)
-- `kubernetes>=27.0.0` — K8s API client (reused by MCP tool implementations)
-- `PyYAML>=6.0.1` — YAML parsing (reused by validate and apply tools)
-- `pytest>=8.0.0` — test runner (extended with async support)
+- `mcp[cli]>=1.26.0` — FastMCP with stdio transport (production)
+- `kubernetes>=27.0.0` — K8s API client (reused by tools)
+- `PyYAML>=6.0.1` — YAML parsing (reused by validate/apply)
+- `pytest>=8.0.0`, `pytest-asyncio` — test runner
 
-**Existing code to reuse as tool implementations (do not duplicate):**
-- `webapp/inspection/cluster.py` — `collect_cluster_inspection()` → behind `weka_appstore_inspect_cluster` tool
-- `webapp/inspection/weka.py` — WEKA inspection → behind `weka_appstore_inspect_weka` tool
-- `webapp/planning/apply_gateway.py` — `ApplyGateway` → behind `weka_appstore_apply` tool
-- `webapp/planning/validator.py` — validation logic → behind `weka_appstore_validate_yaml` tool
+**v3.0 adds:** Streamable HTTP transport on the MCP server, OpenClaw/NemoClaw deployment to EKS via the `openclaw-rocks` Kubernetes operator, and sidecar wiring to register the MCP server over HTTP.
 
 ---
 
-## Recommended Stack
+## Recommended Stack — New Additions for v3.0
 
-### Core Technologies (New Additions Only)
+### Core Technologies
 
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
-| `mcp` (official Python SDK) | `>=1.9,<2` | MCP server framework with `FastMCP` high-level API | Official Anthropic SDK; FastMCP is bundled inside the `mcp` package (not a separate install); provides `@mcp.tool()` decorator that auto-generates JSON schema from Python type hints; stdio transport is the default and what OpenClaw uses to spawn the server process |
-| `mcp[cli]` extra | same as `mcp` | MCP Inspector dev tool for manual tool testing | The `cli` extra installs the `mcp dev` and `mcp run` commands; `mcp dev server.py` opens a browser-based inspector to call tools interactively without writing any test code first — essential for iterating on tool shapes before writing automated tests |
+| `mcp[cli]` (Streamable HTTP transport) | `>=1.26.0` (already pinned) | Add HTTP transport mode to existing FastMCP server | No new package needed — Streamable HTTP is built into `mcp>=1.9`. Call `mcp.run(transport="streamable-http", host="0.0.0.0", port=8080)` and the `/mcp` endpoint is live. The existing `mcp[cli]>=1.26.0` pin already covers this. |
+| OpenClaw Kubernetes Operator | `oci://ghcr.io/openclaw-rocks/charts/openclaw-operator` (latest) | Deploy and manage OpenClaw agent instances on EKS via the `OpenClawInstance` CRD | Official community operator from `openclaw-rocks/k8s-operator`. Manages the full pod (StatefulSet, Service, RBAC, NetworkPolicy, PVC), handles sidecar injection via `spec.sidecars`, and accepts arbitrary custom containers running alongside the main agent container. Verified via official openclaw.rocks docs. |
+| OpenClaw container image | `alpine/openclaw:2026.3.11` (or latest `alpine/openclaw`) | Agent runtime in the OpenClawInstance pod | Verified via dev.to deployment guide (March 2026). Exposes gateway on port 18789. The operator's nginx gateway-proxy sidecar handles external traffic forwarding to the loopback-bound gateway. |
 
-**Version pin rationale:** Pin `<2` because v2 is pre-alpha on the `main` branch as of March 2026. v1.x is the stable release. Latest confirmed stable on PyPI: `1.9.4` (June 2025). The `mcp` package requires Python >=3.10.
+### Supporting Libraries
 
-### Supporting Libraries (New Additions Only)
+No new Python libraries are required. All Streamable HTTP transport support is already included in `mcp>=1.9`. The sidecar pattern only requires Kubernetes manifests/YAML changes, not Python code changes.
 
-| Library | Version | Purpose | When to Use |
-|---------|---------|---------|-------------|
-| `pytest-asyncio` | `>=1.3.0` | Async test execution for MCP tool tests | Required because FastMCP's in-memory test client calls are async coroutines; the existing test suite uses only synchronous pytest; latest stable: 1.3.0 (November 2025) |
-
-**Note on event loop management:** The `mcp` package pulls in `anyio` as a transitive dependency. Do not install anyio explicitly unless pinning a version. Configure `pytest-asyncio` in strict mode (explicit `@pytest.mark.asyncio` markers) to avoid the known conflict where pytest-asyncio auto mode and anyio's pytest plugin both attempt to own the event loop.
+| What | Where | Notes |
+|------|-------|-------|
+| Streamable HTTP server | `mcp.run()` call in `server.py` | Switch transport arg from default stdio to `"streamable-http"` for the HTTP variant. See integration section below. |
+| Environment variable `MCP_PORT` | `server.py` and `config.py` | Expose port as env var so the Kubernetes manifest can configure it without rebuilding the image. Default: `8080`. |
+| Kubernetes `ConfigMap` for openclaw config | `OpenClawInstance` spec | MCP server registration goes into `spec.config.raw.agents.defaults.mcpServers` as a `streamable-http` entry pointing to `http://localhost:8080/mcp`. |
 
 ### Development Tools
 
 | Tool | Purpose | Notes |
 |------|---------|-------|
-| `mcp dev <server.py>` | Opens MCP Inspector in the browser — interactive tool call UI | Installed via `mcp[cli]` extra; use before writing any automated test to verify tool schemas, argument shapes, and return values |
-| `mcp run <server.py>` | Launches the server via stdio in the terminal | Use to smoke-test the server entrypoint as OpenClaw would invoke it (spawns process, reads JSON-RPC from stdin) |
-| `unittest.mock.patch` / `pytest monkeypatch` | Mock K8s API calls in unit tests | Already available in stdlib + pytest; no new package needed; the existing codebase uses this pattern extensively (see `tests/planning/`) |
+| `helm` v3.x | Install the openclaw-rocks operator on EKS | `helm install openclaw-operator oci://ghcr.io/openclaw-rocks/charts/openclaw-operator --namespace openclaw-operator-system --create-namespace` |
+| `kubectl port-forward` | Local access to OpenClaw gateway during dev | `kubectl port-forward svc/my-agent 18789:18789 -n openclaw` — exposes the agent chat gateway locally |
+| `mcp dev server.py` | Interactive MCP Inspector for HTTP transport smoke-test | Already available via `mcp[cli]`; run with `--transport streamable-http` flag to test HTTP mode |
 
 ---
 
 ## Installation
 
-Add to `app-store-gui/requirements.txt` (or a separate `mcp-server/requirements.txt` if the MCP server becomes a standalone deployment unit):
-
-```
-# MCP server
-mcp[cli]>=1.9,<2
-
-# Async test support for MCP tool tests
-pytest-asyncio>=1.3.0
-```
+No new Python packages. All changes are in existing code and Kubernetes manifests.
 
 ```bash
-# Install
-pip install "mcp[cli]>=1.9,<2" "pytest-asyncio>=1.3.0"
+# Verify mcp[cli]>=1.26.0 is already installed (it should be from v2.0)
+pip show mcp
+
+# Install OpenClaw operator on EKS (one-time cluster setup)
+helm install openclaw-operator \
+  oci://ghcr.io/openclaw-rocks/charts/openclaw-operator \
+  --namespace openclaw-operator-system \
+  --create-namespace
 ```
 
 ---
 
-## Tool Registration Pattern
+## Integration Points
 
-The FastMCP `@mcp.tool()` decorator is the registration mechanism. Type hints drive the JSON schema that OpenClaw sees; the docstring becomes the tool description the agent reads.
+### 1. Adding HTTP Transport to server.py
+
+The MCP server currently runs stdio only. Add HTTP support by reading a transport env var:
 
 ```python
-# mcp_server/server.py
-from mcp.server.fastmcp import FastMCP
-
-mcp = FastMCP("weka-app-store")
-
-@mcp.tool()
-def weka_appstore_inspect_cluster() -> dict:
-    """Return a bounded snapshot of Kubernetes cluster state.
-
-    Returns GPU inventory (model, count, memory per node), CPU allocatable vs
-    requested, RAM allocatable vs requested, namespaces, and storage classes.
-    Read-only. No cluster mutation.
-    """
-    from webapp.inspection.cluster import collect_cluster_inspection
-    return collect_cluster_inspection()
-
-@mcp.tool()
-def weka_appstore_validate_yaml(yaml_content: str) -> dict:
-    """Validate a WekaAppStore YAML document against the CRD and operator contract.
-
-    Returns pass/fail with actionable errors. Call this before weka_appstore_apply.
-    """
-    from webapp.planning.validator import validate_plan_yaml
-    return validate_plan_yaml(yaml_content)
+# mcp-server/server.py (additions only)
+import os
 
 if __name__ == "__main__":
-    mcp.run()  # stdio transport by default — what OpenClaw uses
+    from config import validate_required
+    validate_required()
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    if transport == "streamable-http":
+        port = int(os.environ.get("MCP_PORT", "8080"))
+        mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+    else:
+        mcp.run()  # stdio default — unchanged for local dev
 ```
 
-**Critical rules:**
-- Decorator is `@mcp.tool()` with parentheses — `@mcp.tool` (no parentheses) raises `TypeError`
-- Type hints on parameters generate the JSON schema OpenClaw uses to construct arguments
-- Docstrings are agent-facing, not human-facing — write them to guide the agent's reasoning
-- `mcp.run()` with no arguments defaults to stdio transport; this is correct for OpenClaw subprocess model
-- Return `dict` — FastMCP serializes it to JSON automatically
+**Key facts (HIGH confidence — verified via PyPI and gofastmcp.com):**
+- Transport string is `"streamable-http"` (hyphen, not underscore)
+- MCP endpoint is always at `/mcp` path — `http://localhost:8080/mcp`
+- `host="0.0.0.0"` is required in a container so the sidecar is reachable from within the pod
+- No new dependencies needed — Streamable HTTP is included in `mcp>=1.9`
+- For a stateless server (no per-session state), initialize with `FastMCP("name", stateless_http=True)` for horizontal scaling compatibility
 
----
+**Also update config.py** to add `MCP_TRANSPORT` and `MCP_PORT` as optional env vars so they appear in documentation and validation output.
 
-## OpenClaw Registration Format
+### 2. Dockerfile Update
 
-OpenClaw registers MCP servers in YAML configuration. The server runs as a child process via stdio — no HTTP server, no port, no TLS:
+The existing `CMD ["python", "-m", "server"]` runs stdio. For the sidecar container, the deployment YAML overrides this via `args`:
 
 ```yaml
-# ~/.openclaw/openclaw.yaml (or openclaw.json — format depends on OpenClaw version)
-agents:
-  - id: main
-    model: anthropic/claude-sonnet-4-5
-    mcp_servers:
-      - name: weka-app-store
-        command: python3
-        args:
-          - /path/to/app-store-gui/mcp_server/server.py
-        env:
-          KUBECONFIG: /path/to/.kube/config
-          WEKA_API_ENDPOINT: https://weka-cluster.example.com
+# In the OpenClawInstance sidecar spec — no Dockerfile change needed
+containers:
+- name: weka-mcp-server
+  image: wekachrisjen/weka-app-store-mcp:latest
+  args: ["python", "-m", "server"]
+  env:
+  - name: MCP_TRANSPORT
+    value: "streamable-http"
+  - name: MCP_PORT
+    value: "8080"
+  - name: BLUEPRINTS_DIR
+    value: "/blueprints"
+  - name: KUBERNETES_AUTH_MODE
+    value: "in-cluster"
 ```
 
-OpenClaw spawns the process at agent start and communicates over stdin/stdout using JSON-RPC 2.0. The agent discovers available tools through the MCP protocol handshake.
+The existing Dockerfile CMD stays as-is. The container behaves as stdio by default and as HTTP when `MCP_TRANSPORT=streamable-http` is injected.
 
-**Confidence: MEDIUM** — format verified via community documentation (clawctl.com MCP setup guide, March 2026). NemoClaw alpha as of March 16 2026 does not yet publish an official config schema. The stdio subprocess model itself is confirmed by the MCP specification and multiple sources.
+### 3. OpenClawInstance CRD — Sidecar Registration
 
----
+The operator manages OpenClaw agent pods via the `OpenClawInstance` CRD. To add the MCP server sidecar and register it over HTTP:
 
-## Mock Agent Harness Pattern
-
-FastMCP provides an in-process test client — the entire tool chain can be exercised without spawning a subprocess or running a live OpenClaw instance:
-
-```python
-# tests/mcp/conftest.py
-import pytest
-from mcp import Client
-from mcp_server.server import mcp
-
-@pytest.fixture
-async def mcp_client():
-    async with Client(transport=mcp) as client:
-        yield client
+```yaml
+apiVersion: openclaw.rocks/v1alpha1
+kind: OpenClawInstance
+metadata:
+  name: weka-agent
+  namespace: openclaw
+spec:
+  envFrom:
+    - secretRef:
+        name: openclaw-api-keys        # ANTHROPIC_API_KEY or OPENAI_API_KEY
+  storage:
+    persistence:
+      enabled: true
+      size: 10Gi
+  # MCP server sidecar — communicates with the agent over localhost
+  sidecars:
+    - name: weka-mcp-server            # must not collide with reserved names
+      image: wekachrisjen/weka-app-store-mcp:latest
+      ports:
+        - containerPort: 8080
+          name: mcp-http
+      env:
+        - name: MCP_TRANSPORT
+          value: "streamable-http"
+        - name: MCP_PORT
+          value: "8080"
+        - name: BLUEPRINTS_DIR
+          value: "/blueprints"
+        - name: KUBERNETES_AUTH_MODE
+          value: "in-cluster"
+      resources:
+        requests:
+          cpu: 200m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+      # readOnlyRootFilesystem enforced by operator for custom sidecars
+  # Register the sidecar MCP server in OpenClaw's config
+  config:
+    raw:
+      agents:
+        defaults:
+          mcpServers:
+            weka-app-store:
+              transport: "streamable-http"
+              url: "http://localhost:8080/mcp"
 ```
 
-```python
-# tests/mcp/test_tool_cluster.py
-import pytest
-from unittest.mock import patch
+**Sidecar naming constraints (HIGH confidence — operator docs):**
+Reserved container names rejected by the operator webhook: `openclaw`, `gateway-proxy`, `chromium`, `tailscale`, `ollama`, `web-terminal`. Use `weka-mcp-server`.
 
-@pytest.mark.asyncio
-async def test_inspect_cluster_returns_domains(mcp_client):
-    mock_result = {"domains": {"cpu": {"status": "complete", "observed": {"free_cores": 48.0}}}}
-    with patch("webapp.inspection.cluster.collect_cluster_inspection", return_value=mock_result):
-        result = await mcp_client.call_tool("weka_appstore_inspect_cluster", {})
-    assert result.data["domains"]["cpu"]["status"] == "complete"
+**Port choice:** Port `8080` avoids conflict with OpenClaw's gateway on `18789` and the bridge on `18790`.
+
+**localhost routing:** Both containers share a network namespace in the pod. The MCP server on `localhost:8080` is directly reachable from the OpenClaw agent container — no Service or ingress needed.
+
+### 4. openclaw.json Update (from stdio to HTTP)
+
+The existing `openclaw.json` in the repo documents the stdio startup contract. For the EKS sidecar deployment, this changes to an HTTP endpoint:
+
+```json
+{
+  "name": "weka-app-store-mcp",
+  "description": "MCP server for the WEKA App Store.",
+  "transport": "streamable-http",
+  "url": "http://localhost:8080/mcp",
+  "env": {
+    "required": ["BLUEPRINTS_DIR"],
+    "optional": ["KUBERNETES_AUTH_MODE", "LOG_LEVEL", "MCP_PORT"]
+  },
+  "container": "wekachrisjen/weka-app-store-mcp:latest",
+  "skill": "mcp-server/SKILL.md"
+}
 ```
 
-The mock agent harness (`test_mock_harness.py`) calls tools in the full deployment sequence to prove end-to-end flow without a live agent:
+The `startup` block (command/args for stdio) is removed for the HTTP deployment variant. Keep the stdio block for local dev documentation.
 
-```python
-@pytest.mark.asyncio
-async def test_full_deploy_flow(mcp_client, mock_k8s, mock_weka):
-    # 1. Inspect cluster resources
-    cluster = await mcp_client.call_tool("weka_appstore_inspect_cluster", {})
-    # 2. Inspect WEKA storage
-    weka = await mcp_client.call_tool("weka_appstore_inspect_weka", {})
-    # 3. List blueprints
-    catalog = await mcp_client.call_tool("weka_appstore_list_blueprints", {})
-    # 4. Validate generated YAML
-    validation = await mcp_client.call_tool(
-        "weka_appstore_validate_yaml",
-        {"yaml_content": SAMPLE_WEKAAPPSTORE_YAML}
-    )
-    assert validation.data["valid"] is True
-    # 5. Apply (mocked K8s write)
-    apply_result = await mcp_client.call_tool(
-        "weka_appstore_apply",
-        {"yaml_content": SAMPLE_WEKAAPPSTORE_YAML, "namespace": "ai-platform"}
-    )
-    assert apply_result.data["applied"] == ["WekaAppStore"]
+### 5. RBAC — ServiceAccount for In-Cluster K8s Access
+
+The MCP server sidecar uses `KUBERNETES_AUTH_MODE=in-cluster` to call the K8s API. The `OpenClawInstance` operator creates a ServiceAccount, but it needs to be annotated with permission to list/get pods, nodes, namespaces, storageclasses, and custom resources:
+
+```yaml
+# ClusterRole for MCP server tools (read-only + WekaAppStore apply)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: weka-mcp-server-role
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "namespaces", "pods", "persistentvolumes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list"]
+  - apiGroups: ["warp.io"]
+    resources: ["wekaappstores"]
+    verbs: ["get", "list", "create"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
 ```
 
----
-
-## Recommended File Layout
-
-The MCP server is a new top-level module alongside `webapp/`, not wired into the FastAPI app:
-
-```
-app-store-gui/
-  mcp_server/
-    __init__.py
-    server.py          # FastMCP instance; all @mcp.tool() registrations
-    tools/
-      __init__.py
-      cluster.py       # thin wrapper over webapp/inspection/cluster.py
-      weka.py          # thin wrapper over webapp/inspection/weka.py
-      blueprints.py    # blueprint catalog read (list + get)
-      validate.py      # thin wrapper over webapp/planning/validator.py
-      apply.py         # thin wrapper over webapp/planning/apply_gateway.py
-      status.py        # WekaAppStore CR status query via K8s custom objects API
-      schema.py        # CRD schema retrieval for agent YAML generation context
-  tests/
-    mcp/
-      conftest.py           # async fixtures: in-memory FastMCP client, mock K8s/WEKA
-      test_tool_cluster.py
-      test_tool_weka.py
-      test_tool_blueprints.py
-      test_tool_validate.py
-      test_tool_apply.py
-      test_tool_status.py
-      test_tool_schema.py
-      test_mock_harness.py  # end-to-end tool chain without live OpenClaw
-```
-
----
-
-## pytest Configuration Update
-
-Add `asyncio_mode = strict` to avoid event loop conflicts between pytest-asyncio and anyio:
-
-```ini
-# pytest.ini
-[pytest]
-asyncio_mode = strict
-```
-
-This keeps pytest-asyncio in strict mode (tests must be explicitly marked `@pytest.mark.asyncio`) and prevents anyio's pytest plugin from interfering.
+Bind this to the ServiceAccount the operator creates for the `OpenClawInstance` pod.
 
 ---
 
@@ -247,10 +233,10 @@ This keeps pytest-asyncio in strict mode (tests must be explicitly marked `@pyte
 
 | Recommended | Alternative | When to Use Alternative |
 |-------------|-------------|-------------------------|
-| `mcp` official SDK with bundled `FastMCP` | `fastmcp` PyPI package (PrefectHQ / jlowin) | The community `fastmcp` v3.0 (January 2026) adds granular auth, OpenTelemetry, and OpenAPI provider support — switch to it if the project needs multi-server composition, fine-grained authorization, or built-in tracing |
-| stdio transport (`mcp.run()` default) | Streamable HTTP transport | Use HTTP if the MCP server must serve multiple concurrent OpenClaw instances, if browser-based MCP clients need direct access, or if a shared remote MCP server deployment is needed |
-| MCP server as a module in `app-store-gui/` | Separate Python package/repo | Use a separate package only if the MCP server needs independent versioning, a separate container image, or an independent deployment pipeline |
-| `pytest-asyncio` strict mode | anyio `@pytest.mark.anyio` | Use anyio's marker if the whole test suite migrates to anyio backends — for now, strict asyncio_mode avoids retrofitting the existing synchronous test files |
+| Streamable HTTP on port 8080 inside pod | stdio subprocess spawned by OpenClaw | Use stdio for local dev and single-user desktop scenarios — it's simpler and is the current production config. Use HTTP for Kubernetes sidecar because OpenClaw can't spawn a subprocess from inside a co-located container |
+| `spec.sidecars` custom container in `OpenClawInstance` | Separate Kubernetes Deployment with ClusterIP Service | Use separate Deployment only if the MCP server needs to be shared across multiple OpenClaw agent instances. For a single-agent pod, sidecar is simpler, shares network namespace, and requires no inter-pod DNS or service |
+| `openclaw-rocks/k8s-operator` Helm chart | Raw manifests (Deployment, Service, PVC, RBAC by hand) | Use raw manifests if the operator adds unacceptable overhead or if the cluster policy blocks CRD installation. The operator Helm chart is the official documented path and handles all the pod assembly complexity |
+| Port 8080 for MCP HTTP | Port 3721 (openclaw-mcp-server community default) | Port choice is arbitrary inside the pod. Use 8080 because it's the de facto HTTP alt-port convention and avoids confusion with OpenClaw's own ports (18789, 18790) |
 
 ---
 
@@ -258,13 +244,11 @@ This keeps pytest-asyncio in strict mode (tests must be explicitly marked `@pyte
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| `pip install fastmcp` (PyPI `fastmcp` package) | This is `PrefectHQ/fastmcp` — a community fork with its own release cycle and diverged APIs. It is NOT the official FastMCP. The official FastMCP lives inside the `mcp` package at `from mcp.server.fastmcp import FastMCP` | `pip install "mcp[cli]>=1.9,<2"` |
-| `mcp>=2` | v2 is pre-alpha on the `main` branch with breaking API changes as of March 2026 | `mcp>=1.9,<2` |
-| HTTP/SSE transport for the initial implementation | Requires a running server with an open port, firewall rules, and optional TLS; OpenClaw needs a URL instead of a command; adds operational complexity for no benefit when only one agent instance connects | `mcp.run()` stdio (default) |
-| Custom chat UI routes in FastAPI | OpenClaw provides the conversation interface natively — building a parallel UI creates two authoritative interfaces | OpenClaw's native WebSocket Gateway / chat channels |
-| Session or conversation state in MCP tool responses | OpenClaw has built-in memory and session management — adding state to tools creates conflicts with the agent's own tracking | Stateless tools; let OpenClaw own state |
-| Planning/compiler/family-matcher logic in the MCP server | OpenClaw reasons about YAML structure from the CRD schema context the tools provide — reimplementing this in Python duplicates the agent's core reasoning capability | `weka_appstore_get_crd_schema` + `weka_appstore_validate_yaml` give the agent what it needs; remove the v1.0 compiler and family-matcher |
-| `asyncio_mode = "auto"` in pytest-asyncio | Auto mode causes pytest-asyncio to claim all async tests globally, which conflicts with anyio's plugin that the `mcp` package pulls in | `asyncio_mode = "strict"` with explicit `@pytest.mark.asyncio` markers |
+| SSE transport (`"sse"`) | SSE transport is deprecated per the MCP spec as of March 2025 and superseded by Streamable HTTP. Some clients may still support it but it is being removed | `transport="streamable-http"` |
+| `stateless_http=True` on this server | The WEKA MCP tools are already stateless by design (no session state). Setting `stateless_http=True` disables the MCP session-id mechanism entirely, which may break clients that expect session tracking. Leave it at default (stateful session management is handled by the SDK, not by the tools) | Default `FastMCP("name")` without `stateless_http` |
+| `asyncio_mode = "auto"` in pytest config | Auto mode causes pytest-asyncio to claim all async tests globally, conflicting with anyio (pulled in by `mcp`). Already flagged in v2.0 STACK.md | `asyncio_mode = "strict"` with explicit `@pytest.mark.asyncio` |
+| Exposing the MCP HTTP port as a Kubernetes Service | The MCP server is an agent-private tool endpoint — no other workload should call it directly. Exposing it as a Service opens a security surface and is not needed when the sidecar and agent are co-located | Keep MCP on localhost within the pod; no Service, no Ingress |
+| NIM/NemoClaw as the agent runtime for this milestone | NemoClaw is alpha (announced March 16 2026) with no published Kubernetes operator or stable config schema. OpenClaw is the stable deployment target for v3.0. NemoClaw is a future milestone item | `alpine/openclaw` + `openclaw-rocks` operator |
 
 ---
 
@@ -272,30 +256,29 @@ This keeps pytest-asyncio in strict mode (tests must be explicitly marked `@pyte
 
 | Package | Compatible With | Notes |
 |---------|-----------------|-------|
-| `mcp>=1.9,<2` | Python >=3.10 | Confirm Python version is >=3.10 in the project; the rest of the existing stack (FastAPI, kubernetes-client) supports 3.10+ |
-| `mcp>=1.9,<2` | `anyio` (transitive) | `mcp` pulls in anyio automatically; no explicit anyio pin needed unless a specific version conflict appears |
-| `pytest-asyncio>=1.3.0` | `pytest>=8.0.0` | Existing repo already has `pytest>=8.0.0` — compatible |
-| `pytest-asyncio>=1.3.0` | anyio pytest plugin | Keep `asyncio_mode = strict` to prevent both plugins competing for the event loop |
-| `kubernetes>=27.0.0` | MCP server tools | The existing kubernetes client is imported by tool implementations; no version change needed |
-| `PyYAML>=6.0.1` | MCP validate tool | Existing PyYAML is reused by `weka_appstore_validate_yaml`; no version change needed |
+| `mcp[cli]>=1.26.0` | Streamable HTTP | Confirmed available in `mcp>=1.9`. `1.26.0` is the latest stable (PyPI, Jan 24 2026). No separate package needed for HTTP transport. |
+| `mcp[cli]>=1.26.0` | Python >=3.10 | Existing container uses `python:3.10-slim` — compatible |
+| OpenClaw operator (latest) | Kubernetes 1.28+ | EKS current default AMIs (1.29, 1.30, 1.31) are all compatible |
+| `alpine/openclaw:2026.3.11` | OpenClaw operator latest | Verified via dev.to guide (March 2026) |
 
 ---
 
 ## Sources
 
-- PyPI `mcp` package (official Anthropic SDK) — v1.9.4 confirmed latest stable, v2 pre-alpha: https://pypi.org/project/mcp/
-- GitHub `modelcontextprotocol/python-sdk` — v1.x is current stable release: https://github.com/modelcontextprotocol/python-sdk
-- MCP Python SDK official API docs: https://py.sdk.modelcontextprotocol.io/
-- FastMCP in-process testing guide (official MCP docs): https://gofastmcp.com/servers/testing
-- OpenClaw MCP server YAML config format (community, MEDIUM confidence): https://www.clawctl.com/blog/mcp-server-setup-guide
-- MCP tool registration decorator pattern (official MCP docs): https://modelcontextprotocol.io/docs/develop/build-server
-- NemoClaw alpha announcement — NVIDIA, March 16 2026: https://nvidianews.nvidia.com/news/nvidia-announces-nemoclaw
-- pytest-asyncio PyPI — v1.3.0 released November 2025: https://pypi.org/project/pytest-asyncio/
-- MCPcat unit testing guide (mock patterns, in-process client): https://mcpcat.io/guides/writing-unit-tests-mcp-servers/
-- Stop Vibe-Testing Your MCP Server (jlowin.dev) — pytest fixture patterns for FastMCP: https://www.jlowin.dev/blog/stop-vibe-testing-mcp-servers
+- PyPI `mcp` package — v1.26.0 confirmed latest stable (Jan 24 2026): https://pypi.org/project/mcp/
+- gofastmcp.com deployment docs — `mcp.run(transport="streamable-http", host, port)` signature: https://gofastmcp.com/deployment/running-server
+- MCPcat Streamable HTTP guide — `/mcp` endpoint path, production config: https://mcpcat.io/guides/building-streamablehttp-mcp-server/
+- OpenClaw K8s operator official install docs: https://docs.openclaw.ai/install/kubernetes
+- openclaw-rocks/k8s-operator GitHub — `spec.sidecars`, reserved container names, sidecar architecture: https://github.com/openclaw-rocks/k8s-operator
+- DeepWiki openclaw-rocks/k8s-operator sidecar docs — three sidecar categories, gateway-proxy constraint: https://deepwiki.com/openclaw-rocks/k8s-operator/5.1-sidecar-containers
+- openclaw.rocks deploy guide — `OpenClawInstance` CRD YAML with `spec.sidecars`: https://openclaw.rocks/blog/deploy-openclaw-kubernetes
+- Community `openclaw-mcp-server` reference — `streamable-http` URL format `http://HOST:PORT/mcp`: https://github.com/rodgco/openclaw-mcp-server
+- masteryodaa/openclaw-sdk DeepWiki — `HttpMcpServer` `transport: "streamable-http"`, `url` field: https://deepwiki.com/masteryodaa/openclaw-sdk/2.15-mcp-server-integration
+- dev.to OpenClaw on Kubernetes — `alpine/openclaw:2026.3.11` image, port 18789: https://dev.to/thenjdevopsguy/running-openclaw-on-kubernetes-57ki
+- MCP spec Streamable HTTP (March 26 2025) — official transport introduction: https://blog.cloudflare.com/streamable-http-mcp-servers-python/
 
 ---
 
-*Stack research for: MCP server + OpenClaw tool integration (WEKA App Store v2.0 milestone)*
-*Researched: 2026-03-20*
-*Replaces: previous STACK.md (NemoClaw planning layer, v1.0 architecture — now superseded by OpenClaw pivot)*
+*Stack research for: Streamable HTTP transport + NemoClaw/OpenClaw EKS sidecar deployment (WEKA App Store v3.0 milestone)*
+*Researched: 2026-03-23*
+*Extends: previous STACK.md (v2.0 stdio MCP server — still valid, not replaced)*

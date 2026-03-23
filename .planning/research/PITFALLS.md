@@ -1,237 +1,276 @@
 # Pitfalls Research
 
-**Domain:** MCP Tool Server Integration — adding agentic tool registration to an existing backend (WEKA App Store / OpenClaw)
-**Researched:** 2026-03-20
-**Confidence:** HIGH (verified against MCP specification, Anthropic engineering guidance, and the actual codebase)
+**Domain:** Adding Streamable HTTP MCP transport and NemoClaw/OpenClaw EKS sidecar deployment to an existing MCP server
+**Researched:** 2026-03-23
+**Confidence:** HIGH for MCP transport and Kubernetes patterns (official spec + SDK issues verified); MEDIUM for NemoClaw-specific behavior (early preview software, March 2026 release, interfaces may change)
+
+---
+
+> **Note on scope:** This document covers pitfalls specific to v3.0 additions: Streamable HTTP transport, EKS sidecar deployment, NemoClaw sandbox behavior, and OpenClaw tool registration via HTTP. Pitfalls for the existing MCP server tool contract (response shape, approval gate, YAML validation, deprecated code) are documented in the v2.0 pitfalls file and remain valid.
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: Tool Response Over-Engineering Confuses the Agent
+### Pitfall 1: Mounting Streamable HTTP on Existing FastAPI App Breaks the Session Manager
 
 **What goes wrong:**
-Tool responses that mirror the existing internal Python dataclass structure — nested `InspectionDomainFinding`, `FitFindings`, `InspectionSnapshot`, `ValidationResult` — are designed for backend-to-backend contracts, not agent consumption. When an LLM receives a deeply nested, multi-level object with internal codes, correlation IDs, normalization warnings, and domain-status enums, it spends context budget decoding structure instead of reasoning about content. The model may miss the key answer (e.g., "12 free GPUs") buried inside `domains.gpu.observed.free_devices`.
+The current `server.py` runs as a standalone stdio process. When adding Streamable HTTP transport, the natural instinct is to mount `mcp.streamable_http_app()` onto the existing FastAPI app using `app.mount("/mcp", mcp_app)`. This fails with `RuntimeError: Task group is not initialized. Make sure to use run()`. The MCP app's Starlette lifespan (which initializes the session manager) is not invoked when the app is mounted as a sub-application inside FastAPI — only the outer FastAPI lifespan runs.
+
+A secondary failure mode: mounting at `/mcp` produces 307 redirects and 404s because the MCP endpoint path is hardcoded inside the returned Starlette app, making FastAPI's mount prefix stack incorrectly.
 
 **Why it happens:**
-The natural shortcut is to serialize existing Python models directly into tool responses. `inspection/cluster.py` already returns a rich domain-structured dict. Passing that raw output through the MCP tool feels like code reuse. But the schema was designed for the old planning session contract (where the backend parsed it), not for an agent that needs to act on the number.
+The FastMCP python SDK returns a pre-configured Starlette ASGI application. Starlette/FastAPI nested lifespan composition is not automatic — each mounted sub-app's lifespan must be explicitly wrapped and invoked by the parent app's lifespan context manager. Most developers do not know this because normal FastAPI sub-apps (APIRouter, StaticFiles) do not use lifespan.
 
 **How to avoid:**
-Define a separate, flattened agent-facing response shape for each tool. For `inspect_cluster`, return a flat summary: `{ "free_gpus": 4, "gpu_model": "H100", "free_cpu_cores": 48, "free_memory_gib": 192, "namespaces": [...], "captured_at": "..." }`. Expose `flatten_cluster_status()` (which already exists in `inspection/cluster.py`) as the tool output, not `collect_cluster_inspection()`. The rich domain format can be retained internally for logging. Keep a separate `weka_appstore_inspect_cluster_detailed` tool if the agent ever needs the structured form.
+Run the MCP server as a standalone Uvicorn/ASGI process separate from the existing FastAPI backend. Both processes run in the same pod but on different ports (e.g., FastAPI on 8080, MCP on 8001). They communicate only via shared volume mounts and environment variables — not through FastAPI app mounting. This approach avoids the lifespan problem entirely and keeps the transport boundary clean.
+
+If colocation in a single process is required, use a combined lifespan: create an `asynccontextmanager` that calls both the FastAPI app lifespan and `mcp.streamable_http_app()` lifespan in sequence, pass it as the `lifespan=` argument to the outer FastAPI app, then add MCP routes manually to the outer app rather than using `app.mount()`.
 
 **Warning signs:**
-- Mock harness calls the tool and the useful answer requires 4+ key traversals to extract.
-- Tool response JSON exceeds 2000 tokens for a single snapshot.
-- The SKILL.md guidance has to tell the agent how to parse the response structure.
+- `RuntimeError: Task group is not initialized` on the first HTTP MCP request after startup.
+- 307 redirects to `/mcp/mcp` (double prefix) when accessing the MCP endpoint.
+- The MCP server works fine in stdio mode but fails immediately when `transport="streamable-http"` is added.
 
 **Phase to address:**
-Phase 1 (MCP Server Scaffold and Read-Only Tools) — define the output shape contract before writing tool implementations.
+Streamable HTTP transport implementation phase — design the process boundary (separate process vs. single process) before writing any transport code.
 
 ---
 
-### Pitfall 2: Approval Gate Lives Only in Trust, Not in Code
+### Pitfall 2: NemoClaw's Deny-All Egress Policy Blocks the Sidecar MCP Server
 
 **What goes wrong:**
-The `weka_appstore_apply` tool accepts YAML and creates a `WekaAppStore` CR. If the approval gate is implemented as "the agent should ask the user first" (a prompt instruction in SKILL.md) rather than as a hard check inside the tool itself, there is nothing preventing:
-- A misconfigured OpenClaw skill that skips the confirmation step
-- A future agent version or model that reasons around the instruction
-- A direct MCP call during testing that bypasses all agent-level logic
+NemoClaw's default sandbox policy (`openclaw-sandbox.yaml`) blocks all outbound network egress except a hardcoded allowlist: Anthropic APIs, NVIDIA inference endpoints, GitHub, npm registry, Telegram, and OpenClaw services. When OpenClaw (inside the NemoClaw sandbox) tries to register and call the sidecar MCP server at `http://localhost:8001/mcp`, the OpenShell runtime blocks the connection and logs the attempt. The agent either fails to initialize tools at all or receives connection errors on every tool call.
 
-The PRD explicitly identifies this risk: "The agent could attempt to apply without approval if poorly configured."
+This is not a configuration bug — it is the policy working correctly. The mistake is deploying without explicitly whitelisting `localhost:8001` (or the equivalent loopback address) in the egress policy before the agent starts.
 
 **Why it happens:**
-Trusting OpenClaw's built-in approval system is the right architectural intent, but delegating all gating to the agent layer creates a single point of failure. Developers building the tool layer assume the agent layer is always present and always correct.
+NemoClaw's documentation focuses on remote endpoint allowlisting. Developers assume loopback traffic is inherently permitted (it is in standard Linux networking), but OpenShell's network policy enforcement operates at the application layer and applies to all outbound connections including localhost. The sidecar MCP server is an "unknown" endpoint until explicitly added.
 
 **How to avoid:**
-The `apply` tool must enforce a gate that is independent of agent behavior. Options:
-1. Require a `confirmed: true` parameter that the tool checks before proceeding — the agent must explicitly set it, and SKILL.md instructs the agent never to set it without user confirmation.
-2. Require an `approval_token` that OpenClaw generates after its own approval flow, and the tool validates it.
-3. Implement a two-phase apply: `weka_appstore_prepare_apply` (returns a preview and a short-lived token), `weka_appstore_confirm_apply` (consumes the token).
+Before deploying, add the sidecar MCP server's loopback address to the NemoClaw network policy. Edit `nemoclaw-blueprint/policies/openclaw-sandbox.yaml` to include `127.0.0.1:8001` (or the configured port) in the egress allowlist. Run `nemoclaw onboard` after the policy change. Verify the policy is applied before starting the agent by inspecting the TUI's policy view.
 
-Option 1 is the minimum. The key is that the tool itself rejects a call without the approval signal — it does not trust that no call will arrive without one.
+If NemoClaw is deployed to EKS using the `agent-sandbox` CRD pattern (rather than its default k3s-in-Docker mode), verify that the CRD's network policy fields support the same loopback allowlisting — this is an open research item since NemoClaw's EKS support is community-driven and not officially documented.
 
 **Warning signs:**
-- The mock harness can call `apply` in a single step with no confirmation parameter.
-- SKILL.md says "ask the user" but the tool code has no guard.
-- A test that calls the apply tool directly (bypassing all agent logic) succeeds and creates a CR.
+- OpenShell TUI shows a blocked connection attempt to `127.0.0.1` when the agent starts up.
+- Tool calls time out immediately rather than returning errors (connection refused vs. timeout distinguish different failure modes).
+- NemoClaw TUI prompts the operator to approve or deny a connection to `localhost` — this is the policy working as designed.
 
 **Phase to address:**
-Phase 2 (Validation and Apply Tools) — approval gate enforced in tool implementation, not deferred to SKILL.md.
+NemoClaw deployment configuration phase — policy file must be prepared and verified before the agent pod is started.
 
 ---
 
-### Pitfall 3: Mock Harness Tests the Tool API, Not the Agent-Tool Interaction
+### Pitfall 3: NemoClaw Requires k3s-in-Docker, Not Native EKS Pod Scheduling
 
 **What goes wrong:**
-The mock harness proves each tool returns valid JSON when called with known inputs. But when a real OpenClaw agent calls the tools:
-- Tool descriptions are ambiguous and the agent picks the wrong tool for the job
-- The agent constructs parameter values the tool doesn't expect (e.g., passes a `blueprint_name` where a `blueprint_id` is required)
-- The agent misinterprets a response flag (`"status": "partial"`) and draws a wrong conclusion
-- The agent calls tools in an unintended sequence (e.g., calls `apply` before `validate`)
-- The agent loops on a tool call when it should stop
+NemoClaw's primary installation model is Docker + k3s embedded in Docker, running on an Ubuntu VM. It installs OpenShell, creates an isolated k3s cluster inside Docker, and manages the agent within that nested cluster. This model does not map onto a standard EKS pod. Running `nemoclaw install` on an EKS node does not produce a working deployment — it attempts to create a Docker-based k3s cluster inside a container, which requires privileged mode, nested container runtimes, and Docker-in-Docker that EKS worker nodes typically do not permit.
 
-A mock harness that calls `tool_function(known_args)` and asserts `response == expected` does not catch any of these issues because the agent is not part of the loop.
+The community workaround is to use the `agent-sandbox` CRD from `kubernetes-sigs/agent-sandbox` as the sandbox runtime instead of OpenShell's embedded k3s. This requires deploying the `agent-sandbox` controller to the EKS cluster and configuring NemoClaw to use it as the runtime backend. As of March 2026 this is community-driven (GitHub Issue #407 in NVIDIA/NemoClaw) and not officially supported.
 
 **Why it happens:**
-Development without a live OpenClaw instance is the explicit project constraint. The temptation is to test what is measurable: tool inputs and outputs. The agent-facing contract (descriptions, parameter naming, response semantics) goes untested because there is no agent to test it with.
+NemoClaw is presented as "run OpenClaw more securely in Kubernetes" but the Kubernetes in question is the embedded k3s cluster it creates inside Docker, not the user's existing cluster. The marketing implies standard Kubernetes compatibility that does not currently exist for managed services like EKS.
 
 **How to avoid:**
-Build two levels of mock testing:
-1. **Unit tests**: call each tool directly, assert response shape — this is necessary but not sufficient.
-2. **Simulated tool-use loop**: write a harness that sequences tool calls as a real agent would, driven by a scripted decision tree. The harness should: call `inspect_cluster`, then `list_blueprints`, then `get_blueprint`, then `validate_yaml` on a generated example, then attempt `apply` — and verify the full chain behaves correctly including the approval gate.
+Do not attempt to run `nemoclaw install` directly on EKS worker nodes. Two viable approaches:
 
-Separately, write explicit tests for the descriptions and parameter names: read the tool description and check it would unambiguously route an agent to the right tool for each scenario. This is a human review step, not automated.
+1. **Separate VM approach:** Deploy NemoClaw on a dedicated EC2 instance alongside the EKS cluster. The VM runs NemoClaw's k3s-in-Docker stack. The sidecar MCP server runs in EKS as a standard pod. NemoClaw calls the MCP server over the cluster's internal DNS or a Service endpoint rather than localhost. This gives up the low-latency sidecar benefit but avoids the EKS compatibility gap.
+
+2. **agent-sandbox CRD approach (experimental):** Deploy the `agent-sandbox` controller to EKS, configure NemoClaw to use it as the runtime backend. This is documented in GitHub Issue #407 but is not officially supported. Treat it as experimental for this milestone.
 
 **Warning signs:**
-- All harness tests call tools with hardcoded kwargs, never constructing calls from natural language intent.
-- The harness never exercises an error path (e.g., `validate_yaml` returning errors → agent retries).
-- No test checks that the approval confirmation cannot be bypassed.
+- `nemoclaw install` requires Docker daemon access from within the pod (likely a privileged container request).
+- Pod fails to start with `permission denied` on `/var/run/docker.sock` or similar.
+- The node reports nested container creation failures in `kubelet` logs.
 
 **Phase to address:**
-Phase 1 (tool structure), Phase 2 (harness exercises apply and approval), Phase 3 (end-to-end chain test).
+Infrastructure and deployment planning phase — select the deployment topology before any Kubernetes manifests are written.
 
 ---
 
-### Pitfall 4: Validator Ported from v1.0 Validates the Wrong Contract
+### Pitfall 4: OpenClaw HTTP MCP Registration Expects a Stable URL, Not a Pod IP
 
 **What goes wrong:**
-`planning/validator.py` validates a `StructuredPlan` — the v1.0 backend-brain contract that includes `blueprint_family`, `fit_findings`, `unresolved_questions`, `reasoning_summary`, and deeply nested domain findings. In v2.0, the `weka_appstore_validate_yaml` tool validates **YAML that the agent generates for the WekaAppStore CRD**, not a planning session contract.
-
-If `validator.py` is reused without modification, the `validate_yaml` tool will:
-- Reject valid `WekaAppStore` YAML because it doesn't match `StructuredPlan` fields
-- Accept invalid YAML because the CRD contract is different from the planning session contract
-- Return errors referencing internal fields (`blueprint_family`, `fit_findings`) that the agent has no context for
+In `openclaw.json`, an MCP server registered via HTTP uses a URL field: `"url": "http://<address>/mcp"`. If that address is a Pod IP, it changes every time the pod restarts. After a pod restart, OpenClaw's registration still points to the old IP. The agent starts, fails to connect to the MCP server, and reports tool unavailability — or worse, connects to a different workload that happens to reuse the old IP.
 
 **Why it happens:**
-The instruction to "reuse existing `planning/validator.py`" is correct in spirit (the CRD-level checks like component naming, dependency references, and Helm fields are still needed), but the top-level schema validation is v1.0-specific. The reuse boundary is at the component-level helper functions, not the top-level `validate_structured_plan()` entrypoint.
+Local testing uses `http://localhost:8001/mcp` which is stable. When moving to EKS, developers copy the pod IP from `kubectl get pods -o wide` and hardcode it in the config. Pod IPs are ephemeral — they are not stable across restarts, node migrations, or rolling updates.
 
 **How to avoid:**
-Write a new `validate_wekaappstore_yaml()` function that validates against the actual `WekaAppStore` CRD shape (`apiVersion`, `kind`, `metadata.name`, `spec.appStack.components[]`). Extract and reuse the component-level helpers from `validator.py` (`_validate_component_contracts`, `_parse_helm_chart`, `_parse_readiness_check`) since those rules apply to both contracts. Do not pass YAML from the agent through `validate_structured_plan()`.
+Register the MCP server using a Kubernetes Service ClusterIP DNS name: `http://weka-mcp-server.<namespace>.svc.cluster.local:8001/mcp`. Services have stable DNS names and ClusterIPs regardless of which pod backs them. Create a headless Service pointing to the MCP server pod before configuring OpenClaw. If NemoClaw runs on a separate VM (approach 1 from Pitfall 3), use a LoadBalancer or NodePort Service to expose the MCP server and register the stable endpoint.
+
+For the sidecar pattern specifically (NemoClaw and MCP server in the same pod), `localhost` is the correct address since both containers share the same network namespace. This is stable across pod IP changes.
 
 **Warning signs:**
-- The `validate_yaml` tool returns errors about `blueprint_family`, `reasoning_summary`, or `fit_findings` — fields that have no meaning in a `WekaAppStore` CR.
-- Agent-generated YAML that creates a valid CR passes validation, but valid-looking YAML is rejected with "unsupported field" errors.
-- The validator imports `SUPPORTED_BLUEPRINT_FAMILIES` from `models.py` and uses it to block the agent's output.
+- `openclaw.json` contains a dotted-decimal IP address.
+- After deploying a new pod version, agents report tools unavailable without any code change.
+- `openclaw.json` is generated at deployment time from `kubectl get pod` output rather than from a Service DNS name.
 
 **Phase to address:**
-Phase 2 (Validation and Apply Tools) — clarify the validation contract boundary before implementation.
+OpenClaw registration and deployment configuration phase — finalize the MCP server address scheme before writing `openclaw.json` or `generate_openclaw_config.py` output.
 
 ---
 
-### Pitfall 5: Deprecated Code Lives Alongside New Tool Code, Creating Two Authority Sources
+### Pitfall 5: Streamable HTTP Session ID Is Not Forwarded by All MCP Clients
 
 **What goes wrong:**
-`planning/session_service.py`, `planning/family_matcher.py`, and `planning/compiler.py` are scheduled for deletion. If deletion is deferred ("we'll clean it up later"), two things happen:
-- Developers maintaining the codebase write new logic against the old service layer instead of the new MCP tools, because the old code is still there and wired up
-- The FastAPI routes that use the session service continue to work, creating a parallel deploy path that doesn't go through the OpenClaw gate and approval system
-- Integration bugs are masked because both paths "work" in isolation
+When the MCP server issues an `Mcp-Session-Id` header in its `InitializeResult` response, the protocol requires clients to include that header in all subsequent requests. Several MCP clients (including some versions of OpenClaw's internal MCP client) use `fetch()` internally and do not persist or forward the `Mcp-Session-Id` header across requests. The server then treats each subsequent request as a new session, re-initializes state, and either returns 400 Bad Request or creates a new session on every tool call.
 
-This is the classic brownfield migration failure mode: the new system is built, but the old system is never fully turned off, and the two drift apart.
+The FastMCP Python SDK has a documented issue (Issue #808) where the server does not recognize the `X-Session-ID` header even when the client sends it correctly. Both the server and client sides have active known issues as of early 2026.
 
 **Why it happens:**
-Removing working code feels risky. The old session service has test coverage; removing it means those tests disappear. The planning session HTML is still in `templates/` and still renders. Nobody explicitly breaks anything, so nobody removes anything.
+Streamable HTTP transport is relatively new (TypeScript SDK 1.10.0, April 2025; Python SDK support followed later). Session management was an afterthought in many client implementations that assumed stateless operation. When both server and client implementations are immature simultaneously, session header forwarding is the first thing to break.
 
 **How to avoid:**
-Phase the deprecation explicitly in the roadmap:
-1. In Phase 1: mark deprecated modules with a top-level `# DEPRECATED: see MCP tool implementation` comment.
-2. In Phase 2: disable the FastAPI planning session routes (return 410 Gone) and remove the session HTML template. The code can remain but must not be callable.
-3. In Phase 3 (or when the mock harness proves the MCP path works end-to-end): delete `session_service.py`, `session_store.py`, `family_matcher.py`, `compiler.py`, and their tests.
+Design the MCP server to operate in stateless mode for this milestone. Do not rely on `Mcp-Session-Id` for any required functionality. The MCP spec allows servers to omit the session ID entirely, in which case clients do not need to forward anything. For a sidecar deployment with a single OpenClaw client, stateless mode is sufficient — there is no horizontal scaling concern and no need for session affinity.
 
-Treat deletion as a milestone deliverable, not cleanup.
+If stateful sessions are needed in future, test session header forwarding explicitly with the version of OpenClaw/NemoClaw deployed before enabling it.
 
 **Warning signs:**
-- A developer adds a feature to `session_service.py` during v2.0 work.
-- The planning session routes still return 200 responses after Phase 2.
-- The old planning session HTML is still linked from the main UI.
+- Each tool call triggers a new `initialize` handshake in the server logs (stateless symptom).
+- Server logs show 400 responses to requests after the first `initialize`.
+- OpenClaw reports tools available after `initialize` but unavailable during the planning session.
 
 **Phase to address:**
-Phase 1 (mark deprecated), Phase 2 (disable routes), Phase 3 (delete).
+Streamable HTTP transport implementation phase — make stateless vs. stateful decision explicit in the server implementation before writing session management code.
 
 ---
 
-### Pitfall 6: Agent YAML Generation Hallucinates Fields the CRD Does Not Support
+### Pitfall 6: MCP Server Container Starts After OpenClaw Tries to Register Tools
 
 **What goes wrong:**
-When the agent is given the `WekaAppStore` CRD schema as context and asked to generate YAML, it will sometimes produce fields that look plausible but do not exist in the schema:
-- Inventing a `resources:` block at the component level
-- Using `image:` or `tag:` as top-level component fields instead of inside `values:`
-- Generating `apiVersion: warp.io/v1` instead of `warp.io/v1alpha1`
-- Producing valid Helm values syntax that the operator does not process (e.g., `helmChart.valueFiles` instead of `helmChart.values_files`)
+In the sidecar pod, OpenClaw starts and immediately attempts to register tools from `openclaw.json`. If the MCP server container has not yet completed startup (Python imports, Kubernetes client initialization, tool registration), the registration request arrives at a port that is not yet listening. OpenClaw logs a connection error and marks the tools as unavailable. Depending on the client, it may not retry registration after startup.
 
-The agent doesn't hallucinate randomly — it generalizes from Kubernetes YAML patterns it has seen in training data, which is broader than the specific `WekaAppStore` contract.
+Kubernetes starts both containers concurrently unless startup ordering is explicitly configured. There is no built-in guarantee that the MCP server sidecar is ready before the main OpenClaw container starts tool registration.
 
 **Why it happens:**
-The CRD schema context provided via `weka_appstore_get_crd_schema` is not enough to suppress generalization. The agent knows more Kubernetes patterns than the CRD allows, and when uncertain, fills gaps with plausible-but-wrong fields.
+Kubernetes init containers run before the main containers, but sidecar-pattern containers (defined as init containers with `restartPolicy: Always` in Kubernetes 1.29+) start before the main container only if defined that way. Most sidecar configurations use regular containers in `spec.containers`, which start concurrently. Developers test locally where startup times are short and the race does not manifest.
 
 **How to avoid:**
-- `validate_yaml` must catch and return actionable errors for every hallucinated field — not just "unknown field" but "field `X` is not valid; use `Y` instead where applicable."
-- The SKILL.md must include explicit negative examples: "Do NOT add `resources:` to components. Do NOT add `image:` at the component level."
-- Provide 2-3 complete valid YAML examples in the CRD schema context, not just the schema spec.
-- The validate-then-retry loop must be explicitly scripted in SKILL.md: "If validate_yaml returns errors, fix them and validate again before applying."
+Define the MCP server as a native sidecar (init container with `restartPolicy: Always` in Kubernetes 1.29+ / EKS 1.29+). This guarantees the MCP server starts and passes its `startupProbe` before the main OpenClaw container starts. Add a startup probe to the MCP server container:
+
+```yaml
+startupProbe:
+  httpGet:
+    path: /health
+    port: 8001
+  failureThreshold: 30
+  periodSeconds: 2
+```
+
+Add a `/health` endpoint to the MCP server that returns 200 only after all tools are registered and the server is accepting connections.
 
 **Warning signs:**
-- `validate_yaml` receives YAML with Kubernetes-standard fields that are not in the `WekaAppStore` spec.
-- The agent succeeds on the first validation attempt consistently in mock testing but fails on the first real agent attempt.
-- SKILL.md does not include a validate-retry instruction.
+- OpenClaw logs show tool registration errors only on pod cold starts, not during operation.
+- The problem disappears if the pod is given extra time before first use (masking the race).
+- No `startupProbe` is defined on the MCP server container.
 
 **Phase to address:**
-Phase 2 (validate_yaml returns actionable errors), Phase 3 (SKILL.md includes examples and retry loop).
+Kubernetes manifests and deployment phase — container startup ordering must be specified in the pod spec, not left to chance.
 
 ---
 
-### Pitfall 7: Inspection Tools Return Stale Data, Agent Applies Without Re-Checking
+### Pitfall 7: Kubernetes RBAC Gives the Sidecar Pod the Operator's Permissions
 
 **What goes wrong:**
-The agent calls `inspect_cluster` at the start of a conversation and uses those values throughout the planning session. By the time it calls `apply`, the cluster state may have changed: a GPU was allocated by another workload, a namespace was deleted, a StorageClass was removed. The apply succeeds at the MCP tool level (creates the CR), but the operator reconcile fails because the resources assumed to be available are no longer there.
+If the NemoClaw/MCP sidecar pod uses the same service account as the WEKA operator, it inherits full cluster-write permissions including the ability to create, update, and delete `WekaAppStore` CRDs, modify RBAC bindings, and access Secrets. The MCP server's apply tool needs only `create` on `wekaappstores` resources. The inspection tools need only `get`/`list` on nodes, namespaces, storage classes, and pods. Running with operator-level permissions violates least-privilege and creates a blast radius if the MCP server is compromised through prompt injection or a dependency vulnerability.
 
 **Why it happens:**
-`inspect_cluster` returns a snapshot with a `captured_at` timestamp, but nothing in the protocol forces the agent to re-inspect before applying. The SKILL.md may instruct the agent to do this, but agents follow SKILL.md loosely when the instructions are long.
+The existing WEKA App Store already has an operator service account with broad permissions. It is expedient to reuse it rather than creating a new account. The default EKS pod identity (node instance role) may also grant broad IAM permissions that are not needed by the MCP server.
 
 **How to avoid:**
-- The `weka_appstore_apply` tool should optionally re-inspect critical resources before creating the CR and include an `inspection_age_warning` in its response if the most recent snapshot is older than a threshold (e.g., 5 minutes).
-- SKILL.md should state: "Call `inspect_cluster` and `inspect_weka` immediately before calling `apply`, not only at the start of the conversation."
-- Tool responses must include `captured_at` prominently at the top level so the agent can reason about staleness.
-- This is partly addressed by the existing `InspectionFreshness` design in the codebase — ensure it surfaces to the agent, not just to internal validators.
+Create a dedicated service account `weka-mcp-server-sa` with a ClusterRole that grants:
+- `get`, `list` on `nodes`, `namespaces`, `storageclasses`, `pods`
+- `get`, `list` on `persistentvolumes`, `persistentvolumeclaims`
+- `create` on `wekaappstores` (in the operator's namespace)
+- `get`, `list` on `wekaappstores` (for status tool)
+
+Block access to `secrets`, `configmaps`, `serviceaccounts`, RBAC resources, and all non-inspection resources. Annotate the service account with IRSA to scope AWS permissions to nothing (or read-only CloudWatch if logging is required).
 
 **Warning signs:**
-- The mock harness calls `inspect_cluster` once and then calls `apply` directly without re-inspection.
-- `captured_at` is nested inside `domains.cpu.freshness` rather than at the response root.
-- SKILL.md does not mention staleness or re-inspection.
+- The pod spec references `serviceAccountName: weka-operator-sa`.
+- No custom ClusterRole or Role exists for the MCP server.
+- `kubectl auth can-i delete wekaappstores --as=system:serviceaccount:<ns>:weka-mcp-server-sa` returns "yes".
 
 **Phase to address:**
-Phase 2 (apply tool includes staleness check), Phase 3 (SKILL.md includes re-inspection instruction).
+Kubernetes manifests phase — service account and RBAC must be defined before deployment, not added as a follow-up hardening task.
 
 ---
 
-### Pitfall 8: Tool Descriptions Are Written for Humans, Not Agents
+### Pitfall 8: The MCP Server's Origin Validation Blocks Intra-Pod Requests
 
 **What goes wrong:**
-Tool descriptions that work well for human API docs cause agent confusion:
-- Descriptions that explain what the tool does rather than when to use it ("Returns GPU, CPU, RAM, namespace, and storage class data" vs "Call this first when assessing whether the cluster can support a blueprint deployment")
-- Parameter names that are ambiguous or internally-named (`blueprint_id` vs `blueprint_name`)
-- Missing guidance on what to do with the response
-- No indication of which tools depend on which other tools
-
-The agent must infer call sequencing and interpretation from descriptions alone during live operation. Poorly written descriptions mean the agent picks the wrong tool, passes wrong parameters, or calls tools in the wrong order.
+The MCP specification (section: Streamable HTTP, Security Warning) requires servers to validate the `Origin` header on all incoming connections to prevent DNS rebinding attacks. When OpenClaw calls the MCP server from within the same pod via `http://localhost:8001/mcp`, the request may have no `Origin` header, or the header may be set to `null` (a common browser security behavior for same-origin requests). If the FastMCP server's Origin validation rejects requests with missing or `null` Origin headers, every intra-pod tool call fails with 403 Forbidden.
 
 **Why it happens:**
-Tool descriptions are written by developers who understand the codebase. They document what the tool does, not how an agent should reason about using it. The distinction becomes visible only when a real agent misuses the tool.
+Origin validation is designed for browser-facing servers. MCP client implementations that do not originate from a browser (like OpenClaw's programmatic fetch client) may not send an Origin header at all. The server-side default validation behavior may be overly strict for a pod-internal transport scenario.
 
 **How to avoid:**
-Follow Anthropic's engineering guidance on tool descriptions:
-- Start with the decision context: "Call this tool to determine if the cluster has sufficient GPU, CPU, and RAM to run a blueprint before generating a deployment plan."
-- Include sequencing: "Call `inspect_cluster` and `inspect_weka` before `list_blueprints` or `validate_yaml`."
-- Include response guidance: "Use `free_gpus` and `gpu_model` to assess GPU fit. Use `free_memory_gib` for RAM requirements."
-- Keep descriptions under 200 tokens. Remove tutorial-style prose.
-- Name parameters for what the agent will have, not internal identifiers (`blueprint_name`, not `blueprint_id`).
+Explicitly configure the FastMCP server's allowed origins to include the intra-pod case. For a sidecar deployment, the simplest safe configuration is: allow requests with no Origin header (loopback-only binding already prevents external access) while still binding the server to `127.0.0.1` rather than `0.0.0.0`. Do not disable Origin validation for publicly accessible endpoints. Verify the FastMCP server is bound to `127.0.0.1` in the pod network namespace so external network actors cannot reach it regardless of Origin policy.
 
 **Warning signs:**
-- Description of any tool exceeds 300 tokens.
-- The description explains implementation details ("queries the Kubernetes API using CoreV1Api").
-- SKILL.md has to re-explain what each tool does because the tool description is inadequate.
+- `403 Forbidden` responses to tool calls in the server log with an Origin-related message.
+- Tool calls succeed from a curl test that includes `-H "Origin: http://localhost"` but fail from the OpenClaw client.
+- The server is bound to `0.0.0.0` in the Kubernetes pod (exposes to cluster network) instead of `127.0.0.1`.
 
 **Phase to address:**
-Phase 1 (write initial descriptions), Phase 3 (review and tune after end-to-end harness testing).
+Streamable HTTP transport implementation phase — Origin policy and binding address must be set explicitly when configuring the HTTP transport.
+
+---
+
+### Pitfall 9: openclaw.json Generated at Build Time Does Not Survive Pod Restarts
+
+**What goes wrong:**
+`generate_openclaw_config.py` produces `openclaw.json` with the MCP server URL embedded. If this file is baked into the container image or generated once at build time, it becomes stale when:
+- The MCP server port changes.
+- The deployment namespace changes.
+- The transport changes from stdio to HTTP (requiring `"url"` instead of `"command"`/`"args"` fields).
+
+The agent starts with an outdated registration and cannot reach the tools. Because `openclaw.json` is inside the image, fixing it requires a new image build and redeploy.
+
+**Why it happens:**
+During v2.0 development, the generate script targets local stdio registration where the command is a fixed path (`python server.py`). HTTP registration requires a URL, which is environment-specific. The build-time generation pattern works for static local registrations but breaks for environment-specific deployments.
+
+**How to avoid:**
+Generate `openclaw.json` at pod startup using an init container or a startup script that injects the correct URL from environment variables. Store the generated file in an `emptyDir` volume shared between containers. The generation command becomes:
+
+```bash
+MCP_SERVER_URL=http://localhost:8001/mcp python generate_openclaw_config.py > /shared/openclaw.json
+```
+
+The `generate_openclaw_config.py` script must be updated to support HTTP transport output (producing `"url": "$MCP_SERVER_URL"`) in addition to the existing stdio output.
+
+**Warning signs:**
+- `openclaw.json` contains a hardcoded localhost URL baked into the container image.
+- The file is not in a ConfigMap, mounted volume, or generated at startup.
+- Changing the MCP server port requires a new image build.
+
+**Phase to address:**
+OpenClaw registration and deployment configuration phase — config generation must be runtime, not build-time, for EKS deployment.
+
+---
+
+### Pitfall 10: The SSE Transport Is Being Deprecated — Do Not Implement It
+
+**What goes wrong:**
+Developers researching MCP HTTP transport find documentation and examples for the older `HTTP+SSE` transport (protocol version 2024-11-05). Implementing SSE transport instead of Streamable HTTP results in a server that requires two endpoints (`/sse` for the SSE stream, `/messages` for POST), maintains persistent connections, limits horizontal scaling, and will lose client support as the deprecation completes (effective April 1, 2026, per the SSE Transport Deprecation announcement).
+
+**Why it happens:**
+The SSE transport has significantly more community examples, blog posts, and StackOverflow answers than the newer Streamable HTTP transport. Searching for "MCP HTTP Python" returns SSE-first results. The older FastMCP tutorials use `transport="sse"`. It is easy to implement the wrong transport.
+
+**How to avoid:**
+Use `transport="streamable-http"` explicitly in the FastMCP server. Do not implement the SSE endpoints. Verify the MCP spec version in use is 2025-03-26 or later. Add a comment to the server startup code identifying the transport version.
+
+If backward compatibility with older OpenClaw versions is needed, implement the Streamable HTTP transport only and check the OpenClaw version being deployed against the MCP protocol version it supports. If OpenClaw only supports SSE, that is an argument to upgrade OpenClaw, not to implement a deprecated transport.
+
+**Warning signs:**
+- `server.py` imports or references `SseServerTransport`.
+- The server exposes a `/sse` endpoint.
+- Online tutorials used as references are dated before April 2025.
+
+**Phase to address:**
+Streamable HTTP transport implementation phase — confirm the transport name explicitly in code review before merging.
 
 ---
 
@@ -239,12 +278,12 @@ Phase 1 (write initial descriptions), Phase 3 (review and tune after end-to-end 
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| Pass `collect_cluster_inspection()` output directly as tool response | No extra serialization code | Agent receives nested domain structure it must traverse; context bloat; descriptions need to explain the format | Never — `flatten_cluster_status()` already exists |
-| Validate agent YAML through `validate_structured_plan()` | Reuses existing tested validator | Wrong contract — rejects valid CRDs, accepts wrong format | Never — write `validate_wekaappstore_yaml()` |
-| Implement approval gate only in SKILL.md | No code change to apply tool | Single point of failure; bypassed by direct calls or misconfigured agent | Never for production; acceptable only in initial Phase 1 stub |
-| Keep deprecated session service code while building MCP tools | No immediate breakage | Two authority sources; developers add features to old path; parallel deploy path | Phase 1 only with explicit deprecation markers; must be removed by Phase 3 |
-| Hardcode blueprint family list in the validator | Simple to check | Validator breaks every time a new blueprint is added; not data-driven | Never — load from catalog dynamically |
-| Return all inspection domains even when not needed | Complete data | Bloats every response with irrelevant domains; wasted context tokens | Never for standard calls; add `domains` parameter to filter |
+| Mount MCP app on existing FastAPI with `app.mount()` | One process, one port | Lifespan initialization failure; 307 redirect loops; hard to debug | Never — run as separate process or use combined lifespan |
+| Hardcode MCP URL in `openclaw.json` image | Simple build | Breaks on port/namespace change; requires image rebuild for config change | Never for EKS deployment |
+| Use same service account as operator | No new RBAC work | Blast radius if MCP server is compromised; violates least-privilege | Never — RBAC is a one-time setup |
+| Implement SSE transport for faster start | More examples available | Deprecated April 2026; OpenClaw may drop support | Never — Streamable HTTP is a 2025 standard |
+| Skip startup probe on MCP sidecar | Simpler manifests | Race condition on pod cold start; intermittent tool registration failures | Never for production; acceptable for one-off local testing only |
+| Bind MCP server to `0.0.0.0` in pod | Accessible for debugging | Exposes MCP to entire cluster network; Origin bypass possible | Never in production; acceptable only behind a NetworkPolicy that blocks all external access |
 
 ---
 
@@ -252,12 +291,13 @@ Phase 1 (write initial descriptions), Phase 3 (review and tune after end-to-end 
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| OpenClaw MCP registration | Registering the MCP server before testing tool call/response semantics with mock agent | Test tool chain end-to-end with scripted mock harness first; only register with OpenClaw after mock tests pass |
-| `inspection/cluster.py` reuse | Calling `collect_cluster_inspection()` in the tool handler, serializing its full output | Call `flatten_cluster_status(collect_cluster_inspection(...))` to get the agent-facing flat dict |
-| `planning/validator.py` reuse | Passing agent-generated YAML through `validate_structured_plan()` | Extract component-level helpers; write new top-level `validate_wekaappstore_yaml()` for the CRD contract |
-| `planning/apply_gateway.py` reuse | Calling `apply_yaml_content_with_namespace()` directly from the tool | Wrap in a gated function that checks the `confirmed` parameter before delegating |
-| Kubernetes RBAC for the MCP server | Running the MCP server with the same service account as the operator (full cluster write access) | Create a separate service account for the MCP server with read-only access plus write permission scoped to `wekaappstores` resources only |
-| WEKA API connection | Using the same WEKA API credentials used by the operator | Use a read-only WEKA API token for inspection tools; apply tool does not need WEKA write access |
+| FastMCP + FastAPI mount | `app.mount("/mcp", mcp.streamable_http_app())` — lifespan not invoked | Run as separate process on separate port; or compose lifespans manually |
+| NemoClaw sandbox + sidecar | Assume loopback traffic is always permitted | Add `127.0.0.1:<port>` to `openclaw-sandbox.yaml` egress allowlist before deploying |
+| openclaw.json HTTP registration | Use `"command"/"args"` stdio fields for HTTP server | Use `"url"` field pointing to `http://localhost:<port>/mcp`; generate at pod startup |
+| EKS pod identity for MCP server | Reuse operator service account | Create `weka-mcp-server-sa` with read-only + scoped apply ClusterRole |
+| Sidecar startup ordering | Both containers start concurrently, OpenClaw loses the race | Define MCP server as native sidecar init container with `startupProbe` |
+| MCP session management | Implement stateful sessions assuming client will forward `Mcp-Session-Id` | Default to stateless mode; do not require session ID for single-client sidecar pattern |
+| NemoClaw on EKS | Run `nemoclaw install` on EKS worker node | Use separate EC2 VM with Docker, or community `agent-sandbox` CRD (experimental) |
 
 ---
 
@@ -265,10 +305,9 @@ Phase 1 (write initial descriptions), Phase 3 (review and tune after end-to-end 
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| Full cluster inspection on every tool call | Every `list_blueprints` call also queries the K8s API for no reason | Inspection is only triggered by `inspect_cluster` and `inspect_weka` — other tools are static | First tool call in a chain |
-| Passing full CRD spec as static context in every tool response | Every tool response includes the 10KB CRD spec | Only `get_crd_schema` returns the CRD spec; other tools do not include it | At scale when multiple tools are registered |
-| Tool response without pagination or filtering | `list_blueprints` returns every field for every blueprint including full Helm values schemas | Return name, description, category, and resource requirements only; use `get_blueprint` for full detail | When blueprint catalog grows beyond ~10 entries |
-| All 8 tools preloaded into agent context simultaneously | Agent context budget consumed by tool schemas before any conversation | Keep tool descriptions concise; group read-only tools under a shared `instructions` prefix; total tool schema budget should be under 5000 tokens | When OpenClaw loads tools at session start |
+| Stateful MCP sessions with Kubernetes HPA | Session affinity required; sticky sessions break with pod scale-out | Use stateless mode for sidecar deployment; sticky sessions only if scaling is needed | When pod count > 1 |
+| Python MCP server cold start delay | First tool call after pod restart takes 5-10 seconds while Python imports initialize | Add `startupProbe` with sufficient `failureThreshold`; pre-warm via health endpoint | Every pod restart in EKS (rolling updates, node replacements) |
+| Large `openclaw.json` with many MCP servers | OpenClaw loads all tool schemas at session start; context budget consumed | Keep tool descriptions concise (under 200 tokens each); 8 tools already defined — do not add more without removing others | With 8+ verbose tools registered simultaneously |
 
 ---
 
@@ -276,23 +315,23 @@ Phase 1 (write initial descriptions), Phase 3 (review and tune after end-to-end 
 
 | Mistake | Risk | Prevention |
 |---------|------|------------|
-| MCP server runs with operator service account | A compromised MCP server or agent prompt injection can delete CRDs, nodes, or operator state | Separate service account with least-privilege RBAC: read-only for inspect tools, write scoped to `wekaappstores` for apply |
-| `apply` tool accepts arbitrary YAML strings without validation | Prompt injection could construct YAML that creates non-`WekaAppStore` resources | Always run `validate_wekaappstore_yaml()` inside the apply tool before passing to `apply_gateway.py`, regardless of whether the caller already called `validate_yaml` |
-| No audit log for tool calls | Cannot trace which agent call created which CR or whether the approval gate was exercised | Log every tool call with: tool name, parameters hash, timestamp, caller identity (OpenClaw session ID if available), and result status |
-| Tool descriptions expose internal implementation details | Description-based prompt injection can trick agent into extracting internal state | Descriptions should state behavior and usage, not implementation (no mentions of `CoreV1Api`, `warp.io` API group internals, or file paths) |
+| MCP server bound to `0.0.0.0` in pod | Any pod in the cluster can call the apply tool directly, bypassing OpenClaw's approval flow | Bind to `127.0.0.1`; for sidecar pattern this is the only address needed |
+| NemoClaw sandbox egress unrestricted (policy disabled for convenience) | Agent can exfiltrate cluster data or call external endpoints | Maintain deny-by-default policy; add only `127.0.0.1:<mcp-port>` plus required inference endpoints |
+| Production WEKA API credentials shared with NemoClaw sandbox | Credentials exposed to agent context; sandbox policy drift could allow exfiltration | Pass only a read-only WEKA API token to the MCP server; never give the agent direct WEKA API access |
+| Operator service account token accessible from sidecar | Sidecar can read the token from `/var/run/secrets/kubernetes.io/serviceaccount/token` and use it for unrestricted cluster operations | Use a dedicated service account for the sidecar pod; mount only the MCP-specific service account |
 
 ---
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **`validate_yaml` tool:** Often missing validation of `apiVersion` and `kind` values — verify it rejects `warp.io/v1` (wrong version) and `WekaAppStore` with wrong casing.
-- [ ] **`apply` tool:** Often missing the approval gate in the tool body — verify a direct call without `confirmed: true` returns an error, not a created CR.
-- [ ] **`inspect_cluster` response:** Often missing `captured_at` at the top level — verify it is present and not only inside `domains.cpu.freshness`.
-- [ ] **Tool descriptions:** Often written in "what it does" style — verify each description starts with when/why to call it, not what it calls internally.
-- [ ] **Deprecated code removal:** Often scheduled but not enforced — verify `session_service.py`, `family_matcher.py`, and `compiler.py` are unreachable (routes disabled or deleted) before Phase 3 ends.
-- [ ] **SKILL.md validate-retry loop:** Often omitted — verify SKILL.md explicitly instructs the agent to re-validate after fixing errors before applying.
-- [ ] **Blueprint catalog tool:** Often returns full Helm schema in `list_blueprints` — verify it returns summary only and delegates full detail to `get_blueprint`.
-- [ ] **Namespace resolution:** The existing `apply_gateway.py` normalizes `targetNamespace` only when the field already exists. Verify agent-generated YAML always includes `targetNamespace` on each component, or the gateway falls back to the CR namespace.
+- [ ] **Streamable HTTP transport:** Often the SSE transport is implemented instead — verify `server.py` uses `transport="streamable-http"` and does not expose `/sse` endpoint.
+- [ ] **NemoClaw egress policy:** Often loopback address is omitted — verify `openclaw-sandbox.yaml` explicitly allows `127.0.0.1:<mcp-port>` before agent start.
+- [ ] **openclaw.json HTTP registration:** Often still uses `"command"/"args"` stdio format — verify it uses `"url": "http://localhost:<port>/mcp"` for the HTTP transport.
+- [ ] **Sidecar startup ordering:** Often both containers start concurrently — verify MCP server is defined as native sidecar init container with `restartPolicy: Always` and a `startupProbe`.
+- [ ] **Service account RBAC:** Often the operator service account is reused — verify `weka-mcp-server-sa` exists with its own ClusterRole and is referenced in the pod spec.
+- [ ] **MCP server binding:** Often bound to `0.0.0.0` — verify the Uvicorn/FastMCP server starts with `host="127.0.0.1"` in the pod.
+- [ ] **generate_openclaw_config.py:** Often generates stdio config only — verify it supports `--transport http` output with `"url"` field and is called at pod startup, not build time.
+- [ ] **NemoClaw EKS compatibility:** Often assumed to be a standard pod — verify the deployment topology decision (separate VM vs. agent-sandbox CRD) is documented and tested before wiring the MCP server endpoint.
 
 ---
 
@@ -300,12 +339,13 @@ Phase 1 (write initial descriptions), Phase 3 (review and tune after end-to-end 
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| Tool response over-engineering discovered after Phase 1 | MEDIUM | Add a flattening layer in the tool handler without changing `cluster.py`; no client changes needed since MCP is server-side |
-| Approval gate missing from apply tool | HIGH | Requires adding required parameter to tool signature, updating SKILL.md, re-registering tool with OpenClaw; any existing test cases that call apply without confirmation must be updated |
-| Wrong validator reused for YAML validation | MEDIUM | Write new validator function alongside old one; redirect `validate_yaml` tool to new function; old validator remains for any legacy paths still using it |
-| Deprecated code not removed | LOW-MEDIUM | Disable routes first (immediate, low risk), then schedule deletion with test removal; no data migration needed |
-| Agent hallucinates CRD fields | LOW | Add negative examples to SKILL.md and improve `validate_yaml` error messages to be prescriptive; no code architecture change needed |
-| Tool descriptions cause wrong tool selection | LOW | Update descriptions (no API change); re-test with mock harness |
+| FastMCP mounted on FastAPI (lifespan failure) | MEDIUM | Move to separate process on separate port; update pod spec and service; update `openclaw.json` URL |
+| NemoClaw blocks sidecar (egress policy) | LOW | Edit policy YAML, run `nemoclaw onboard`; no code changes needed |
+| NemoClaw incompatible with EKS | HIGH | Switch to separate VM deployment; update MCP server Service to expose externally; update OpenClaw registration URL; retests required |
+| Pod IP hardcoded in `openclaw.json` | LOW | Move config generation to pod startup script; parameterize URL from env var |
+| MCP server starts after OpenClaw (race condition) | LOW | Add native sidecar definition and `startupProbe` to pod spec |
+| Wrong service account used | LOW | Create new service account and ClusterRole; update pod spec; no data migration |
+| SSE transport implemented instead of Streamable HTTP | MEDIUM | Rewrite server transport; test new transport end-to-end; update `openclaw.json` registration format |
 
 ---
 
@@ -313,30 +353,35 @@ Phase 1 (write initial descriptions), Phase 3 (review and tune after end-to-end 
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| Tool response over-engineering | Phase 1 | Agent-facing response shape defined and reviewed before implementation; mock harness extracts answer in ≤2 key traversals |
-| Approval gate only in trust | Phase 2 | Direct call to apply tool without `confirmed: true` returns error, not a created CR |
-| Mock harness tests tool API only | Phase 1-3 | Harness exercises full inspect → validate → apply chain including error paths |
-| Validator validates wrong contract | Phase 2 | `validate_yaml` tool accepts valid `WekaAppStore` YAML and rejects invalid CRD YAML (not planning session fields) |
-| Deprecated code creates dual authority | Phase 1 (mark), Phase 2 (disable routes), Phase 3 (delete) | Planning session routes return 410; deprecated module files removed from repo |
-| Agent YAML hallucination | Phase 2 (validator), Phase 3 (SKILL.md) | SKILL.md includes examples and retry loop; `validate_yaml` returns field-specific prescriptive errors |
-| Stale inspection at apply time | Phase 2 (apply tool), Phase 3 (SKILL.md) | Apply tool includes `inspection_age_warning`; SKILL.md instructs re-inspect before apply |
-| Tool descriptions written for humans | Phase 1 (draft), Phase 3 (review) | Mock harness agent simulation selects correct tools from descriptions alone |
+| FastMCP + FastAPI lifespan failure | Transport implementation | MCP server runs as standalone process; curl to `/health` returns 200 before any agent test |
+| NemoClaw egress blocks sidecar | Deployment config | NemoClaw TUI shows no blocked connection to `127.0.0.1` on agent start |
+| NemoClaw EKS incompatibility | Architecture/topology decision | Deployment topology documented and smoke-tested before writing any K8s manifests |
+| Pod IP in openclaw.json | Registration config | `openclaw.json` is generated at pod startup from env vars; no dotted-decimal IP in the file |
+| Session ID forwarding failure | Transport implementation | Server runs in stateless mode; no `Mcp-Session-Id` required; tool calls succeed without session header |
+| Sidecar startup race | K8s manifests | MCP server defined as native sidecar; pod start logs show MCP server ready before OpenClaw init |
+| Operator service account reuse | K8s manifests | `kubectl auth can-i create wekaappstores --as=system:serviceaccount:<ns>:weka-mcp-server-sa` returns "yes"; `kubectl auth can-i delete nodes` returns "no" |
+| Origin header rejection | Transport implementation | Intra-pod curl with no Origin header returns 200; server bound to `127.0.0.1` confirmed in startup logs |
+| Build-time openclaw.json | Registration config | Changing `MCP_SERVER_PORT` env var produces correct `openclaw.json` at startup without image rebuild |
+| SSE transport implemented instead of Streamable HTTP | Transport implementation | Code review confirms `transport="streamable-http"`; no `/sse` endpoint exists |
 
 ---
 
 ## Sources
 
-- [Anthropic Engineering: Writing Tools for Agents](https://www.anthropic.com/engineering/writing-tools-for-agents) — tool description quality, response design, context efficiency (HIGH confidence)
-- [MCP Specification: Tools](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) — structured response format, output schema requirements (HIGH confidence)
-- [MCP Tool Schema Bloat: The Hidden Token Tax](https://layered.dev/mcp-tool-schema-bloat-the-hidden-token-tax-and-how-to-fix-it/) — token bloat patterns, verbose descriptions, schema redundancy (HIGH confidence)
-- [NearForm: Implementing MCP — Tips, Tricks, and Pitfalls](https://nearform.com/digital-community/implementing-model-context-protocol-mcp-tips-tricks-and-pitfalls/) — approval gates, testing without live agents, version drift (MEDIUM confidence)
-- [MCP Security for Agent-Tool Interactions — Elastic Security Labs](https://www.elastic.co/security-labs/mcp-tools-attack-defense-recommendations) — approval bypass, autonomous action risks (HIGH confidence)
-- [Building Least-Privilege AI Agent Gateway — InfoQ](https://www.infoq.com/articles/building-ai-agent-gateway-mcp/) — RBAC scoping, policy-as-code for MCP gateways (MEDIUM confidence)
-- [MCP Context Window Problem — Junia AI](https://www.junia.ai/blog/mcp-context-window-problem) — context bloat from tool schema loading (MEDIUM confidence)
-- [Anthropic Engineering: Code Execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp) — token efficiency, dynamic tool loading patterns (HIGH confidence)
-- Codebase review: `inspection/cluster.py`, `planning/validator.py`, `planning/apply_gateway.py`, `planning/models.py`, `planning/session_service.py` — contract analysis and reuse boundary identification (HIGH confidence — direct inspection)
-- PRD: `PRD-openclaw-integration.md` — architecture intent, risks identified by the project (HIGH confidence)
+- [MCP Specification 2025-03-26: Transports](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports) — Streamable HTTP session management, Origin validation requirements, backwards compatibility (HIGH confidence — official spec)
+- [MCP Python SDK Issue #1367: Mounting Streamable HTTP on FastAPI fails](https://github.com/modelcontextprotocol/python-sdk/issues/1367) — lifespan initialization failure, redirect loop root cause (HIGH confidence — active SDK issue)
+- [MCP Python SDK Issue #808: FastMCP does not recognize X-Session-ID header](https://github.com/modelcontextprotocol/python-sdk/issues/808) — session header recognition bug (HIGH confidence — verified SDK issue)
+- [MCP Python SDK Issue #737: RuntimeError: Received request before initialization was complete](https://github.com/modelcontextprotocol/python-sdk/issues/737) — premature session manager shutdown when embedded in FastAPI (HIGH confidence — verified SDK issue)
+- [NVIDIA NemoClaw GitHub: Support OpenShift deployment via agent-sandbox CRD — Issue #407](https://github.com/NVIDIA/NemoClaw/issues/407) — EKS/OpenShift deployment community workaround (MEDIUM confidence — community issue, not official)
+- [NVIDIA NemoClaw Documentation: Network Policies](https://docs.nvidia.com/nemoclaw/latest/reference/network-policies.html) — deny-all egress default, allowlist configuration (HIGH confidence — official NVIDIA docs)
+- [Scaling HTTP Streamable MCP Servers on Kubernetes: Handling Sticky Sessions](https://zhimin-wen.medium.com/scaling-http-streamable-mcp-servers-on-kubernetes-handling-sticky-sessions-24212857c8ca) — session affinity requirements, stateless mode recommendation (MEDIUM confidence — community article)
+- [Why MCP Deprecated SSE and Went with Streamable HTTP — fka.dev](https://blog.fka.dev/blog/2025-06-06-why-mcp-deprecated-sse-and-go-with-streamable-http/) — SSE deprecation rationale and timeline (HIGH confidence — verified against spec)
+- [SSE Transport Deprecation: Migration to Streamable HTTP — Keboola](https://changelog.keboola.com/sse-transport-deprecation-migration-to-streamable-http/) — deprecation effective date April 2026 (MEDIUM confidence — third-party migration announcement)
+- [Kubernetes Sidecar Containers: Start Sidecar First](https://scalefactory.com/blog/2025/06/19/start-sidecar-first-in-kubernetes/) — native sidecar init container pattern for startup ordering (HIGH confidence — Kubernetes official KEP + community guide)
+- [EKS Security Best Practices — Wiz](https://www.wiz.io/academy/container-security/eks-security-best-practices) — IRSA least-privilege, instance role inheritance pitfall (MEDIUM confidence — vendor guide aligned with AWS official docs)
+- [Getting Started With NemoClaw: Avoid the Obvious Mistakes — Stormap](https://stormap.ai/post/getting-started-with-nemoclaw-install-onboard-and-avoid-the-obvious-mistakes) — infrastructure stack misunderstanding, policy management mistakes (MEDIUM confidence — community guide)
+- Codebase review: `mcp-server/server.py`, `mcp-server/generate_openclaw_config.py` — current stdio transport pattern, config generation baseline (HIGH confidence — direct inspection)
 
 ---
-*Pitfalls research for: MCP tool server integration into existing WEKA App Store backend*
-*Researched: 2026-03-20*
+*Pitfalls research for: Streamable HTTP MCP transport and NemoClaw/OpenClaw EKS sidecar deployment*
+*Researched: 2026-03-23*
