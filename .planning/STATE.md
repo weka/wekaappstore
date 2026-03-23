@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Live EKS Deployment and Agent Testing
 status: planning
-stopped_at: Completed 11-02-PLAN.md
-last_updated: "2026-03-23T06:42:01.589Z"
+stopped_at: Completed 11-01-PLAN.md
+last_updated: "2026-03-23T06:42:19.621Z"
 last_activity: 2026-03-23 — v3.0 roadmap created; Phases 11-14 defined
 progress:
   total_phases: 4
@@ -48,6 +48,7 @@ Progress: [░░░░░░░░░░] 0% (v3.0)
 
 *Updated after each plan completion*
 | Phase 11-streamable-http-transport P02 | 12 | 2 tasks | 4 files |
+| Phase 11-streamable-http-transport P01 | 2min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -61,6 +62,8 @@ Progress: [░░░░░░░░░░] 0% (v3.0)
 - [v2.0]: Flat 2-key depth contract enforced by check_depth() across all 8 tools; 103 tests as regression safety net
 - [Phase 11-02]: Removed startup block from openclaw.json — HTTP transport uses url for discovery, no subprocess spawn
 - [Phase 11-02]: MCP_TRANSPORT and MCP_PORT in env.optional (not required) preserving stdio backward compat for CI and local dev
+- [Phase 11]: FastMCP constructed conditionally at module level (not in __main__) so tests can import server.mcp without transport side effects
+- [Phase 11]: stateless_http=True required in HTTP mode to avoid session ID forwarding issues with OpenClaw client (XPORT-04)
 
 ### Pending Todos
 
@@ -75,6 +78,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-23T06:42:01.587Z
-Stopped at: Completed 11-02-PLAN.md
+Last session: 2026-03-23T06:42:19.619Z
+Stopped at: Completed 11-01-PLAN.md
 Resume file: None
