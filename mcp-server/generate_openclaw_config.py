@@ -89,9 +89,9 @@ def build_openclaw_config(tool_descriptions: dict[str, str]) -> dict:
     """Build the openclaw.json structure from extracted tool descriptions.
 
     Structure follows the target format from RESEARCH.md / CONTEXT.md:
-    - transport: stdio
-    - startup: python -m server from mcp-server/ directory
-    - env: required=[BLUEPRINTS_DIR], optional=[KUBERNETES_AUTH_MODE, LOG_LEVEL, KUBECONFIG]
+    - transport: streamable-http
+    - url: http://localhost:8080/mcp (no startup block; NemoClaw connects via URL)
+    - env: required=[BLUEPRINTS_DIR], optional=[KUBERNETES_AUTH_MODE, LOG_LEVEL, KUBECONFIG, MCP_TRANSPORT, MCP_PORT]
     - tools: [{name, description}] in server.py registration order
     """
     # Build tools list in canonical registration order
@@ -123,18 +123,11 @@ def build_openclaw_config(tool_descriptions: dict[str, str]) -> dict:
             "and WEKA storage resources, browsing blueprint catalogs, validating WekaAppStore "
             "YAML manifests, applying blueprints to the cluster, and monitoring deployment status."
         ),
-        "transport": "stdio",
-        "startup": {
-            "command": "python",
-            "args": ["-m", "server"],
-            "cwd": "mcp-server/",
-            "env": {
-                "PYTHONPATH": ".:../app-store-gui",
-            },
-        },
+        "transport": "streamable-http",
+        "url": "http://localhost:8080/mcp",
         "env": {
             "required": ["BLUEPRINTS_DIR"],
-            "optional": ["KUBERNETES_AUTH_MODE", "LOG_LEVEL", "KUBECONFIG"],
+            "optional": ["KUBERNETES_AUTH_MODE", "LOG_LEVEL", "KUBECONFIG", "MCP_TRANSPORT", "MCP_PORT"],
         },
         "container": "weka-app-store-mcp:latest",
         "skill": "mcp-server/SKILL.md",

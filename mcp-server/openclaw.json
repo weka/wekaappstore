@@ -2,18 +2,8 @@
   "_comment": "Best-effort format -- may need revision when NemoClaw alpha schema is published.",
   "name": "weka-app-store-mcp",
   "description": "MCP server for the WEKA App Store. Provides tools for inspecting cluster and WEKA storage resources, browsing blueprint catalogs, validating WekaAppStore YAML manifests, applying blueprints to the cluster, and monitoring deployment status.",
-  "transport": "stdio",
-  "startup": {
-    "command": "python",
-    "args": [
-      "-m",
-      "server"
-    ],
-    "cwd": "mcp-server/",
-    "env": {
-      "PYTHONPATH": ".:../app-store-gui"
-    }
-  },
+  "transport": "streamable-http",
+  "url": "http://localhost:8080/mcp",
   "env": {
     "required": [
       "BLUEPRINTS_DIR"
@@ -21,7 +11,9 @@
     "optional": [
       "KUBERNETES_AUTH_MODE",
       "LOG_LEVEL",
-      "KUBECONFIG"
+      "KUBECONFIG",
+      "MCP_TRANSPORT",
+      "MCP_PORT"
     ]
   },
   "container": "weka-app-store-mcp:latest",
