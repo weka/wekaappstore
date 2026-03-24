@@ -96,6 +96,7 @@ OpenClaw connects via WebSocket Gateway, uses OpenAI-compatible model API, and r
 | Flat 2-key depth contract for all tool responses | Prevents agents from needing deep key traversal; enforced by check_depth() test | ✓ Good — 103 tests enforce |
 | Description-based tool selection in harness | Proves tool descriptions are sufficient for agent routing without hardcoded names | ✓ Good — keyword matching works |
 | Container image on wekachrisjen Docker Hub | Chris's corporate Docker Hub account for all WEKA images | ✓ Good — CI/CD wired |
+| Deploy NemoClaw/OpenClaw via agent-sandbox CRD on EKS | Experimental CRD provides sandbox isolation, GPU scheduling, and volume management out of the box; avoids hand-rolling Deployment + RBAC + PV scaffolding. Gateway must use --bind=loopback (not lan) since non-loopback requires controlUi.allowedOrigins config; loopback is correct for sidecar deployment | Validated in Phase 12 — pod Running with NVIDIA A10G on EKS in wekaappstore namespace |
 
 ---
 *Last updated: 2026-03-23 after v3.0 milestone start*
