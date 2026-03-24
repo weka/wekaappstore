@@ -97,7 +97,7 @@ Plans:
 | 8. SKILL.md, Agent Context, and Cleanup | v2.0 | 3/3 | Complete | 2026-03-22 |
 | 9. Deployment and Registration | v2.0 | 2/2 | Complete | 2026-03-22 |
 | 10. Integration Bug Fixes | v2.0 | 1/1 | Complete | 2026-03-22 |
-| 11. Streamable HTTP Transport | 2/2 | Complete   | 2026-03-23 | - |
+| 11. Streamable HTTP Transport | 2/2 | Complete    | 2026-03-24 | - |
 | 12. NemoClaw EKS Topology | v3.0 | 0/TBD | Not started | - |
 | 13. Kubernetes Manifests and Sidecar Wiring | v3.0 | 0/TBD | Not started | - |
 | 14. End-to-End Validation | v3.0 | 0/TBD | Not started | - |

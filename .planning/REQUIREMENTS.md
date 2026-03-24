@@ -11,8 +11,8 @@ Requirements for the Live EKS Deployment and Agent Testing milestone. Each maps 
 
 - [x] **XPORT-01**: MCP server supports Streamable HTTP transport on a configurable port alongside existing stdio
 - [x] **XPORT-02**: `MCP_TRANSPORT` env var selects transport mode (`stdio` default, `http` for sidecar deployment)
-- [ ] **XPORT-03**: Health endpoint (`/health`) returns 200 when server is ready for tool calls
-- [ ] **XPORT-04**: HTTP transport operates in stateless mode (no session ID dependency)
+- [x] **XPORT-03**: Health endpoint (`/health`) returns 200 when server is ready for tool calls
+- [x] **XPORT-04**: HTTP transport operates in stateless mode (no session ID dependency)
 
 ### Kubernetes Deployment
 
@@ -62,8 +62,8 @@ Deferred to v3.1+ after live agent behavior is observed.
 |-------------|-------|--------|
 | XPORT-01 | Phase 11 | Complete |
 | XPORT-02 | Phase 11 | Complete |
-| XPORT-03 | Phase 11 | Pending |
-| XPORT-04 | Phase 11 | Pending |
+| XPORT-03 | Phase 11 | Complete |
+| XPORT-04 | Phase 11 | Complete |
 | K8S-01 | Phase 13 | Pending |
 | K8S-02 | Phase 13 | Pending |
 | K8S-03 | Phase 13 | Pending |
