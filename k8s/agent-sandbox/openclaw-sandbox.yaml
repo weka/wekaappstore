@@ -1,0 +1,79 @@
+# Source: kubernetes-sigs/agent-sandbox/examples/openclaw-sandbox/
+# Sandbox CR for deploying OpenClaw via the agent-sandbox CRD operator (v0.2.1)
+# Apply with: kubectl apply -f openclaw-sandbox.yaml -n <NAMESPACE>
+# Requires: openclaw-secrets.yaml applied first (creates openclaw-token and nvidia-api-key Secrets)
+apiVersion: agents.x-k8s.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: openclaw-sandbox
+  # No namespace hardcoded — apply with: kubectl apply -f openclaw-sandbox.yaml -n <NAMESPACE>
+spec:
+  podTemplate:
+    spec:
+      nodeSelector:
+        nvidia.com/gpu: "true"
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: openclaw
+          image: ghcr.io/openclaw/openclaw:latest
+          command:
+            - "node"
+            - "dist/index.js"
+            - "gateway"
+            - "--bind=lan"
+            - "--port"
+            - "18789"
+            - "--allow-unconfigured"
+            - "--verbose"
+          ports:
+            - containerPort: 18789
+              name: gateway
+              protocol: TCP
+            - containerPort: 18790
+              name: secondary
+              protocol: TCP
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+            requests:
+              nvidia.com/gpu: "1"
+          env:
+            - name: OPENCLAW_GATEWAY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: openclaw-token
+                  key: token
+            - name: NVIDIA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: nvidia-api-key
+                  key: key
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: openclaw-config
+              mountPath: /home/node/.openclaw
+            - name: openclaw-workspace
+              mountPath: /home/node/.openclaw/workspace
+      volumes:
+        - name: openclaw-config
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: openclaw-workspace
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 2Gi
