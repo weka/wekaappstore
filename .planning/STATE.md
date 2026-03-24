@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Live EKS Deployment and Agent Testing
 status: planning
-stopped_at: Completed 13-01-PLAN.md
-last_updated: "2026-03-24T05:57:21.689Z"
+stopped_at: Completed 13-02-PLAN.md
+last_updated: "2026-03-24T05:58:14.824Z"
 last_activity: 2026-03-23 — v3.0 roadmap created; Phases 11-14 defined
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0% (v3.0)
 | Phase 12-nemoclaw-eks-topology P01 | 2min | 2 tasks | 4 files |
 | Phase 12-nemoclaw-eks-topology P02 | 15min | 3 tasks | 4 files |
 | Phase 13-kubernetes-manifests-and-sidecar-wiring P01 | 2min | 2 tasks | 2 files |
+| Phase 13-kubernetes-manifests-and-sidecar-wiring P02 | 8min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,9 @@ Progress: [░░░░░░░░░░] 0% (v3.0)
 - [Phase 13-01]: delete verb included for wekaappstores resource — research audit includes it for operator lifecycle management
 - [Phase 13-01]: subjects[0].namespace must be wekaappstore in ClusterRoleBinding — mismatch causes silent 403 failures
 - [Phase 13-01]: SKILL.md ConfigMap targets OpenClaw container (not MCP sidecar) — OpenClaw reads SKILL.md at agent registration via skill field in openclaw.json
+- [Phase 13-kubernetes-manifests-and-sidecar-wiring]: printf used in init container (not heredoc) to avoid shell variable expansion when writing openclaw.json
+- [Phase 13-kubernetes-manifests-and-sidecar-wiring]: subPath: blueprints on MCP sidecar mount dereferences git-sync symlink at /blueprints/blueprints
+- [Phase 13-kubernetes-manifests-and-sidecar-wiring]: openclaw-config readOnly in weka-mcp-sidecar; init container is sole writer to prevent race conditions
 
 ### Pending Todos
 
@@ -88,6 +92,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T05:57:21.687Z
-Stopped at: Completed 13-01-PLAN.md
+Last session: 2026-03-24T05:58:14.822Z
+Stopped at: Completed 13-02-PLAN.md
 Resume file: None

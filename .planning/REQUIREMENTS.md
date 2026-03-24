@@ -16,16 +16,16 @@ Requirements for the Live EKS Deployment and Agent Testing milestone. Each maps 
 
 ### Kubernetes Deployment
 
-- [ ] **K8S-01**: Sidecar container spec defines the MCP server container for inclusion in OpenClaw pod
+- [x] **K8S-01**: Sidecar container spec defines the MCP server container for inclusion in OpenClaw pod
 - [x] **K8S-02**: ServiceAccount and RBAC ClusterRole grant minimum permissions for all 8 tools (read cluster/WEKA, create WekaAppStore CRs)
-- [ ] **K8S-03**: Readiness probe on health endpoint prevents tool discovery before server is ready
-- [ ] **K8S-04**: Blueprint manifests are available to the sidecar via shared volume mount
-- [ ] **K8S-05**: `openclaw.json` is generated at pod startup from environment variables (not baked into image)
+- [x] **K8S-03**: Readiness probe on health endpoint prevents tool discovery before server is ready
+- [x] **K8S-04**: Blueprint manifests are available to the sidecar via shared volume mount
+- [x] **K8S-05**: `openclaw.json` is generated at pod startup from environment variables (not baked into image)
 
 ### NemoClaw/OpenClaw Setup
 
 - [x] **NCLAW-01**: NemoClaw/OpenClaw deployed to EKS using experimental agent-sandbox CRD approach
-- [ ] **NCLAW-02**: MCP server registered with OpenClaw via Streamable HTTP transport (`http://localhost:<port>/mcp`)
+- [x] **NCLAW-02**: MCP server registered with OpenClaw via Streamable HTTP transport (`http://localhost:<port>/mcp`)
 - [x] **NCLAW-03**: NemoClaw egress policy explicitly allows loopback access to MCP sidecar port
 - [x] **NCLAW-04**: SKILL.md loaded by agent at registration time
 
@@ -64,13 +64,13 @@ Deferred to v3.1+ after live agent behavior is observed.
 | XPORT-02 | Phase 11 | Complete |
 | XPORT-03 | Phase 11 | Complete |
 | XPORT-04 | Phase 11 | Complete |
-| K8S-01 | Phase 13 | Pending |
+| K8S-01 | Phase 13 | Complete |
 | K8S-02 | Phase 13 | Complete |
-| K8S-03 | Phase 13 | Pending |
-| K8S-04 | Phase 13 | Pending |
-| K8S-05 | Phase 13 | Pending |
+| K8S-03 | Phase 13 | Complete |
+| K8S-04 | Phase 13 | Complete |
+| K8S-05 | Phase 13 | Complete |
 | NCLAW-01 | Phase 12 | Complete |
-| NCLAW-02 | Phase 13 | Pending |
+| NCLAW-02 | Phase 13 | Complete |
 | NCLAW-03 | Phase 12 | Complete |
 | NCLAW-04 | Phase 13 | Complete |
 | E2E-01 | Phase 14 | Pending |
