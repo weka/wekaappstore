@@ -1,0 +1,20 @@
+# NOTE: This Service targets the openclaw-sandbox pod via the agent-sandbox operator hash label.
+# The hash (62f96e10) is derived from the Sandbox CR spec and may change if the CR is modified.
+# Re-query: kubectl get sandbox openclaw-sandbox -n wekaappstore -o jsonpath='{.status.selector}'
+# IMPORTANT: OpenClaw uses --bind=loopback. This Service routes to eth0, not loopback.
+# Traffic via this Service will be REFUSED unless the bind mode is changed to --bind=lan.
+# For E2E validation, use kubectl port-forward instead (bypasses this limitation).
+apiVersion: v1
+kind: Service
+metadata:
+  name: openclaw-gateway-svc
+  namespace: wekaappstore
+spec:
+  selector:
+    agents.x-k8s.io/sandbox-name-hash: "62f96e10"
+  ports:
+    - name: gateway
+      port: 18789
+      targetPort: 18789
+      protocol: TCP
+  type: ClusterIP

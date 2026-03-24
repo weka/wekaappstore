@@ -1,0 +1,25 @@
+# HTTPRoute for OpenClaw Web UI — routes openclaw.example.com to the gateway Service.
+# Follows the same pattern as cluster_init/routes/appstore-route.yaml.
+# WebSocket upgrade is handled automatically by Envoy Gateway (no special annotation needed).
+# NOTE: Requires openclaw-gateway-svc.yaml to be applied first.
+# NOTE: Currently blocked by --bind=loopback — see openclaw-gateway-svc.yaml comments.
+# For E2E validation, use kubectl port-forward pod/$POD 18789:18789 -n wekaappstore instead.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: openclaw-ui
+  namespace: wekaappstore
+spec:
+  parentRefs:
+    - name: warp-edge-gateway
+      namespace: envoy-gateway-system
+  hostnames:
+    - openclaw.example.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: openclaw-gateway-svc
+          port: 18789
