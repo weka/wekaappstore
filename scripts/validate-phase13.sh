@@ -174,9 +174,11 @@ if [[ "${LIVE_MODE}" == "true" ]]; then
 
   # ─── Check 5: RBAC — list nodes ─────────────────────────────────────────────
   echo "[5] RBAC: can-i list nodes as weka-mcp-server-sa..."
+  # Note: kubectl auth can-i emits a warning for cluster-scoped resources before printing "yes"/"no".
+  # Use grep to extract just the yes/no answer from potentially multi-line output.
   RBAC_NODES=$(kubectl auth can-i list nodes \
     --as="system:serviceaccount:${NAMESPACE}:weka-mcp-server-sa" 2>&1 || true)
-  if [[ "${RBAC_NODES}" == "yes" ]]; then
+  if echo "${RBAC_NODES}" | grep -q "^yes$"; then
     echo "  PASS: weka-mcp-server-sa can list nodes"
     PASS=$((PASS + 1))
   else
@@ -221,14 +223,16 @@ if [[ "${LIVE_MODE}" == "true" ]]; then
 
     # ─── Check 8: MCP sidecar /health endpoint ──────────────────────────────
     echo "[8] Checking MCP sidecar health at localhost:8080/health..."
+    # The weka-mcp-sidecar is a Python container — curl may not be available.
+    # Use python3 urllib to check the health endpoint instead.
     HEALTH_RC=0
-    kubectl exec "${POD_NAME}" -n "${NAMESPACE}" -c weka-mcp-sidecar -- \
-      curl -sf --max-time 10 http://localhost:8080/health > /dev/null 2>&1 || HEALTH_RC=$?
-    if [[ "${HEALTH_RC}" -eq 0 ]]; then
+    HEALTH_OUT=$(kubectl exec "${POD_NAME}" -n "${NAMESPACE}" -c weka-mcp-sidecar -- \
+      python3 -c "import urllib.request; r=urllib.request.urlopen('http://localhost:8080/health',timeout=10); print(r.status)" 2>&1) || HEALTH_RC=$?
+    if [[ "${HEALTH_RC}" -eq 0 ]] && echo "${HEALTH_OUT}" | grep -q "^200$"; then
       echo "  PASS: MCP sidecar /health endpoint responded (HTTP 200)"
       PASS=$((PASS + 1))
     else
-      echo "  FAIL: MCP sidecar /health endpoint did not respond (curl exit ${HEALTH_RC})"
+      echo "  FAIL: MCP sidecar /health endpoint did not respond (got: '${HEALTH_OUT}', exit ${HEALTH_RC})"
       echo "        Check logs: kubectl logs ${POD_NAME} -c weka-mcp-sidecar -n ${NAMESPACE}"
       FAIL=$((FAIL + 1))
     fi

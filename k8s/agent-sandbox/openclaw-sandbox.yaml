@@ -30,13 +30,18 @@ spec:
       # Writes openclaw.json into the shared openclaw-config emptyDir so OpenClaw
       # discovers the MCP sidecar at pod startup. Uses printf (not heredoc) to
       # avoid shell variable expansion pitfalls when writing JSON.
+      #
+      # Schema: OpenClaw 2026.3.23 uses mcp.servers.<name> nested format.
+      # The top-level flat schema (name/description/transport/url/skill) is rejected
+      # by openclaw config validate — discovered by live cluster testing in Phase 13-03.
+      # Correct keys: mcp.servers.<name>.url, .transport, .skill
       initContainers:
         - name: openclaw-json-generator
           image: busybox:1.36
           command: ["sh", "-c"]
           args:
             - |
-              printf '{"name":"weka-app-store-mcp","description":"MCP server for the WEKA App Store.","transport":"streamable-http","url":"http://localhost:%s/mcp","skill":"%s"}\n' "$MCP_PORT" "$SKILL_MD_PATH" > /home/node/.openclaw/openclaw.json && cat /home/node/.openclaw/openclaw.json
+              printf '{"mcp":{"servers":{"weka-app-store-mcp":{"url":"http://localhost:%s/mcp","transport":"streamable-http","skill":"%s"}}}}\n' "$MCP_PORT" "$SKILL_MD_PATH" > /home/node/.openclaw/openclaw.json && cat /home/node/.openclaw/openclaw.json
           env:
             - name: MCP_PORT
               value: "8080"
