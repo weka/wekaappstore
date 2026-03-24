@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Live EKS Deployment and Agent Testing
 status: planning
-stopped_at: Phase 14 context gathered
-last_updated: "2026-03-24T22:22:48.628Z"
+stopped_at: Completed 14-01-PLAN.md
+last_updated: "2026-03-24T22:43:47.618Z"
 last_activity: 2026-03-23 — v3.0 roadmap created; Phases 11-14 defined
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 9
+  completed_plans: 8
   percent: 0
 ---
 
@@ -54,6 +54,7 @@ Progress: [░░░░░░░░░░] 0% (v3.0)
 | Phase 13-kubernetes-manifests-and-sidecar-wiring P01 | 2min | 2 tasks | 2 files |
 | Phase 13-kubernetes-manifests-and-sidecar-wiring P02 | 8min | 2 tasks | 2 files |
 | Phase 13-kubernetes-manifests-and-sidecar-wiring P03 | 18min | 2 tasks | 3 files |
+| Phase 14-end-to-end-validation P01 | 2 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,8 @@ Progress: [░░░░░░░░░░] 0% (v3.0)
 - [Phase Phase 13-03]: openclaw.json schema is mcp.servers.<name>.{url,transport,skill} nested format (not flat top-level schema) — discovered by live cluster testing against OpenClaw 2026.3.23
 - [Phase Phase 13-03]: wekachrisjen/weka-app-store-mcp built as multi-arch image (linux/amd64 + linux/arm64) via docker buildx — EKS nodes are amd64, dev machine is arm64
 - [Phase Phase 13-03]: webapp/__init__.py uses __getattr__ lazy import for app — avoids FastAPI dependency in MCP server Docker build context
+- [Phase 14-01]: HTTPRoute and Service manifests authored but NOT applied — OpenClaw --bind=loopback prevents Service routing; E2E session uses kubectl port-forward instead
+- [Phase 14-01]: Evidence capture uses --pre/--post/all flags to separate before-chat (E2E-01/02) and after-chat (E2E-03/04) kubectl captures
 
 ### Pending Todos
 
@@ -96,6 +99,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T22:22:48.619Z
-Stopped at: Phase 14 context gathered
-Resume file: .planning/phases/14-end-to-end-validation/14-CONTEXT.md
+Last session: 2026-03-24T22:43:47.615Z
+Stopped at: Completed 14-01-PLAN.md
+Resume file: None

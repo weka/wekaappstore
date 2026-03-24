@@ -84,7 +84,7 @@ Plans:
   2. Agent lists and describes blueprints from the live catalog through chat
   3. Agent generates, validates, and applies a WekaAppStore CR through the full SKILL.md workflow (inspect → validate → apply); CR appears in `kubectl get wekaappstores`
   4. Agent reports deployment status after apply (operator reconciliation outcome visible in chat)
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
 - [ ] 14-01-PLAN.md — Infrastructure prep: prereq validation, Service+HTTPRoute manifests, evidence capture scripts
@@ -104,4 +104,4 @@ Plans:
 | 11. Streamable HTTP Transport | 2/2 | Complete    | 2026-03-24 | - |
 | 12. NemoClaw EKS Topology | 2/2 | Complete    | 2026-03-24 | - |
 | 13. Kubernetes Manifests and Sidecar Wiring | 3/3 | Complete    | 2026-03-24 | - |
-| 14. End-to-End Validation | v3.0 | 0/2 | Not started | - |
+| 14. End-to-End Validation | 1/2 | In Progress|  | - |

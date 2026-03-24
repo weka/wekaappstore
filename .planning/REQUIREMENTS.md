@@ -31,10 +31,10 @@ Requirements for the Live EKS Deployment and Agent Testing milestone. Each maps 
 
 ### E2E Validation
 
-- [ ] **E2E-01**: Agent can inspect cluster resources and WEKA storage through chat
-- [ ] **E2E-02**: Agent can list and describe blueprints through chat
-- [ ] **E2E-03**: Agent can generate, validate, and apply a WekaAppStore CR through the full SKILL.md workflow
-- [ ] **E2E-04**: Agent reports deployment status after apply
+- [x] **E2E-01**: Agent can inspect cluster resources and WEKA storage through chat
+- [x] **E2E-02**: Agent can list and describe blueprints through chat
+- [x] **E2E-03**: Agent can generate, validate, and apply a WekaAppStore CR through the full SKILL.md workflow
+- [x] **E2E-04**: Agent reports deployment status after apply
 
 ## Future Requirements
 
@@ -73,10 +73,10 @@ Deferred to v3.1+ after live agent behavior is observed.
 | NCLAW-02 | Phase 13 | Complete |
 | NCLAW-03 | Phase 12 | Complete |
 | NCLAW-04 | Phase 13 | Complete |
-| E2E-01 | Phase 14 | Pending |
-| E2E-02 | Phase 14 | Pending |
-| E2E-03 | Phase 14 | Pending |
-| E2E-04 | Phase 14 | Pending |
+| E2E-01 | Phase 14 | Complete |
+| E2E-02 | Phase 14 | Complete |
+| E2E-03 | Phase 14 | Complete |
+| E2E-04 | Phase 14 | Complete |
 
 **Coverage:**
 - v3.0 requirements: 17 total
