@@ -68,10 +68,12 @@ Plans:
   3. Blueprint YAML files are accessible inside the sidecar at `BLUEPRINTS_DIR` via volume mount
   4. `openclaw.json` is generated at pod startup from env vars (not baked into the image); correct URL and transport visible in pod logs
   5. `weka-mcp-server-sa` ServiceAccount exists with scoped ClusterRole (not reusing operator's service account)
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 13-01: TBD
+- [ ] 13-01-PLAN.md — RBAC manifest (SA + ClusterRole + ClusterRoleBinding) and SKILL.md ConfigMap
+- [ ] 13-02-PLAN.md — Update Sandbox CR with init container, MCP sidecar, git-sync, and volumes; create validation script
+- [ ] 13-03-PLAN.md — Deploy manifests to EKS cluster, run live validation, human verification
 
 ### Phase 14: End-to-End Validation
 **Goal**: Agent completes the full SKILL.md tool chain against a live EKS cluster and live WEKA storage; happy-path blueprint deployment succeeds through chat
@@ -100,5 +102,5 @@ Plans:
 | 10. Integration Bug Fixes | v2.0 | 1/1 | Complete | 2026-03-22 |
 | 11. Streamable HTTP Transport | 2/2 | Complete    | 2026-03-24 | - |
 | 12. NemoClaw EKS Topology | 2/2 | Complete    | 2026-03-24 | - |
-| 13. Kubernetes Manifests and Sidecar Wiring | v3.0 | 0/TBD | Not started | - |
+| 13. Kubernetes Manifests and Sidecar Wiring | v3.0 | 0/3 | Not started | - |
 | 14. End-to-End Validation | v3.0 | 0/TBD | Not started | - |
