@@ -1,7 +1,11 @@
 # Source: kubernetes-sigs/agent-sandbox/examples/openclaw-sandbox/
 # Sandbox CR for deploying OpenClaw via the agent-sandbox CRD operator (v0.2.1)
+# Phase 13: MCP sidecar wiring added — init container, weka-mcp-sidecar, git-sync, volumes
 # Apply with: kubectl apply -f openclaw-sandbox.yaml -n <NAMESPACE>
-# Requires: openclaw-secrets.yaml applied first (creates openclaw-token and nvidia-api-key Secrets)
+# Requires:
+#   - openclaw-secrets.yaml applied first (creates openclaw-token and nvidia-api-key Secrets)
+#   - mcp-rbac.yaml applied first (creates weka-mcp-server-sa ServiceAccount and RBAC)
+#   - mcp-skill-configmap.yaml applied first (creates weka-mcp-skill-md ConfigMap)
 apiVersion: agents.x-k8s.io/v1alpha1
 kind: Sandbox
 metadata:
@@ -18,7 +22,43 @@ spec:
           effect: NoSchedule
       securityContext:
         fsGroup: 1000
+      # K8S-02: ServiceAccount grants MCP sidecar the RBAC permissions defined in mcp-rbac.yaml
+      # (list/get Secrets, create/patch WekaAppStore CRDs, etc.)
+      serviceAccountName: weka-mcp-server-sa
+      # ─── Init Container ───────────────────────────────────────────────────────
+      # K8S-05: Init container runs before any regular container starts.
+      # Writes openclaw.json into the shared openclaw-config emptyDir so OpenClaw
+      # discovers the MCP sidecar at pod startup. Uses printf (not heredoc) to
+      # avoid shell variable expansion pitfalls when writing JSON.
+      initContainers:
+        - name: openclaw-json-generator
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              printf '{"name":"weka-app-store-mcp","description":"MCP server for the WEKA App Store.","transport":"streamable-http","url":"http://localhost:%s/mcp","skill":"%s"}\n' "$MCP_PORT" "$SKILL_MD_PATH" > /home/node/.openclaw/openclaw.json && cat /home/node/.openclaw/openclaw.json
+          env:
+            - name: MCP_PORT
+              value: "8080"
+            - name: SKILL_MD_PATH
+              value: "/home/node/.openclaw/SKILL.md"
+          volumeMounts:
+            - name: openclaw-config
+              mountPath: /home/node/.openclaw
+          # runAsUser 1000 matches fsGroup so the written openclaw.json
+          # is readable by both OpenClaw (uid 1000) and the MCP sidecar (uid 10001, gid 1000 via fsGroup)
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
       containers:
+        # ─── Container 1: OpenClaw Gateway ──────────────────────────────────────
         - name: openclaw
           image: ghcr.io/openclaw/openclaw:latest
           command:
@@ -65,9 +105,112 @@ spec:
               mountPath: /home/node/.openclaw
             - name: openclaw-workspace
               mountPath: /home/node/.openclaw/workspace
+            # NCLAW-04: SKILL.md from ConfigMap gives OpenClaw agent context about
+            # available MCP tools. Mounted read-only via subPath so it appears as a
+            # single file inside the already-mounted openclaw-config emptyDir path.
+            - name: skill-md
+              mountPath: /home/node/.openclaw/SKILL.md
+              subPath: SKILL.md
+              readOnly: true
+        # ─── Container 2: WEKA App Store MCP Sidecar ────────────────────────────
+        # K8S-03: Readiness probe gates traffic routing until the MCP HTTP server
+        # is accepting connections. OpenClaw will not route tool calls until Ready.
+        - name: weka-mcp-sidecar
+          image: wekachrisjen/weka-app-store-mcp
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: mcp-http
+              protocol: TCP
+          env:
+            - name: MCP_TRANSPORT
+              value: "http"
+            - name: MCP_PORT
+              value: "8080"
+            # K8S-04: BLUEPRINTS_DIR points to the subPath-mounted directory that
+            # dereferences the git-sync symlink. See volumeMount below for subPath details.
+            - name: BLUEPRINTS_DIR
+              value: "/app/blueprints"
+            - name: KUBERNETES_AUTH_MODE
+              value: "incluster"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            # git-sync writes to /blueprints/blueprints (a symlink to the versioned
+            # checkout directory). Using subPath: blueprints dereferences that symlink
+            # so the MCP sidecar sees /app/blueprints as a plain directory, not a dangling link.
+            # Research pitfall #1: without subPath the container sees a symlink it cannot follow.
+            - name: blueprints
+              mountPath: /app/blueprints
+              subPath: blueprints
+            # openclaw-config is readOnly here — the init container already wrote
+            # openclaw.json; the sidecar only needs to read SKILL.md from this volume.
+            # Write happens exclusively in the init container to avoid race conditions.
+            - name: openclaw-config
+              mountPath: /home/node/.openclaw
+              readOnly: true
+        # ─── Container 3: git-sync ───────────────────────────────────────────────
+        # Continuously syncs the warp-blueprints repo into the blueprints emptyDir.
+        # --one-time flag is intentionally absent: continuous sync is the locked decision
+        # so blueprints remain current without pod restarts.
+        - name: git-sync
+          image: registry.k8s.io/git-sync/git-sync:v4.5.0
+          args:
+            - --repo=https://github.com/weka/warp-blueprints.git
+            - --root=/blueprints
+            - --link=blueprints
+            - --period=60s
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65533
+          volumeMounts:
+            - name: blueprints
+              mountPath: /blueprints
       volumes:
+        # Shared config dir: init container writes openclaw.json here;
+        # OpenClaw and MCP sidecar read from it.
         - name: openclaw-config
           emptyDir: {}
+        # Shared blueprint store: git-sync writes here; MCP sidecar reads via subPath mount.
+        - name: blueprints
+          emptyDir: {}
+        # SKILL.md ConfigMap: provides agent context for OpenClaw tool discovery.
+        # Created by: kubectl apply -f k8s/agent-sandbox/mcp-skill-configmap.yaml -n <NAMESPACE>
+        - name: skill-md
+          configMap:
+            name: weka-mcp-skill-md
   volumeClaimTemplates:
     - metadata:
         name: openclaw-workspace
