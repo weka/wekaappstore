@@ -52,7 +52,7 @@ Plans:
   2. NemoClaw egress policy explicitly allows loopback access so sidecar port is reachable
   3. GPU node group and NVIDIA GPU Operator confirmed operational (agent container starts without GPU errors)
   4. Topology decision (agent-sandbox CRD approach) documented as a Key Decision in PROJECT.md
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
 - [ ] 12-01-PLAN.md — Create Sandbox CR manifest, Secret templates, operator install script, and smoke test script
@@ -99,6 +99,6 @@ Plans:
 | 9. Deployment and Registration | v2.0 | 2/2 | Complete | 2026-03-22 |
 | 10. Integration Bug Fixes | v2.0 | 1/1 | Complete | 2026-03-22 |
 | 11. Streamable HTTP Transport | 2/2 | Complete    | 2026-03-24 | - |
-| 12. NemoClaw EKS Topology | v3.0 | 0/2 | Not started | - |
+| 12. NemoClaw EKS Topology | 1/2 | In Progress|  | - |
 | 13. Kubernetes Manifests and Sidecar Wiring | v3.0 | 0/TBD | Not started | - |
 | 14. End-to-End Validation | v3.0 | 0/TBD | Not started | - |

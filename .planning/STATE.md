@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Live EKS Deployment and Agent Testing
 status: planning
-stopped_at: Phase 12 context gathered
-last_updated: "2026-03-24T02:53:03.142Z"
+stopped_at: Completed 12-nemoclaw-eks-topology 12-01-PLAN.md
+last_updated: "2026-03-24T03:19:28.721Z"
 last_activity: 2026-03-23 — v3.0 roadmap created; Phases 11-14 defined
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  total_plans: 4
+  completed_plans: 3
   percent: 0
 ---
 
@@ -49,6 +49,7 @@ Progress: [░░░░░░░░░░] 0% (v3.0)
 *Updated after each plan completion*
 | Phase 11-streamable-http-transport P02 | 12 | 2 tasks | 4 files |
 | Phase 11-streamable-http-transport P01 | 2min | 2 tasks | 4 files |
+| Phase 12-nemoclaw-eks-topology P01 | 2min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -64,6 +65,8 @@ Progress: [░░░░░░░░░░] 0% (v3.0)
 - [Phase 11-02]: MCP_TRANSPORT and MCP_PORT in env.optional (not required) preserving stdio backward compat for CI and local dev
 - [Phase 11]: FastMCP constructed conditionally at module level (not in __main__) so tests can import server.mcp without transport side effects
 - [Phase 11]: stateless_http=True required in HTTP mode to avoid session ID forwarding issues with OpenClaw client (XPORT-04)
+- [Phase 12-nemoclaw-eks-topology]: Sandbox CR has no hardcoded namespace — applied with kubectl -n <NAMESPACE> to match locked decision of same namespace as WEKA App Store components
+- [Phase 12-nemoclaw-eks-topology]: Loopback :8080 probe in smoke test is WARN-only (exit 7 = PASS, exit 28 = WARN) since MCP sidecar does not exist until Phase 13
 
 ### Pending Todos
 
@@ -78,6 +81,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T02:53:03.139Z
-Stopped at: Phase 12 context gathered
-Resume file: .planning/phases/12-nemoclaw-eks-topology/12-CONTEXT.md
+Last session: 2026-03-24T03:19:28.719Z
+Stopped at: Completed 12-nemoclaw-eks-topology 12-01-PLAN.md
+Resume file: None

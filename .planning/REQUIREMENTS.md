@@ -24,9 +24,9 @@ Requirements for the Live EKS Deployment and Agent Testing milestone. Each maps 
 
 ### NemoClaw/OpenClaw Setup
 
-- [ ] **NCLAW-01**: NemoClaw/OpenClaw deployed to EKS using experimental agent-sandbox CRD approach
+- [x] **NCLAW-01**: NemoClaw/OpenClaw deployed to EKS using experimental agent-sandbox CRD approach
 - [ ] **NCLAW-02**: MCP server registered with OpenClaw via Streamable HTTP transport (`http://localhost:<port>/mcp`)
-- [ ] **NCLAW-03**: NemoClaw egress policy explicitly allows loopback access to MCP sidecar port
+- [x] **NCLAW-03**: NemoClaw egress policy explicitly allows loopback access to MCP sidecar port
 - [ ] **NCLAW-04**: SKILL.md loaded by agent at registration time
 
 ### E2E Validation
@@ -69,9 +69,9 @@ Deferred to v3.1+ after live agent behavior is observed.
 | K8S-03 | Phase 13 | Pending |
 | K8S-04 | Phase 13 | Pending |
 | K8S-05 | Phase 13 | Pending |
-| NCLAW-01 | Phase 12 | Pending |
+| NCLAW-01 | Phase 12 | Complete |
 | NCLAW-02 | Phase 13 | Pending |
-| NCLAW-03 | Phase 12 | Pending |
+| NCLAW-03 | Phase 12 | Complete |
 | NCLAW-04 | Phase 13 | Pending |
 | E2E-01 | Phase 14 | Pending |
 | E2E-02 | Phase 14 | Pending |
