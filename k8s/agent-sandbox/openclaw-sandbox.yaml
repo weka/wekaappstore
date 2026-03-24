@@ -132,10 +132,13 @@ spec:
               value: "http"
             - name: MCP_PORT
               value: "8080"
-            # K8S-04: BLUEPRINTS_DIR points to the subPath-mounted directory that
-            # dereferences the git-sync symlink. See volumeMount below for subPath details.
+            # K8S-04: BLUEPRINTS_DIR points into the git-sync worktree's manifests
+            # subdirectory. git-sync creates /blueprints/blueprints -> .worktrees/<hash>
+            # which is a symlink. Kubernetes subPath does not follow symlinks so the
+            # sidecar mounts the full emptyDir at /app/git-sync-root and navigates
+            # through the symlink to the manifests/ subdirectory at runtime via BLUEPRINTS_DIR.
             - name: BLUEPRINTS_DIR
-              value: "/app/blueprints"
+              value: "/app/git-sync-root/blueprints/manifests"
             - name: KUBERNETES_AUTH_MODE
               value: "incluster"
           readinessProbe:
@@ -166,13 +169,15 @@ spec:
               drop:
                 - ALL
           volumeMounts:
-            # git-sync writes to /blueprints/blueprints (a symlink to the versioned
-            # checkout directory). Using subPath: blueprints dereferences that symlink
-            # so the MCP sidecar sees /app/blueprints as a plain directory, not a dangling link.
-            # Research pitfall #1: without subPath the container sees a symlink it cannot follow.
+            # git-sync writes to /blueprints/blueprints (a symlink -> .worktrees/<hash>).
+            # Kubernetes subPath does NOT follow symlinks, so using subPath: blueprints
+            # results in an empty mount (the symlink is never dereferenced).
+            # Fix: mount the full emptyDir at /app/git-sync-root. The MCP server then
+            # reads /app/git-sync-root/blueprints/manifests/ which Python's os.listdir()
+            # follows through the symlink at runtime (unlike Kubernetes subPath).
+            # BLUEPRINTS_DIR env var is set to this full path above.
             - name: blueprints
-              mountPath: /app/blueprints
-              subPath: blueprints
+              mountPath: /app/git-sync-root
             # openclaw-config is readOnly here — the init container already wrote
             # openclaw.json; the sidecar only needs to read SKILL.md from this volume.
             # Write happens exclusively in the init container to avoid race conditions.

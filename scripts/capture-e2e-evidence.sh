@@ -130,10 +130,13 @@ if [[ "${MODE}" == "pre" ]] || [[ "${MODE}" == "all" ]]; then
   echo "--- E2E-02: Blueprint catalog ---"
 
   if [[ -n "${POD_NAME}" ]]; then
+    # Resolve BLUEPRINTS_DIR dynamically from the running container to handle mount path changes
+    BLUEPRINTS_DIR_LIVE=$(kubectl exec "${POD_NAME}" -c weka-mcp-sidecar -n "${NAMESPACE}" -- \
+      sh -c 'echo $BLUEPRINTS_DIR' 2>/dev/null || echo "/app/git-sync-root/blueprints/manifests")
     run_capture \
-      "blueprint catalog listing" \
+      "blueprint catalog listing (${BLUEPRINTS_DIR_LIVE})" \
       "${EVIDENCE_DIR}/e2e-02-blueprints.txt" \
-      "kubectl exec ${POD_NAME} -c weka-mcp-sidecar -n ${NAMESPACE} -- ls -la /app/blueprints/"
+      "kubectl exec ${POD_NAME} -c weka-mcp-sidecar -n ${NAMESPACE} -- ls -la ${BLUEPRINTS_DIR_LIVE}"
   else
     echo "  SKIP: No pod available — E2E-02 blueprint evidence not captured"
     echo "  SKIP: No pod available — run after pod is Ready" > "${EVIDENCE_DIR}/e2e-02-blueprints.txt"

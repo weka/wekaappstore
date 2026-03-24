@@ -1,0 +1,52 @@
+NAME                                         STATUS   ROLES    AGE   VERSION               INTERNAL-IP    EXTERNAL-IP      OS-IMAGE             KERNEL-VERSION                  CONTAINER-RUNTIME
+ip-172-3-1-154.us-west-2.compute.internal    Ready    <none>   48d   v1.32.9-eks-ecaa3a6   172.3.1.154    52.88.238.190    Amazon Linux 2       5.10.245-245.983.amzn2.x86_64   containerd://1.7.29
+ip-172-3-1-203.us-west-2.compute.internal    Ready    <none>   48d   v1.32.11              172.3.1.203    35.89.104.114    Ubuntu 22.04.5 LTS   6.8.0-1044-aws                  containerd://1.7.28
+ip-172-3-1-7.us-west-2.compute.internal      Ready    <none>   47d   v1.32.11              172.3.1.7      35.89.150.152    Ubuntu 22.04.5 LTS   6.8.0-1044-aws                  containerd://1.7.28
+ip-172-3-10-231.us-west-2.compute.internal   Ready    <none>   48d   v1.32.9-eks-ecaa3a6   172.3.10.231   44.248.231.235   Amazon Linux 2       5.10.245-245.983.amzn2.x86_64   containerd://1.7.29
+ip-172-3-11-145.us-west-2.compute.internal   Ready    <none>   47d   v1.32.11              172.3.11.145   44.243.7.173     Ubuntu 22.04.5 LTS   6.8.0-1044-aws                  containerd://1.7.28
+ip-172-3-11-183.us-west-2.compute.internal   Ready    <none>   48d   v1.32.9-eks-ecaa3a6   172.3.11.183   16.146.249.86    Amazon Linux 2       5.10.245-245.983.amzn2.x86_64   containerd://1.7.29
+ip-172-3-12-208.us-west-2.compute.internal   Ready    <none>   48d   v1.32.11              172.3.12.208   54.214.144.226   Ubuntu 22.04.5 LTS   6.8.0-1044-aws                  containerd://1.7.28
+ip-172-3-14-248.us-west-2.compute.internal   Ready    <none>   48d   v1.32.11              172.3.14.248   44.244.140.169   Ubuntu 22.04.5 LTS   6.8.0-1044-aws                  containerd://1.7.28
+ip-172-3-14-73.us-west-2.compute.internal    Ready    <none>   29d   v1.32.11              172.3.14.73    35.89.98.29      Ubuntu 22.04.5 LTS   6.8.0-1044-aws                  containerd://1.7.28
+ip-172-3-15-20.us-west-2.compute.internal    Ready    <none>   48d   v1.32.11              172.3.15.20    35.90.23.152     Ubuntu 22.04.5 LTS   6.8.0-1044-aws                  containerd://1.7.28
+ip-172-3-15-62.us-west-2.compute.internal    Ready    <none>   48d   v1.32.9-eks-ecaa3a6   172.3.15.62    35.93.69.86      Amazon Linux 2       5.10.245-245.983.amzn2.x86_64   containerd://1.7.29
+ip-172-3-3-239.us-west-2.compute.internal    Ready    <none>   48d   v1.32.11              172.3.3.239    34.214.36.59     Ubuntu 22.04.5 LTS   6.8.0-1044-aws                  containerd://1.7.28
+ip-172-3-31-18.us-west-2.compute.internal    Ready    <none>   29d   v1.32.11              172.3.31.18    35.94.63.19      Ubuntu 22.04.5 LTS   6.8.0-1044-aws                  containerd://1.7.28
+ip-172-3-4-194.us-west-2.compute.internal    Ready    <none>   48d   v1.32.9-eks-ecaa3a6   172.3.4.194    34.213.92.142    Amazon Linux 2       5.10.245-245.983.amzn2.x86_64   containerd://1.7.29
+ip-172-3-5-144.us-west-2.compute.internal    Ready    <none>   48d   v1.32.11              172.3.5.144    54.213.35.63     Ubuntu 22.04.5 LTS   6.8.0-1044-aws                  containerd://1.7.28
+ip-172-3-7-125.us-west-2.compute.internal    Ready    <none>   48d   v1.32.9-eks-ecaa3a6   172.3.7.125    54.218.99.216    Amazon Linux 2       5.10.245-245.983.amzn2.x86_64   containerd://1.7.29
+ip-172-3-9-254.us-west-2.compute.internal    Ready    <none>   48d   v1.32.9-eks-ecaa3a6   172.3.9.254    44.251.232.250   Amazon Linux 2       5.10.245-245.983.amzn2.x86_64   containerd://1.7.29
+ip-172-3-9-76.us-west-2.compute.internal     Ready    <none>   48d   v1.32.9-eks-ecaa3a6   172.3.9.76     16.148.104.67    Amazon Linux 2       5.10.245-245.983.amzn2.x86_64   containerd://1.7.29
+Capacity:
+  cpu:                16
+  ephemeral-storage:  609555876Ki
+  hugepages-1Gi:      0
+  hugepages-2Mi:      4048Mi
+  memory:             65118188Ki
+  nvidia.com/gpu:     1
+  pods:               234
+Allocatable:
+  cpu:                15890m
+  ephemeral-storage:  560692952568
+  hugepages-1Gi:      0
+  hugepages-2Mi:      4048Mi
+  memory:             57973740Ki
+  nvidia.com/gpu:     1
+  pods:               234
+System Info:
+  Machine ID:                 ec2ebf6d105cf8ced164f6ead700ac32
+  System UUID:                ec2ebf6d-105c-f8ce-d164-f6ead700ac32
+NAME                   STATUS   AGE
+agent-sandbox-system   Active   19h
+csi-wekafs             Active   48d
+default                Active   48d
+envoy-gateway-system   Active   48d
+gpu-operator           Active   47d
+keycloak               Active   42d
+kube-node-lease        Active   48d
+kube-public            Active   48d
+kube-system            Active   48d
+monitoring             Active   48d
+rag                    Active   47d
+weka-operator-system   Active   48d
+wekaappstore           Active   48d

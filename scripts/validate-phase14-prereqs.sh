@@ -83,21 +83,25 @@ fi
 # CHECK 2: OSS Rag blueprint in catalog
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
-echo "[2] Checking OSS Rag blueprint in MCP sidecar catalog (/app/blueprints/)..."
+echo "[2] Checking OSS Rag blueprint in MCP sidecar catalog (BLUEPRINTS_DIR)..."
+
+# Resolve the actual BLUEPRINTS_DIR from the running container env (handles mount path changes)
+BLUEPRINTS_DIR=$(kubectl exec "${POD_NAME}" -c weka-mcp-sidecar -n "${NAMESPACE}" -- \
+  sh -c 'echo $BLUEPRINTS_DIR' 2>/dev/null || echo "/app/git-sync-root/blueprints/manifests")
 
 BLUEPRINTS_OUT=$(kubectl exec "${POD_NAME}" -c weka-mcp-sidecar -n "${NAMESPACE}" -- \
-  ls /app/blueprints/ 2>&1 || echo "ERROR")
+  ls "${BLUEPRINTS_DIR}" 2>&1 || echo "ERROR")
 
 if [[ "${BLUEPRINTS_OUT}" == "ERROR" ]]; then
-  echo "  FAIL: Could not list /app/blueprints/ in weka-mcp-sidecar"
-  echo "        kubectl exec ${POD_NAME} -c weka-mcp-sidecar -n ${NAMESPACE} -- ls /app/blueprints/"
+  echo "  FAIL: Could not list ${BLUEPRINTS_DIR} in weka-mcp-sidecar"
+  echo "        kubectl exec ${POD_NAME} -c weka-mcp-sidecar -n ${NAMESPACE} -- ls ${BLUEPRINTS_DIR}"
   FAIL=$((FAIL + 1))
 elif echo "${BLUEPRINTS_OUT}" | grep -qi "oss\|rag"; then
-  echo "  PASS: OSS Rag blueprint found in catalog"
+  echo "  PASS: OSS Rag blueprint found in catalog (${BLUEPRINTS_DIR})"
   echo "        Entries: ${BLUEPRINTS_OUT}"
   PASS=$((PASS + 1))
 else
-  echo "  WARN: No entry matching 'oss' or 'rag' (case-insensitive) found in /app/blueprints/"
+  echo "  WARN: No entry matching 'oss' or 'rag' (case-insensitive) found in ${BLUEPRINTS_DIR}"
   echo "        Blueprint naming may differ. Catalog contents:"
   echo "${BLUEPRINTS_OUT}" | sed 's/^/        /'
   WARNS+=("Check 2: No 'oss' or 'rag' blueprint found — verify catalog contents manually")

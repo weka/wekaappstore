@@ -1,0 +1,8 @@
+total 28
+drwxr-sr-x 7 65533 1000 4096 Mar 24 22:48 .
+drwxr-sr-x 4 65533 1000 4096 Mar 24 22:48 ..
+drwxr-sr-x 2 65533 1000 4096 Mar 24 22:48 apache_spark
+drwxr-sr-x 2 65533 1000 4096 Mar 24 22:48 cluster_init
+drwxr-sr-x 3 65533 1000 4096 Mar 24 22:48 nvidia-vss
+drwxr-sr-x 6 65533 1000 4096 Mar 24 22:48 openfold-protein
+drwxr-sr-x 2 65533 1000 4096 Mar 24 22:48 oss-rag
