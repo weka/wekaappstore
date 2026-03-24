@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Live EKS Deployment and Agent Testing
 status: planning
-stopped_at: Completed 13-02-PLAN.md
-last_updated: "2026-03-24T05:58:14.824Z"
+stopped_at: Completed 13-03-PLAN.md
+last_updated: "2026-03-24T06:19:40.800Z"
 last_activity: 2026-03-23 — v3.0 roadmap created; Phases 11-14 defined
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 7
-  completed_plans: 6
+  completed_plans: 7
   percent: 0
 ---
 
@@ -53,6 +53,7 @@ Progress: [░░░░░░░░░░] 0% (v3.0)
 | Phase 12-nemoclaw-eks-topology P02 | 15min | 3 tasks | 4 files |
 | Phase 13-kubernetes-manifests-and-sidecar-wiring P01 | 2min | 2 tasks | 2 files |
 | Phase 13-kubernetes-manifests-and-sidecar-wiring P02 | 8min | 2 tasks | 2 files |
+| Phase 13-kubernetes-manifests-and-sidecar-wiring P03 | 18min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,9 @@ Progress: [░░░░░░░░░░] 0% (v3.0)
 - [Phase 13-kubernetes-manifests-and-sidecar-wiring]: printf used in init container (not heredoc) to avoid shell variable expansion when writing openclaw.json
 - [Phase 13-kubernetes-manifests-and-sidecar-wiring]: subPath: blueprints on MCP sidecar mount dereferences git-sync symlink at /blueprints/blueprints
 - [Phase 13-kubernetes-manifests-and-sidecar-wiring]: openclaw-config readOnly in weka-mcp-sidecar; init container is sole writer to prevent race conditions
+- [Phase Phase 13-03]: openclaw.json schema is mcp.servers.<name>.{url,transport,skill} nested format (not flat top-level schema) — discovered by live cluster testing against OpenClaw 2026.3.23
+- [Phase Phase 13-03]: wekachrisjen/weka-app-store-mcp built as multi-arch image (linux/amd64 + linux/arm64) via docker buildx — EKS nodes are amd64, dev machine is arm64
+- [Phase Phase 13-03]: webapp/__init__.py uses __getattr__ lazy import for app — avoids FastAPI dependency in MCP server Docker build context
 
 ### Pending Todos
 
@@ -92,6 +96,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T05:58:14.822Z
-Stopped at: Completed 13-02-PLAN.md
+Last session: 2026-03-24T06:19:40.797Z
+Stopped at: Completed 13-03-PLAN.md
 Resume file: None
