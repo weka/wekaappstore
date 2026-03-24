@@ -1,0 +1,72 @@
+# RBAC for WEKA App Store MCP sidecar — minimum permissions for all 8 tools
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: weka-mcp-server-sa
+  namespace: wekaappstore
+  labels:
+    app: weka-mcp-server
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: weka-mcp-server-cr
+  labels:
+    app: weka-mcp-server
+rules:
+  # inspect_cluster: read node/pod/namespace inventory
+  - apiGroups: [""]
+    resources: ["namespaces", "nodes", "pods"]
+    verbs: ["get", "list", "watch"]
+
+  # inspect_cluster: read storage class inventory
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+
+  # get_crd_schema, inspect_cluster: read CRD definitions
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
+
+  # inspect_cluster: read NVIDIA GPU operator cluster policy
+  - apiGroups: ["nvidia.com"]
+    resources: ["clusterpolicies"]
+    verbs: ["get", "list", "watch"]
+
+  # inspect_cluster: read GPU daemonset status
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["get", "list", "watch"]
+
+  # inspect_cluster, apply, status: full lifecycle for WekaAppStore CRs
+  - apiGroups: ["warp.io"]
+    resources: ["wekaappstores"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # inspect_weka: read WEKA cluster inventory
+  - apiGroups: ["weka.weka.io"]
+    resources: ["wekaclusters"]
+    verbs: ["get", "list", "watch"]
+
+  # inspect_cluster: check cluster version and health
+  - nonResourceURLs: ["/version", "/healthz"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: weka-mcp-server-crb
+  labels:
+    app: weka-mcp-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: weka-mcp-server-cr
+subjects:
+  # CRITICAL: namespace must be set explicitly — mismatch causes silent 403 failures
+  - kind: ServiceAccount
+    name: weka-mcp-server-sa
+    namespace: wekaappstore
