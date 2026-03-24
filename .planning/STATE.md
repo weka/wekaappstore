@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Live EKS Deployment and Agent Testing
 status: planning
-stopped_at: Phase 13 context gathered
-last_updated: "2026-03-24T05:39:33.455Z"
+stopped_at: Completed 13-01-PLAN.md
+last_updated: "2026-03-24T05:57:21.689Z"
 last_activity: 2026-03-23 — v3.0 roadmap created; Phases 11-14 defined
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 7
+  completed_plans: 5
   percent: 0
 ---
 
@@ -51,6 +51,7 @@ Progress: [░░░░░░░░░░] 0% (v3.0)
 | Phase 11-streamable-http-transport P01 | 2min | 2 tasks | 4 files |
 | Phase 12-nemoclaw-eks-topology P01 | 2min | 2 tasks | 4 files |
 | Phase 12-nemoclaw-eks-topology P02 | 15min | 3 tasks | 4 files |
+| Phase 13-kubernetes-manifests-and-sidecar-wiring P01 | 2min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,9 @@ Progress: [░░░░░░░░░░] 0% (v3.0)
 - [Phase 12-nemoclaw-eks-topology]: Loopback :8080 probe in smoke test is WARN-only (exit 7 = PASS, exit 28 = WARN) since MCP sidecar does not exist until Phase 13
 - [Phase 12-nemoclaw-eks-topology]: OpenClaw gateway uses --bind=loopback (not --bind=lan) for Sandbox CR deployment; non-loopback requires controlUi config not available in containerized mode
 - [Phase 12-nemoclaw-eks-topology]: Phase 12 gate resolved: OpenClaw deployed via agent-sandbox Sandbox CRD in wekaappstore namespace; NCLAW-01 and NCLAW-03 validated; topology documented in TOPOLOGY.md
+- [Phase 13-01]: delete verb included for wekaappstores resource — research audit includes it for operator lifecycle management
+- [Phase 13-01]: subjects[0].namespace must be wekaappstore in ClusterRoleBinding — mismatch causes silent 403 failures
+- [Phase 13-01]: SKILL.md ConfigMap targets OpenClaw container (not MCP sidecar) — OpenClaw reads SKILL.md at agent registration via skill field in openclaw.json
 
 ### Pending Todos
 
@@ -84,6 +88,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T05:39:33.447Z
-Stopped at: Phase 13 context gathered
-Resume file: .planning/phases/13-kubernetes-manifests-and-sidecar-wiring/13-CONTEXT.md
+Last session: 2026-03-24T05:57:21.687Z
+Stopped at: Completed 13-01-PLAN.md
+Resume file: None
