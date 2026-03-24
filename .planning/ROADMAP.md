@@ -21,7 +21,7 @@ See MILESTONES.md for full v2.0 summary.
 **Milestone Goal:** Deploy OpenClaw/NemoClaw and the MCP server to EKS, register tools via Streamable HTTP sidecar, and validate the full agent chat experience with a happy-path blueprint deployment.
 
 - [x] **Phase 11: Streamable HTTP Transport** - Add HTTP transport mode to MCP server (code-only, no cluster needed) (completed 2026-03-23)
-- [ ] **Phase 12: NemoClaw EKS Topology** - Deploy NemoClaw/OpenClaw to EKS using agent-sandbox CRD; validate topology before manifests
+- [x] **Phase 12: NemoClaw EKS Topology** - Deploy NemoClaw/OpenClaw to EKS using agent-sandbox CRD; validate topology before manifests (completed 2026-03-24)
 - [ ] **Phase 13: Kubernetes Manifests and Sidecar Wiring** - Author complete K8s manifest set; wire MCP sidecar into OpenClaw pod
 - [ ] **Phase 14: End-to-End Validation** - Validate full happy-path blueprint deployment through live agent chat
 
@@ -52,7 +52,7 @@ Plans:
   2. NemoClaw egress policy explicitly allows loopback access so sidecar port is reachable
   3. GPU node group and NVIDIA GPU Operator confirmed operational (agent container starts without GPU errors)
   4. Topology decision (agent-sandbox CRD approach) documented as a Key Decision in PROJECT.md
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 - [ ] 12-01-PLAN.md — Create Sandbox CR manifest, Secret templates, operator install script, and smoke test script
@@ -99,6 +99,6 @@ Plans:
 | 9. Deployment and Registration | v2.0 | 2/2 | Complete | 2026-03-22 |
 | 10. Integration Bug Fixes | v2.0 | 1/1 | Complete | 2026-03-22 |
 | 11. Streamable HTTP Transport | 2/2 | Complete    | 2026-03-24 | - |
-| 12. NemoClaw EKS Topology | 1/2 | In Progress|  | - |
+| 12. NemoClaw EKS Topology | 2/2 | Complete   | 2026-03-24 | - |
 | 13. Kubernetes Manifests and Sidecar Wiring | v3.0 | 0/TBD | Not started | - |
 | 14. End-to-End Validation | v3.0 | 0/TBD | Not started | - |

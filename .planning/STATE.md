@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Live EKS Deployment and Agent Testing
 status: planning
-stopped_at: Completed 12-nemoclaw-eks-topology 12-01-PLAN.md
-last_updated: "2026-03-24T03:19:28.721Z"
+stopped_at: Completed 12-nemoclaw-eks-topology 12-02-PLAN.md
+last_updated: "2026-03-24T05:14:45.051Z"
 last_activity: 2026-03-23 — v3.0 roadmap created; Phases 11-14 defined
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -50,6 +50,7 @@ Progress: [░░░░░░░░░░] 0% (v3.0)
 | Phase 11-streamable-http-transport P02 | 12 | 2 tasks | 4 files |
 | Phase 11-streamable-http-transport P01 | 2min | 2 tasks | 4 files |
 | Phase 12-nemoclaw-eks-topology P01 | 2min | 2 tasks | 4 files |
+| Phase 12-nemoclaw-eks-topology P02 | 15min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -67,6 +68,8 @@ Progress: [░░░░░░░░░░] 0% (v3.0)
 - [Phase 11]: stateless_http=True required in HTTP mode to avoid session ID forwarding issues with OpenClaw client (XPORT-04)
 - [Phase 12-nemoclaw-eks-topology]: Sandbox CR has no hardcoded namespace — applied with kubectl -n <NAMESPACE> to match locked decision of same namespace as WEKA App Store components
 - [Phase 12-nemoclaw-eks-topology]: Loopback :8080 probe in smoke test is WARN-only (exit 7 = PASS, exit 28 = WARN) since MCP sidecar does not exist until Phase 13
+- [Phase 12-nemoclaw-eks-topology]: OpenClaw gateway uses --bind=loopback (not --bind=lan) for Sandbox CR deployment; non-loopback requires controlUi config not available in containerized mode
+- [Phase 12-nemoclaw-eks-topology]: Phase 12 gate resolved: OpenClaw deployed via agent-sandbox Sandbox CRD in wekaappstore namespace; NCLAW-01 and NCLAW-03 validated; topology documented in TOPOLOGY.md
 
 ### Pending Todos
 
@@ -81,6 +84,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T03:19:28.719Z
-Stopped at: Completed 12-nemoclaw-eks-topology 12-01-PLAN.md
+Last session: 2026-03-24T05:14:45.048Z
+Stopped at: Completed 12-nemoclaw-eks-topology 12-02-PLAN.md
 Resume file: None
