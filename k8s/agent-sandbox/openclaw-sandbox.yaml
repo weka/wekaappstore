@@ -25,7 +25,7 @@ spec:
             - "node"
             - "dist/index.js"
             - "gateway"
-            - "--bind=lan"
+            - "--bind=loopback"
             - "--port"
             - "18789"
             - "--allow-unconfigured"

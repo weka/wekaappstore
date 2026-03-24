@@ -19,10 +19,23 @@ echo "Namespace: ${NAMESPACE}"
 echo "Sandbox:   ${SANDBOX_NAME}"
 echo ""
 
+# ─── Resolve label selector from Sandbox CR status ───────────────────────────
+# The agent-sandbox operator sets agents.x-k8s.io/sandbox-name-hash=<hash>
+# (not sandbox.agents.x-k8s.io/name=<name>) as the pod selector.
+# Retrieve the actual selector from the Sandbox CR status field.
+SANDBOX_SELECTOR=$(kubectl get sandbox "${SANDBOX_NAME}" -n "${NAMESPACE}" \
+  -o jsonpath='{.status.selector}' 2>/dev/null || echo "")
+
+if [[ -z "${SANDBOX_SELECTOR}" ]]; then
+  echo "FAIL: Could not retrieve selector from Sandbox CR status. Is the operator running?"
+  echo "      kubectl get sandbox ${SANDBOX_NAME} -n ${NAMESPACE}"
+  exit 1
+fi
+
 # ─── Step 1: Pod Running ─────────────────────────────────────────────────────
 echo "[1/5] Checking pod Ready status (timeout: 300s)..."
 if kubectl wait --for=condition=Ready pod \
-    -l "sandbox.agents.x-k8s.io/name=${SANDBOX_NAME}" \
+    -l "${SANDBOX_SELECTOR}" \
     -n "${NAMESPACE}" \
     --timeout=300s > /dev/null 2>&1; then
   echo "  PASS: Pod is Ready"
@@ -37,7 +50,7 @@ fi
 
 # Retrieve pod name and node name for subsequent checks
 POD_NAME=$(kubectl get pods -n "${NAMESPACE}" \
-  -l "sandbox.agents.x-k8s.io/name=${SANDBOX_NAME}" \
+  -l "${SANDBOX_SELECTOR}" \
   -o jsonpath='{.items[0].metadata.name}')
 NODE_NAME=$(kubectl get pod "${POD_NAME}" -n "${NAMESPACE}" \
   -o jsonpath='{.spec.nodeName}')
