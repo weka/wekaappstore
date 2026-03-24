@@ -56,8 +56,8 @@ Plans:
 
 Plans:
 - [ ] 12-01-PLAN.md — Create Sandbox CR manifest, Secret templates, operator install script, and smoke test script
-- [ ] 12-02-PLAN.md — Deploy to EKS, validate topology, and write TOPOLOGY.md reference for Phase 13
-
+- [x] 12-02-PLAN.md — Deploy to EKS, validate topology, and write TOPOLOGY.md reference for Phase 13
+ (completed 2026-03-24)
 ### Phase 13: Kubernetes Manifests and Sidecar Wiring
 **Goal**: Complete Kubernetes manifest set authored and applied; MCP sidecar running inside the OpenClaw pod with correct RBAC, startup ordering, and runtime-generated openclaw.json
 **Depends on**: Phase 12
@@ -102,5 +102,5 @@ Plans:
 | 10. Integration Bug Fixes | v2.0 | 1/1 | Complete | 2026-03-22 |
 | 11. Streamable HTTP Transport | 2/2 | Complete    | 2026-03-24 | - |
 | 12. NemoClaw EKS Topology | 2/2 | Complete    | 2026-03-24 | - |
-| 13. Kubernetes Manifests and Sidecar Wiring | 3/3 | Complete   | 2026-03-24 | - |
+| 13. Kubernetes Manifests and Sidecar Wiring | 3/3 | Complete    | 2026-03-24 | - |
 | 14. End-to-End Validation | v3.0 | 0/TBD | Not started | - |
