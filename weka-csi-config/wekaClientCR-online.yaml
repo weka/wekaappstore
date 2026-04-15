@@ -3,7 +3,7 @@ kind: WekaClient
 metadata:
   name: warp-cluster-clients
 spec:
-  image: quay.io/weka.io/weka-in-container:4.4.10.202
+  image: quay.io/weka.io/weka-in-container:5.1.0.605
   imagePullSecret: quay-io-robot-secret
   driversDistService: "https://drivers.weka.io"
   rawTolerations:
@@ -16,6 +16,6 @@ spec:
   nodeSelector:
     weka.io/supports-clients: "true"
   wekaSecretRef: weka-client-cluster-dev
-  joinIpPorts: ["172.3.1.114:14000"]
+  joinIpPorts: ["192.168.1.1:14000"]
   network:
     udpMode: true

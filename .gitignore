@@ -1,2 +1,4 @@
 /weka-operator/
 /weka-csi-config/weka-operator/
+/weka-csi-config/quay-secret.yaml
+/weka-csi-config/csi-wekafs-api-secret.yaml

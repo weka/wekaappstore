@@ -41,12 +41,16 @@ spec:
           command: ["sh", "-c"]
           args:
             - |
-              printf '{"mcp":{"servers":{"weka-app-store-mcp":{"url":"http://localhost:%s/mcp","transport":"streamable-http","skill":"%s"}}}}\n' "$MCP_PORT" "$SKILL_MD_PATH" > /home/node/.openclaw/openclaw.json && cat /home/node/.openclaw/openclaw.json
+              printf '{"gateway":{"controlUi":{"dangerouslyAllowHostHeaderOriginFallback":true}},"models":{"providers":{"nim":{"baseUrl":"%s","api":"openai-completions","apiKey":"not-needed","models":[{"id":"%s","name":"Local NIM Llama 3.1 8B","reasoning":false,"input":["text"],"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0},"contextWindow":131072,"maxTokens":4096}]}}},"agents":{"defaults":{"model":{"primary":"nim/%s"},"models":{"nim/%s":{}}}},"mcp":{"servers":{"weka-app-store-mcp":{"url":"http://localhost:%s/mcp","transport":"streamable-http","skill":"%s"}}}}\n' "$NIM_BASE_URL" "$NIM_MODEL" "$NIM_MODEL" "$NIM_MODEL" "$MCP_PORT" "$SKILL_MD_PATH" > /home/node/.openclaw/openclaw.json && cat /home/node/.openclaw/openclaw.json
           env:
             - name: MCP_PORT
               value: "8080"
             - name: SKILL_MD_PATH
               value: "/home/node/.openclaw/SKILL.md"
+            - name: NIM_BASE_URL
+              value: "http://nim-llm.rag.svc.cluster.local:8000/v1"
+            - name: NIM_MODEL
+              value: "meta/llama-3.1-8b-instruct"
           volumeMounts:
             - name: openclaw-config
               mountPath: /home/node/.openclaw
@@ -70,7 +74,7 @@ spec:
             - "node"
             - "dist/index.js"
             - "gateway"
-            - "--bind=loopback"
+            - "--bind=lan"
             - "--port"
             - "18789"
             - "--allow-unconfigured"
@@ -98,6 +102,13 @@ spec:
                 secretKeyRef:
                   name: nvidia-api-key
                   key: key
+            # Local NIM LLM — OpenAI-compatible endpoint in-cluster
+            - name: OPENAI_API_BASE
+              value: "http://nim-llm.rag.svc.cluster.local:8000/v1"
+            - name: OPENAI_API_KEY
+              value: "not-needed"
+            - name: OPENCLAW_MODEL
+              value: "meta/llama-3.1-8b-instruct"
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000

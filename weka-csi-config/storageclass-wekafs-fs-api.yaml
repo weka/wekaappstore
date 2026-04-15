@@ -1,21 +1,14 @@
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: storageclass-wekafs-fs-nfs
+  name: storageclass-wekafs-fs-static
 provisioner: csi.weka.io
-reclaimPolicy: Delete
+reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 parameters:
-
-  volumeType: dir/v1
-  filesystemName: default
-  capacityEnforcement: HARD
-
-  # Optional: set ownership / permissions on the root of each volume
-  ownerUid: "1000"
-  ownerGid: "1000"
-  permissions: "0775"
+  volumeType: weka/v2             # filesystem-backed (omitting this defaults to weka/v2)
+  filesystemGroupName: default  # must exist on WEKA cluster
 
   csi.storage.k8s.io/provisioner-secret-name: &secretName csi-wekafs-api-secret
   csi.storage.k8s.io/provisioner-secret-namespace: &secretNamespace csi-wekafs
