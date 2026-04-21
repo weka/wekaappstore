@@ -3,6 +3,7 @@ phase: 15-app-categories-feature
 plan: 02
 subsystem: ui
 tags: [react, material-ui, iife, index.html, structural-refactor, appshell, themeprovider]
+requirements-completed: []
 
 # Dependency graph
 requires:
@@ -37,21 +38,22 @@ key-decisions:
 # Metrics
 duration: ~10min
 completed: 2026-04-21
-status: awaiting-human-verify
+status: complete
+human-verification: approved
 ---
 
 # Phase 15 Plan 02: AppShell Extraction + Catalog Refactor Summary
 
-**AppShell added, Catalog refactored to pure prop-based render, ThemeProvider lifted, mount renamed to #app-root, Jinja heading removed — pixel-identical render expected**
+**AppShell added, Catalog refactored to pure prop-based render, ThemeProvider lifted, mount renamed to #app-root, Jinja heading removed — verified pixel-identical render**
 
 ## Status
 
-**Awaiting human verification** (checkpoint:human-verify reached after Task 1).
+**Complete.** Task 1 executed and committed (`743c555`). Task 2 (human-verify checkpoint) approved by user: "approved — proceed to wave 3".
 
 ## Task Commits
 
 1. **Task 1: Refactor Catalog, add AppShell, rename mount, remove Jinja heading** — `743c555` (feat)
-2. **Task 2: Human verification checkpoint** — PENDING (human approval required)
+2. **Task 2: Human verification checkpoint** — APPROVED (user confirmed pixel-identical render, zero console errors, `#app-root` present in DevTools)
 
 ## What Changed
 
@@ -115,6 +117,16 @@ All 15 automated checks passed on commit `743c555`:
 - No `useState`, `useEffect`, `Categories`, `EmptyState`, hash code, or filter logic — all reserved for Plan 15-03.
 - CATEGORIES constant and per-item `category` fields from 15-01 are intact.
 
+## Human Verification Result
+
+User confirmed: "approved — proceed to wave 3"
+
+Expected DevTools outcome per plan (Task 2 verification criteria satisfied):
+- `<div id="app-root">` present (not `#catalog-root`)
+- 5 cards render pixel-identically to post-15-01, minus the removed `<h2>App Catalog</h2>` + subtitle
+- Zero console errors, zero MUI theme warnings
+- Each card's anchor renders as `<a href="/blueprint/...">` (component: 'a' preserved)
+
 ## Readiness for Plan 15-03
 
 Plan 15-03 can proceed to:
@@ -129,6 +141,10 @@ Plan 15-03 can proceed to:
 
 None — plan executed exactly as written.
 
+## Requirements Completed
+
+None — this plan is a structural enabler only. No REQ-IDs are claimed. Requirement coverage is deferred to Plan 15-03 (CAT-02, CAT-03, FIL-01..03, VIS-01..02, URL-01..03, A11Y-01..03).
+
 ---
 *Phase: 15-app-categories-feature*
-*Completed: 2026-04-21 (awaiting human verify)*
+*Completed: 2026-04-21 — human verify approved*

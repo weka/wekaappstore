@@ -77,7 +77,7 @@ See MILESTONES.md for full v2.0 summary.
   3. `MCP_TRANSPORT=http` starts the server in Streamable HTTP mode on the port set by `MCP_PORT`
   4. Tool calls over HTTP return the same flat JSON responses as stdio (depth contract preserved)
   5. `openclaw.json` points to `http://localhost:8080/mcp` with `"transport": "streamable-http"` replacing the stdio startup block
-**Plans:** 1/3 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 - [ ] 11-01-PLAN.md — Dual-mode transport in config.py and server.py with health endpoint and tests
@@ -139,4 +139,4 @@ Plans:
 | 12. NemoClaw EKS Topology | v3.0 | 2/2 | Complete | 2026-03-24 |
 | 13. Kubernetes Manifests and Sidecar Wiring | v3.0 | 3/3 | Complete | 2026-03-24 |
 | 14. End-to-End Validation | v3.1 | 1/2 | Descoped → v3.1 | 2026-04-21 |
-| 15. App Categories Feature | 1/3 | In Progress|  | - |
+| 15. App Categories Feature | 2/3 | In Progress|  | - |

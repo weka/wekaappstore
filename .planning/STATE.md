@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: App Categories on Home Screen
 status: planning
-stopped_at: Completed 15-01-PLAN.md
-last_updated: "2026-04-21T07:25:31.906Z"
+stopped_at: Completed 15-02-PLAN.md
+last_updated: "2026-04-21T07:37:14.181Z"
 last_activity: 2026-04-21 — v4.0 roadmap created; Phase 15 has 3 plans; research complete
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 12
-  completed_plans: 9
+  completed_plans: 10
   percent: 0
 ---
 
@@ -48,6 +48,7 @@ Progress: [░░░░░░░░░░] 0% (v4.0)
 
 *Updated after each plan completion*
 | Phase 15 P15-01 | 8 | 2 tasks | 1 files |
+| Phase 15 P02 | 611min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -61,6 +62,7 @@ Progress: [░░░░░░░░░░] 0% (v4.0)
 - [v4.0 research]: Hash parser uses `startsWith('#category=')` to avoid collision with `#catalog` / `#planning-studio`
 - [v4.0 research]: `ThemeProvider` lifts from `Catalog` to `AppShell` — one provider wraps both siblings
 - [Phase 15]: Blueprint → category mapping locked: AI Agent for Enterprise Research=aidp; OSS RAG/NVIDIA RAG/NVIDIA VSS/OpenFold=warp; partner=0 items on launch
+- [Phase 15]: AppShell added immediately after Catalog inside the existing IIFE (no second IIFE); section#catalog wrapper retained unchanged; all 5 edits made in one atomic pass
 
 ### Pending Todos
 
@@ -72,6 +74,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T07:25:31.903Z
-Stopped at: Completed 15-01-PLAN.md
+Last session: 2026-04-21T07:37:14.177Z
+Stopped at: Completed 15-02-PLAN.md
 Resume file: None
