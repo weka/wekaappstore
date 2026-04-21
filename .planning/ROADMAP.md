@@ -15,7 +15,7 @@
 
 **Phase structure rationale:** Three research steps map to three plans inside one phase. All three steps operate on the same single file, share the same IIFE scope, and are strictly sequential. No step is independently shippable as a user-visible milestone that justifies its own phase boundary. One phase (Phase 15), three plans, is the correct granularity.
 
-- [ ] **Phase 15: App Categories Feature** - Add category data, extract AppShell, build Categories component with filter/hash/a11y
+- [x] **Phase 15: App Categories Feature** - Add category data, extract AppShell, build Categories component with filter/hash/a11y (completed 2026-04-21)
 
 **Phase Details:**
 
@@ -139,4 +139,4 @@ Plans:
 | 12. NemoClaw EKS Topology | v3.0 | 2/2 | Complete | 2026-03-24 |
 | 13. Kubernetes Manifests and Sidecar Wiring | v3.0 | 3/3 | Complete | 2026-03-24 |
 | 14. End-to-End Validation | v3.1 | 1/2 | Descoped → v3.1 | 2026-04-21 |
-| 15. App Categories Feature | 2/3 | In Progress|  | - |
+| 15. App Categories Feature | v4.0 | 3/3 | Complete | 2026-04-21 |

@@ -4,6 +4,8 @@ plan: 03
 subsystem: ui
 tags: [react, material-ui, iife, index.html, categories, filter, hash-sync, a11y]
 
+requirements-completed: [CAT-02, CAT-03, FIL-01, FIL-02, FIL-03, VIS-01, VIS-02, URL-01, URL-02, URL-03, A11Y-01, A11Y-02, A11Y-03]
+
 # Dependency graph
 requires:
   - 15-01 (CATEGORIES constant + category fields on items[])
@@ -40,15 +42,13 @@ key-decisions:
   - "VALID_KEYS derived from CATEGORIES.map(c => c.key) inside AppShell for single source of truth"
 
 # Metrics
-duration: ~5min (tasks 1+2)
+duration: ~5min (tasks 1+2) + human verify
 completed: 2026-04-21
-status: PAUSED_AT_CHECKPOINT
-human-verification: pending
+status: complete
+human-verification: approved
 ---
 
 # Phase 15 Plan 03: Categories + Filter + Hash Sync + A11Y Summary
-
-**PARTIAL SUMMARY — paused at Task 3 human-verify checkpoint**
 
 Complete v4.0 App Categories feature delivered in `index.html`: three category cards above the
 catalog grid with single-select toggle filter, URL hash sync, empty state, keyboard accessibility,
@@ -56,15 +56,15 @@ and responsive stacking — all built on the data layer from 15-01 and the struc
 
 ## Status
 
-Paused at Task 3 (human-verify checkpoint). Tasks 1 and 2 are committed.
+**COMPLETE** — All 3 tasks done. Human verification approved 2026-04-21.
 
 ## Task Commits
 
 1. **Task 1: Extend React destructure** — `ca6d9be` (feat)
 2. **Task 2: Add Categories + EmptyState + wire AppShell state** — `e1a7992` (feat)
-3. **Task 3: Human verification** — PENDING
+3. **Task 3: Human verification** — APPROVED by user
 
-## What Was Delivered (Tasks 1 + 2)
+## What Was Delivered
 
 - **React destructure extended** (line 160): `useState` and `useEffect` added alongside
   existing `createElement: h` and `useMemo`.
@@ -165,23 +165,28 @@ Paused at Task 3 (human-verify checkpoint). Tasks 1 and 2 are committed.
 | React destructure includes all four APIs | PASS |
 | Only 1 `} = React;` line | PASS |
 
+## Human Verification Results
+
+**APPROVED** — User confirmed all five ROADMAP Phase 15 success criteria and all five pitfall
+defenses on 2026-04-21. All 29 automated grep checks passed. Feature verified end-to-end in browser.
+
 ## Requirements Covered by This Plan
 
 | REQ-ID | Description | Status |
 |--------|-------------|--------|
-| CAT-02 | Three category cards visible | Delivered |
-| CAT-03 | Cards ordered AIDP → WARP → Partner | Delivered |
-| FIL-01 | Click WARP → 4 apps shown | Delivered |
-| FIL-02 | Click WARP again → all 5 restored | Delivered |
-| FIL-03 | Partner empty state message | Delivered |
-| VIS-01 | Selected card purple border + glow | Delivered |
-| VIS-02 | Unselected cards opacity 0.7 | Delivered |
-| URL-01 | Deep-link `/#category=warp` → filtered view | Delivered |
-| URL-02 | Back once leaves site | Delivered |
-| URL-03 | Unknown hashes → All state | Delivered |
-| A11Y-01 | Mobile stacking xs=12 | Delivered |
-| A11Y-02 | Keyboard: Tab + Enter/Space toggles | Delivered |
-| A11Y-03 | DOM shows `<button aria-pressed="true/false">` | Delivered |
+| CAT-02 | Three category cards visible | COMPLETE |
+| CAT-03 | Cards ordered AIDP -> WARP -> Partner | COMPLETE |
+| FIL-01 | Click WARP -> 4 apps shown | COMPLETE |
+| FIL-02 | Click WARP again -> all 5 restored | COMPLETE |
+| FIL-03 | Partner empty state message | COMPLETE |
+| VIS-01 | Selected card purple border + glow | COMPLETE |
+| VIS-02 | Unselected cards opacity 0.7 | COMPLETE |
+| URL-01 | Deep-link `/#category=warp` -> filtered view | COMPLETE |
+| URL-02 | Back once leaves site | COMPLETE |
+| URL-03 | Unknown hashes -> All state | COMPLETE |
+| A11Y-01 | Mobile stacking xs=12 | COMPLETE |
+| A11Y-02 | Keyboard: Tab + Enter/Space toggles | COMPLETE |
+| A11Y-03 | DOM shows `<button aria-pressed="true/false">` | COMPLETE |
 
 ## Pitfall Defenses
 
@@ -202,10 +207,6 @@ Paused at Task 3 (human-verify checkpoint). Tasks 1 and 2 are committed.
 - A11Y-04: `aria-label` with NeuralMesh full name — not added
 - Gray Area D: auto-scroll on deep-link mount — not added
 
-## Human Verification Results
-
-**PENDING** — awaiting Task 3 acceptance test.
-
 ## Deviations from Plan
 
 **1. [Rule 3 - Comment Refinement] Rephrased 3 inline comments to avoid false-positive grep matches**
@@ -215,13 +216,21 @@ Paused at Task 3 (human-verify checkpoint). Tasks 1 and 2 are committed.
   positives — PITFALL 4 check, PITFALL 2 replaceState count check, and PITFALL 1 no-pushState check
   all reported FAIL despite the code being correct.
 - **Fix:** Rephrased comments to convey intent without including the forbidden literal strings:
-  - `// NOTE: do NOT pass 'component: 'a''` → `// Omitting 'component' prop: CardActionArea defaults to native <button>`
-  - `// PITFALL 2 defense: READ ONLY. Never call history.replaceState here.` → `// Lazy initializer — synchronous, read-only hash parse on mount.`
-  - `// Uses history.replaceState so each toggle...` → `// replaceState keeps the back stack at 1 entry regardless of toggle count.`
+  - `// NOTE: do NOT pass 'component: 'a''` -> `// Omitting 'component' prop: CardActionArea defaults to native <button>`
+  - `// PITFALL 2 defense: READ ONLY. Never call history.replaceState here.` -> `// Lazy initializer — synchronous, read-only hash parse on mount.`
+  - `// Uses history.replaceState so each toggle...` -> `// replaceState keeps the back stack at 1 entry regardless of toggle count.`
 - **Behavior change:** None. Comment rewording only.
-- **All 11 invariant checks pass after the fix.**
+- **All 29 invariant checks pass after the fix.**
+
+## Self-Check: PASSED
+
+- `ca6d9be` exists in git log: FOUND
+- `e1a7992` exists in git log: FOUND
+- `1cfcc46` exists in git log: FOUND
+- `app-store-gui/webapp/templates/index.html` modified: CONFIRMED
 
 ---
 *Phase: 15-app-categories-feature*
-*Status: Paused at Task 3 checkpoint — human verification required*
-*Partial summary created: 2026-04-21*
+*Plan: 15-03*
+*Status: COMPLETE*
+*Human verification: APPROVED 2026-04-21*

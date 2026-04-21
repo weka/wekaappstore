@@ -26,31 +26,31 @@ Result: AIDP=1 app, WARP=4 apps, Partner=0 apps (empty state intentional).
 ### Category Data (CAT)
 
 - [x] **CAT-01**: Each blueprint `item` in `index.html` has a single `category` field with value in `{aidp, warp, partner}`
-- [ ] **CAT-02**: User sees three category cards — labeled "AIDP", "WARP", "Partner" — rendered in that left-to-right order between Planning Studio and App Catalog
-- [ ] **CAT-03**: User sees each category card styled consistently with existing catalog cards (same glassmorphism, border radius, fonts, dark theme)
+- [x] **CAT-02**: User sees three category cards — labeled "AIDP", "WARP", "Partner" — rendered in that left-to-right order between Planning Studio and App Catalog
+- [x] **CAT-03**: User sees each category card styled consistently with existing catalog cards (same glassmorphism, border radius, fonts, dark theme)
 
 ### Filter Behavior (FIL)
 
-- [ ] **FIL-01**: User clicks a category card and the App Catalog grid below filters in place to show only apps in that category
-- [ ] **FIL-02**: User clicks the currently-selected category card and returns to the default "All" view (5 apps)
-- [ ] **FIL-03**: User viewing a category with zero matching apps sees the inline empty-state message "No apps in this category yet."
+- [x] **FIL-01**: User clicks a category card and the App Catalog grid below filters in place to show only apps in that category
+- [x] **FIL-02**: User clicks the currently-selected category card and returns to the default "All" view (5 apps)
+- [x] **FIL-03**: User viewing a category with zero matching apps sees the inline empty-state message "No apps in this category yet."
 
 ### Visual State (VIS)
 
-- [ ] **VIS-01**: User sees the selected category card visually emphasized with purple border and glow matching the WEKA primary color
-- [ ] **VIS-02**: User sees unselected category cards at reduced opacity (0.7) when a category is active; all cards at full opacity when showing All
+- [x] **VIS-01**: User sees the selected category card visually emphasized with purple border and glow matching the WEKA primary color
+- [x] **VIS-02**: User sees unselected category cards at reduced opacity (0.7) when a category is active; all cards at full opacity when showing All
 
 ### URL State Sync (URL)
 
-- [ ] **URL-01**: User can deep-link to a pre-filtered view by loading `/#category=<key>` where `<key>` is one of `aidp`, `warp`, or `partner`
-- [ ] **URL-02**: User clicking Back after one or more category interactions leaves the page in a single press (no history pollution from category toggles)
-- [ ] **URL-03**: User arriving with an unknown, malformed, or unrelated hash sees the default "All" view (hash parser ignores non-`#category=` hashes)
+- [x] **URL-01**: User can deep-link to a pre-filtered view by loading `/#category=<key>` where `<key>` is one of `aidp`, `warp`, or `partner`
+- [x] **URL-02**: User clicking Back after one or more category interactions leaves the page in a single press (no history pollution from category toggles)
+- [x] **URL-03**: User arriving with an unknown, malformed, or unrelated hash sees the default "All" view (hash parser ignores non-`#category=` hashes)
 
 ### Responsive and Accessibility (A11Y)
 
-- [ ] **A11Y-01**: User on a mobile viewport (≤768px) sees category cards stacked vertically, each remaining tappable
-- [ ] **A11Y-02**: User navigating by keyboard can focus each category card via Tab and toggle selection via Enter or Space
-- [ ] **A11Y-03**: Screen-reader users hear the selected/unselected state of each category card via native `aria-pressed` semantics on a `<button>` element
+- [x] **A11Y-01**: User on a mobile viewport (≤768px) sees category cards stacked vertically, each remaining tappable
+- [x] **A11Y-02**: User navigating by keyboard can focus each category card via Tab and toggle selection via Enter or Space
+- [x] **A11Y-03**: Screen-reader users hear the selected/unselected state of each category card via native `aria-pressed` semantics on a `<button>` element
 
 ## v4.0 Future Requirements (v4.1+)
 
