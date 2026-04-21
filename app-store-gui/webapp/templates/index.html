@@ -214,18 +214,26 @@
             }
           });
 
+          const CATEGORIES = [
+            { key: 'aidp',    label: 'AIDP',    description: 'WEKA-built blueprints on the NeuralMesh AI Data Platform' },
+            { key: 'warp',    label: 'WARP',    description: 'WEKA AI RAG Platform (WARP) blueprints' },
+            { key: 'partner', label: 'Partner', description: 'Ecosystem partner-contributed blueprints' }
+          ];
+
           const items = [
             {
               title: 'Enterprise Search and Retrieval Augmented Generation (RAG)',
               desc: 'Deploy an open-source search and summary stack to your cluster for enterprise-grade semantic search and summarization. Utilising leading tools like vLLM and Milvus ',
               href: '/blueprint/oss-rag',
-              tags: ['Open Source']
+              tags: ['Open Source'],
+              category: 'warp'
             },
             {
               title: 'Enterprise Search and Retrieval Augmented Generation (RAG)',
               desc: 'NVIDIA-optimized search and summary stack for high-performance enterprise search and summarization. This is based on NVIDIA NIM framework',
               href: '/blueprint/nvidia-rag',
               tags: ['NVIDIA'],
+              category: 'warp',
               comingSoon: true
             },
             {
@@ -233,19 +241,22 @@
               desc: 'Video search catalog and summarisation with NVIDIA NIM framework. With added customisation for NeuralMesh by WEKA to support high stream counts',
               href: '/blueprint/nvidia-vss',
               tags: ['NVIDIA'],
+              category: 'warp',
               comingSoon: true
             },
             {
               title: 'Openfold Protein Prediction',
               desc: 'OpenFold is an open-source, AI-powered software tool that predicts the 3D structures of proteins from their amino acid sequences.',
               href: '/blueprint/openfold',
-              tags: ['Open Source']
+              tags: ['Open Source'],
+              category: 'warp'
             },
             {
               title: 'AI Agent for Enterprise Research',
               desc: 'This will build an AI Agent that conducts Research on your domain specific data summarising and conducting research.',
               href: '/blueprint/ai-agent-enterprise-research',
               tags: ['NVIDIA'],
+              category: 'aidp',
               comingSoon: true
             }
           ];
