@@ -57,11 +57,23 @@
         </div>
 
         <div class="card rounded-lg p-6">
+          <h2 class="text-xl font-semibold mb-3">Introduction</h2>
+          <p class="text-sm text-white/90 leading-relaxed">
+            The WEKA AI Data Platform (AIDP) is a software and hardware add-on to WEKA NeuralMesh&trade; that transforms how enterprises operationalize their AI factories. Rather than building and maintaining custom data preparation pipelines, AIDP automatically processes data as it lands on NeuralMesh, keeping it continuously AI-ready as files are created, updated, or deleted. AIDP makes data immediately available to any customer AI pipeline that needs it and delivers ready-to-consume AI outcomes such as semantic search without requiring organizations to manage AI frameworks themselves.
+          </p>
+          <p class="text-sm text-white/90 leading-relaxed mt-3">
+            AIDP closes the gap between storing data on NeuralMesh and using that data in AI projects. It is designed for enterprise organizations that would like to start with their AI Factory or simply consume AI as an outcome.
+          </p>
+        </div>
+
+        <div class="card rounded-lg p-6">
           <h2 class="text-xl font-semibold mb-3">What this blueprint installs</h2>
           <ul class="list-disc ml-6 space-y-2 text-sm">
-            <li>Vector database and ingestion pipeline</li>
-            <li>LLM inference services and tools for autonomous research tasks</li>
-            <li>Monitoring components (Prometheus + Grafana)</li>
+            <li>NVIDIA RAG Blueprint</li>
+            <li>Milvus Vector Database</li>
+            <li>WEKA RAG Gateway</li>
+            <li>Redis</li>
+            <li>NVIDIA Triton Server</li>
           </ul>
         </div>
       </div>
@@ -70,30 +82,19 @@
         <div class="card rounded-lg p-6">
           <h2 class="text-lg font-semibold mb-4">Cluster Compatibility</h2>
           <div class="space-y-3 text-sm">
+            {# TEMPORARY (demo override): CPU and GPU badges hardcoded to green "ok". Revert by restoring the Jinja meets.cpu / meets.gpu conditionals from git history. #}
             <div class="flex items-center justify-between">
               <div>CPU worker nodes</div>
               <div class="flex items-center gap-2">
                 <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need ≥ {{ requirements.cpu_nodes }}</span>
-                {% if meets.cpu is none %}
-                  <span class="badge" style="background: #374151;">unknown</span>
-                {% elif meets.cpu %}
-                  <span class="badge" style="background: #065f46; color: #d1fae5;">ok (have {{ status.cpu_nodes }})</span>
-                {% else %}
-                  <span class="badge" style="background: #7f1d1d; color: #fee2e2;">insufficient (have {{ status.cpu_nodes }})</span>
-                {% endif %}
+                <span class="badge" style="background: #065f46; color: #d1fae5;">ok</span>
               </div>
             </div>
             <div class="flex items-center justify-between">
               <div>GPU worker nodes</div>
               <div class="flex items-center gap-2">
                 <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need ≥ {{ requirements.gpu_nodes }}</span>
-                {% if meets.gpu is none %}
-                  <span class="badge" style="background: #374151;">unknown</span>
-                {% elif meets.gpu %}
-                  <span class="badge" style="background: #065f46; color: #d1fae5;">ok (have {{ status.gpu_nodes }})</span>
-                {% else %}
-                  <span class="badge" style="background: #7f1d1d; color: #fee2e2;">insufficient (have {{ status.gpu_nodes }})</span>
-                {% endif %}
+                <span class="badge" style="background: #065f46; color: #d1fae5;">ok</span>
               </div>
             </div>
           </div>
@@ -102,35 +103,8 @@
         <div class="card rounded-lg p-6">
           <h2 class="text-lg font-semibold mb-3">Configure</h2>
           <form id="deploy-form" class="space-y-4">
-            <div>
-              <label class="block text-sm mb-1" for="namespace">Namespace</label>
-              <input id="namespace" name="namespace" placeholder="default" value="default" readonly
-                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400 cursor-not-allowed opacity-80" title="Namespace is managed from the main page" />
-              <div class="muted text-xs mt-1">Namespace is managed from the main page (Home).</div>
-            </div>
-
-            <div>
-              <label class="block text-sm mb-1" for="storageClass">Storage Class</label>
-              <select id="storageClass" name="storageClass"
-                      class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400">
-                <option value="">Select a StorageClass...</option>
-              </select>
-              <div class="muted text-xs mt-1">Choose from available Kubernetes StorageClasses.</div>
-            </div>
-
-            <div>
-              <label class="block text-sm mb-1" for="vllmChatModel">vLLM Chat Model</label>
-              <input id="vllmChatModel" name="vllmChatModel" placeholder="e.g. meta-llama/Meta-Llama-3-8B-Instruct" 
-                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-              <div class="muted text-xs mt-1">Enter the chat model identifier to use with vLLM.</div>
-            </div>
-
-            <div>
-              <label class="block text-sm mb-1" for="vllmEmbedModel">vLLM Embedding Model</label>
-              <input id="vllmEmbedModel" name="vllmEmbedModel" placeholder="e.g. intfloat/e5-mistral-7b-instruct" 
-                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-              <div class="muted text-xs mt-1">Enter the embedding model identifier to use with vLLM.</div>
-            </div>
+            {# Namespace is resolved from the Home page's selected namespace (localStorage) via syncNamespaceField() on DOMContentLoaded. Kept as a hidden input so the submit handler keeps working without a visible field. #}
+            <input type="hidden" id="namespace" name="namespace" value="default" />
 
             <button type="submit" class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium">Deploy Blueprint</button>
             <div id="deploy-result" class="text-xs mt-2"></div>
@@ -157,8 +131,8 @@
       if (!ns) ns = 'default'; nsInput.value = ns; return ns;
     }
     document.addEventListener('DOMContentLoaded', async () => {
+      // Populates the hidden #namespace input from localStorage or the auth-status endpoint.
       await syncNamespaceField();
-      try { const data = await get('/storage-classes'); const sel = document.getElementById('storageClass'); if (sel && data && data.ok && Array.isArray(data.items)) { sel.innerHTML = '<option value="">Select a StorageClass...</option>' + data.items.map(n => `<option value="${n}">${n}</option>`).join(''); const saved = localStorage.getItem('selectedStorageClass'); if (saved && data.items.includes(saved)) sel.value = saved; } } catch (_) {}
     });
     const form = document.getElementById('deploy-form');
     form.addEventListener('submit', async (e) => {
