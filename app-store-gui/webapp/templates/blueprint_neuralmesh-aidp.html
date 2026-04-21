@@ -66,6 +66,12 @@
           </p>
         </div>
 
+        {% if aidp_img_b64 %}
+        <div class="card rounded-lg p-6">
+          <img src="data:image/png;base64,{{ aidp_img_b64 }}" alt="NeuralMesh AIDP architecture diagram" class="w-full rounded-md" />
+        </div>
+        {% endif %}
+
         <div class="card rounded-lg p-6">
           <h2 class="text-xl font-semibold mb-3">What this blueprint installs</h2>
           <ul class="list-disc ml-6 space-y-2 text-sm">

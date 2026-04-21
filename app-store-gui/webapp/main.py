@@ -814,6 +814,16 @@ async def blueprint_detail(request: Request, name: str):
                     oss_img_b64 = base64.b64encode(f.read()).decode('ascii')
             except Exception:
                 oss_img_b64 = None
+    # Prepare embedded diagram for NeuralMesh AIDP blueprint
+    aidp_img_b64 = None
+    if name == 'neuralmesh-aidp':
+        img_path = os.path.join(TEMPLATES_DIR, 'aidp_diagram.png')
+        if os.path.exists(img_path):
+            try:
+                with open(img_path, 'rb') as f:
+                    aidp_img_b64 = base64.b64encode(f.read()).decode('ascii')
+            except Exception:
+                aidp_img_b64 = None
     # Choose a specific template if present (except for RAG pages which keep generic)
     preferred = f"blueprint_{name}.html"
     use_template = "blueprint.html"
@@ -832,6 +842,7 @@ async def blueprint_detail(request: Request, name: str):
         "requirements": reqs,
         "meets": meets,
         "oss_img_b64": oss_img_b64,
+        "aidp_img_b64": aidp_img_b64,
         "logo_b64": LOGO_B64,
     })
 
