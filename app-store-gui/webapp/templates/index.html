@@ -397,10 +397,12 @@
             const [selectedCategory, setSelectedCategory] = useState(() => {
               // Lazy initializer — synchronous, read-only hash parse on mount.
               // Strict prefix check guards against collision with #catalog / #planning-studio.
+              // Default category on a fresh load (no #category= hash) is 'aidp'.
+              const DEFAULT_CATEGORY = 'aidp';
               const raw = window.location.hash;
-              if (!raw.startsWith('#category=')) return 'all';
+              if (!raw.startsWith('#category=')) return DEFAULT_CATEGORY;
               const key = raw.slice('#category='.length);
-              return VALID_KEYS.indexOf(key) >= 0 ? key : 'all';
+              return VALID_KEYS.indexOf(key) >= 0 ? key : DEFAULT_CATEGORY;
             });
 
             useEffect(() => {

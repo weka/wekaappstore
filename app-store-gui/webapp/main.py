@@ -834,17 +834,21 @@ async def blueprint_detail(request: Request, name: str):
     except Exception:
         use_template = "blueprint.html"
 
-    return templates.TemplateResponse(use_template, {
-        "request": request,
-        "name": name,
-        "yaml_path": yaml_path,
-        "status": status,
-        "requirements": reqs,
-        "meets": meets,
-        "oss_img_b64": oss_img_b64,
-        "aidp_img_b64": aidp_img_b64,
-        "logo_b64": LOGO_B64,
-    })
+    return templates.TemplateResponse(
+        request,
+        use_template,
+        {
+            "request": request,
+            "name": name,
+            "yaml_path": yaml_path,
+            "status": status,
+            "requirements": reqs,
+            "meets": meets,
+            "oss_img_b64": oss_img_b64,
+            "aidp_img_b64": aidp_img_b64,
+            "logo_b64": LOGO_B64,
+        },
+    )
 
 
 @app.post("/deploy")
@@ -1089,11 +1093,15 @@ async def get_cluster_info():
 @app.get("/welcome", response_class=HTMLResponse)
 async def welcome_screen(request: Request):
     """Serve the welcome/initialization screen."""
-    return templates.TemplateResponse("welcome.html", {
-        "request": request,
-        "logo_b64": LOGO_B64,
-        "title": "Welcome to WEKA App Store"
-    })
+    return templates.TemplateResponse(
+        request,
+        "welcome.html",
+        {
+            "request": request,
+            "logo_b64": LOGO_B64,
+            "title": "Welcome to WEKA App Store",
+        },
+    )
 
 @app.get("/cluster-status")
 async def get_cluster_status_endpoint(namespace: str = "default"):
