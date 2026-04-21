@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: App Categories on Home Screen
-status: planning
-stopped_at: Defining requirements (v4.0 started)
-last_updated: "2026-04-21T16:15:00.000Z"
-last_activity: 2026-04-21 — v4.0 milestone started (PRD-gui-app-categories.md)
+status: ready_to_plan
+stopped_at: Roadmap created — Phase 15 ready for planning
+last_updated: "2026-04-21T16:30:00.000Z"
+last_activity: 2026-04-21 — v4.0 roadmap created; Phase 15 defined with 3 plans
 progress:
-  total_phases: 0
+  total_phases: 1
   completed_phases: 0
-  total_plans: 0
+  total_plans: 3
   completed_plans: 0
   percent: 0
 ---
@@ -18,24 +18,24 @@ progress:
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-03-23)
+See: `.planning/PROJECT.md` (updated 2026-04-21)
 
 **Core value:** OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
-**Current focus:** Phase 11 — Streamable HTTP Transport
+**Current focus:** Phase 15 — App Categories Feature
 
 ## Current Position
 
 Milestone: v4.0 App Categories on Home Screen
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-04-21 — v4.0 started; research pass in progress
+Phase: 15 of 15 (App Categories Feature)
+Plan: — (not yet planned)
+Status: Ready to plan
+Last activity: 2026-04-21 — v4.0 roadmap created; Phase 15 has 3 plans; research complete
 
 Progress: [░░░░░░░░░░] 0% (v4.0)
 
 ## Performance Metrics
 
-**Velocity (v3.0):**
+**Velocity (v4.0):**
 - Total plans completed: 0
 - Average duration: —
 - Total execution time: —
@@ -47,44 +47,18 @@ Progress: [░░░░░░░░░░] 0% (v4.0)
 | - | - | - | - |
 
 *Updated after each plan completion*
-| Phase 11-streamable-http-transport P02 | 12 | 2 tasks | 4 files |
-| Phase 11-streamable-http-transport P01 | 2min | 2 tasks | 4 files |
-| Phase 12-nemoclaw-eks-topology P01 | 2min | 2 tasks | 4 files |
-| Phase 12-nemoclaw-eks-topology P02 | 15min | 3 tasks | 4 files |
-| Phase 13-kubernetes-manifests-and-sidecar-wiring P01 | 2min | 2 tasks | 2 files |
-| Phase 13-kubernetes-manifests-and-sidecar-wiring P02 | 8min | 2 tasks | 2 files |
-| Phase 13-kubernetes-manifests-and-sidecar-wiring P03 | 18min | 2 tasks | 3 files |
-| Phase 14-end-to-end-validation P01 | 2 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
 ### Decisions
 
-- [v3.0]: NemoClaw deployment uses experimental agent-sandbox CRD approach (user decision; not dedicated EC2 VM)
-- [v3.0]: MCP server runs as native Kubernetes sidecar init container (restartPolicy: Always) to guarantee startup ordering
-- [v3.0]: Streamable HTTP transport selected via MCP_TRANSPORT env var; stdio remains default for CI and local dev
-- [v3.0]: openclaw.json generated at pod startup from env vars via init container; never baked into image
-- [v2.0]: Pivot from backend-brain to OpenClaw-native MCP tool registration
-- [v2.0]: Flat 2-key depth contract enforced by check_depth() across all 8 tools; 103 tests as regression safety net
-- [Phase 11-02]: Removed startup block from openclaw.json — HTTP transport uses url for discovery, no subprocess spawn
-- [Phase 11-02]: MCP_TRANSPORT and MCP_PORT in env.optional (not required) preserving stdio backward compat for CI and local dev
-- [Phase 11]: FastMCP constructed conditionally at module level (not in __main__) so tests can import server.mcp without transport side effects
-- [Phase 11]: stateless_http=True required in HTTP mode to avoid session ID forwarding issues with OpenClaw client (XPORT-04)
-- [Phase 12-nemoclaw-eks-topology]: Sandbox CR has no hardcoded namespace — applied with kubectl -n <NAMESPACE> to match locked decision of same namespace as WEKA App Store components
-- [Phase 12-nemoclaw-eks-topology]: Loopback :8080 probe in smoke test is WARN-only (exit 7 = PASS, exit 28 = WARN) since MCP sidecar does not exist until Phase 13
-- [Phase 12-nemoclaw-eks-topology]: OpenClaw gateway uses --bind=loopback (not --bind=lan) for Sandbox CR deployment; non-loopback requires controlUi config not available in containerized mode
-- [Phase 12-nemoclaw-eks-topology]: Phase 12 gate resolved: OpenClaw deployed via agent-sandbox Sandbox CRD in wekaappstore namespace; NCLAW-01 and NCLAW-03 validated; topology documented in TOPOLOGY.md
-- [Phase 13-01]: delete verb included for wekaappstores resource — research audit includes it for operator lifecycle management
-- [Phase 13-01]: subjects[0].namespace must be wekaappstore in ClusterRoleBinding — mismatch causes silent 403 failures
-- [Phase 13-01]: SKILL.md ConfigMap targets OpenClaw container (not MCP sidecar) — OpenClaw reads SKILL.md at agent registration via skill field in openclaw.json
-- [Phase 13-kubernetes-manifests-and-sidecar-wiring]: printf used in init container (not heredoc) to avoid shell variable expansion when writing openclaw.json
-- [Phase 13-kubernetes-manifests-and-sidecar-wiring]: subPath: blueprints on MCP sidecar mount dereferences git-sync symlink at /blueprints/blueprints
-- [Phase 13-kubernetes-manifests-and-sidecar-wiring]: openclaw-config readOnly in weka-mcp-sidecar; init container is sole writer to prevent race conditions
-- [Phase Phase 13-03]: openclaw.json schema is mcp.servers.<name>.{url,transport,skill} nested format (not flat top-level schema) — discovered by live cluster testing against OpenClaw 2026.3.23
-- [Phase Phase 13-03]: wekachrisjen/weka-app-store-mcp built as multi-arch image (linux/amd64 + linux/arm64) via docker buildx — EKS nodes are amd64, dev machine is arm64
-- [Phase Phase 13-03]: webapp/__init__.py uses __getattr__ lazy import for app — avoids FastAPI dependency in MCP server Docker build context
-- [Phase 14-01]: HTTPRoute and Service manifests authored but NOT applied — OpenClaw --bind=loopback prevents Service routing; E2E session uses kubectl port-forward instead
-- [Phase 14-01]: Evidence capture uses --pre/--post/all flags to separate before-chat (E2E-01/02) and after-chat (E2E-03/04) kubectl captures
+- [v4.0 roadmap]: One phase (Phase 15) with three plans — all three research steps operate on the same single file and IIFE scope; no step is independently shippable as a user-visible milestone
+- [v4.0 roadmap]: Blueprint → category mapping (Open Question 1) requires Chris's confirmation before Plan 15-01 can be marked done; AIDP=1, WARP=4, Partner=0 are PRD defaults
+- [v4.0 research]: JSX forbidden; `h()` only — grep `<[A-Z]` in new code must return zero matches
+- [v4.0 research]: `component: 'a'` must not appear on category `CardActionArea` — toggle buttons render as `<button>`
+- [v4.0 research]: `history.replaceState` must not fire on mount — initialization reads hash only
+- [v4.0 research]: Hash parser uses `startsWith('#category=')` to avoid collision with `#catalog` / `#planning-studio`
+- [v4.0 research]: `ThemeProvider` lifts from `Catalog` to `AppShell` — one provider wraps both siblings
 
 ### Pending Todos
 
@@ -92,13 +66,10 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 12 gate]: NemoClaw EKS topology must be validated before Phase 13 manifests are written — wrong topology = full Phase 13 rewrite
-- [Phase 13 gate]: NemoClaw container image name on NVIDIA NGC is a placeholder; confirm before writing Deployment manifest
-- [Phase 13 gate]: NemoClaw ConfigMap schema for mcpServers.url must be verified against the deployed version
-- [Phase 13 gate]: Blueprint catalog size must be measured; if >1MB, ConfigMap strategy replaced with PVC or git-sync
+- [v4.0 gate]: Chris must confirm blueprint → category mapping before Plan 15-01 sign-off (AIDP: AI Agent for Enterprise Research; WARP: OSS RAG, NVIDIA RAG, NVIDIA VSS, OpenFold; Partner: empty)
 
 ## Session Continuity
 
-Last session: 2026-03-24T22:43:47.615Z
-Stopped at: Completed 14-01-PLAN.md
+Last session: 2026-04-21
+Stopped at: Roadmap created — run `/gsd:plan-phase 15` to begin planning
 Resume file: None

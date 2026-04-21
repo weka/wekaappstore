@@ -89,28 +89,28 @@ Explicitly excluded from v4.0. Each entry has a reason to prevent re-introductio
 
 ## Traceability
 
-Populated by the roadmapper in Step 10. Target: 13 requirements → Phase 15.
+All 14 v4.0 requirements map to Phase 15. Phase 15 has three plans; the plan column indicates which plan first delivers each requirement.
 
-| Requirement | Phase | Status |
-|-------------|-------|--------|
-| CAT-01 | Phase 15 | Pending |
-| CAT-02 | Phase 15 | Pending |
-| CAT-03 | Phase 15 | Pending |
-| FIL-01 | Phase 15 | Pending |
-| FIL-02 | Phase 15 | Pending |
-| FIL-03 | Phase 15 | Pending |
-| VIS-01 | Phase 15 | Pending |
-| VIS-02 | Phase 15 | Pending |
-| URL-01 | Phase 15 | Pending |
-| URL-02 | Phase 15 | Pending |
-| URL-03 | Phase 15 | Pending |
-| A11Y-01 | Phase 15 | Pending |
-| A11Y-02 | Phase 15 | Pending |
-| A11Y-03 | Phase 15 | Pending |
+| Requirement | Phase | Plan | Status |
+|-------------|-------|------|--------|
+| CAT-01 | Phase 15 | 15-01 (Data Preparation) | Pending |
+| CAT-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
+| CAT-03 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
+| FIL-01 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
+| FIL-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
+| FIL-03 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
+| VIS-01 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
+| VIS-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
+| URL-01 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
+| URL-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
+| URL-03 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
+| A11Y-01 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
+| A11Y-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
+| A11Y-03 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
 
 **Coverage:**
 - v4.0 requirements: 14 total
-- Mapped to phases: 14 (all to Phase 15 — roadmapper may split)
+- Mapped to phases: 14 (all to Phase 15)
 - Unmapped: 0
 
 ---
@@ -210,4 +210,4 @@ Deferred from v3.0 after 2026-04-21 retry session discovered code and config gap
 
 ---
 *Requirements defined: 2026-03-23*
-*Last updated: 2026-04-21 — rescoped v3.0 to infrastructure-only; E2E-01..04 moved to v3.1. See v3.0-KNOWN-ISSUES.md.*
+*Last updated: 2026-04-21 — v4.0 traceability table populated by roadmapper; all 14 REQ-IDs mapped to Phase 15 with plan-level assignments.*
