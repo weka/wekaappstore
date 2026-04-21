@@ -154,13 +154,7 @@
     </section>
 
     <section id="catalog" class="max-w-6xl mx-auto px-4 py-8 space-y-6">
-      <div class="flex items-end justify-between mb-4">
-        <div>
-          <h2 class="text-xl font-semibold">App Catalog</h2>
-          <p class="muted text-sm">Choose an application to deploy to your Kubernetes cluster.</p>
-        </div>
-      </div>
-      <div id="catalog-root"></div>
+      <div id="app-root"></div>
       <script>
         (function(){
           const { createElement: h, useMemo } = React;
@@ -261,61 +255,65 @@
             }
           ];
 
-          function Catalog(){
-            return h(ThemeProvider, { theme },
-              h(CssBaseline, null),
-              h(Box, { sx: { flexGrow: 1 } },
-                h(Grid, { container: true, spacing: 2.5, alignItems: 'stretch' },
-                  items.map((it, idx) => h(Grid, { item: true, xs: 12, md: 4, key: idx },
-                    h(Card, { elevation: 0, sx: { position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', ':hover': { transform: 'translateY(-2px)', borderColor: 'primary.main', boxShadow: '0 10px 20px rgba(0,0,0,0.25)' } } },
-                      it.comingSoon && h(Box, { sx: {
-                        position: 'absolute',
-                        top: 36,
-                        right: -24,
-                        transform: 'rotate(45deg)',
-                        background: 'linear-gradient(90deg, #6b2fb3 0%, #a855f7 100%)',
-                        color: '#fff',
-                        px: 3,
-                        py: 0.5,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        letterSpacing: 1,
-                        textTransform: 'uppercase',
-                        boxShadow: '0 6px 14px rgba(0,0,0,0.35)',
-                        borderRadius: 1,
-                        pointerEvents: 'none'
-                      } }, 'Coming Soon'),
-                      h(CardActionArea, { component: 'a', href: it.href, sx: { flexGrow: 1, alignItems: 'stretch' } },
-                        h(CardContent, { sx: { display: 'flex', flexDirection: 'column', flexGrow: 1 } },
-                          h(Stack, { direction: 'row', spacing: 1, sx: { mb: 1 } },
-                            ...(it.tags || []).map((t, i) => h(Chip, { key: i, size: 'small', label: t }))
-                          ),
-                          h(Typography, { variant: 'h6', component: 'h3', sx: { mt: 0.5 } }, it.title),
-                          h(Typography, { variant: 'body2', sx: { color: 'text.secondary', mt: 1 } }, it.desc)
-                        )
-                      ),
-                      h(CardActions, { sx: { mt: 'auto', p: 2 } },
-                        it.comingSoon
-                          ? h(Button, {
-                              variant: 'contained',
-                              color: 'primary',
-                              size: 'small',
-                              disabled: true,
-                              sx: { pointerEvents: 'none', opacity: 0.8 }
-                            }, 'Learn More & Install')
-                          : h(Button, { variant: 'contained', color: 'primary', size: 'small', href: it.href }, 'Learn More & Install')
+          function Catalog({ items }){
+            return h(Box, { sx: { flexGrow: 1 } },
+              h(Grid, { container: true, spacing: 2.5, alignItems: 'stretch' },
+                items.map((it, idx) => h(Grid, { item: true, xs: 12, md: 4, key: idx },
+                  h(Card, { elevation: 0, sx: { position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', ':hover': { transform: 'translateY(-2px)', borderColor: 'primary.main', boxShadow: '0 10px 20px rgba(0,0,0,0.25)' } } },
+                    it.comingSoon && h(Box, { sx: {
+                      position: 'absolute',
+                      top: 36,
+                      right: -24,
+                      transform: 'rotate(45deg)',
+                      background: 'linear-gradient(90deg, #6b2fb3 0%, #a855f7 100%)',
+                      color: '#fff',
+                      px: 3,
+                      py: 0.5,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: 1,
+                      textTransform: 'uppercase',
+                      boxShadow: '0 6px 14px rgba(0,0,0,0.35)',
+                      borderRadius: 1,
+                      pointerEvents: 'none'
+                    } }, 'Coming Soon'),
+                    h(CardActionArea, { component: 'a', href: it.href, sx: { flexGrow: 1, alignItems: 'stretch' } },
+                      h(CardContent, { sx: { display: 'flex', flexDirection: 'column', flexGrow: 1 } },
+                        h(Stack, { direction: 'row', spacing: 1, sx: { mb: 1 } },
+                          ...(it.tags || []).map((t, i) => h(Chip, { key: i, size: 'small', label: t }))
+                        ),
+                        h(Typography, { variant: 'h6', component: 'h3', sx: { mt: 0.5 } }, it.title),
+                        h(Typography, { variant: 'body2', sx: { color: 'text.secondary', mt: 1 } }, it.desc)
                       )
+                    ),
+                    h(CardActions, { sx: { mt: 'auto', p: 2 } },
+                      it.comingSoon
+                        ? h(Button, {
+                            variant: 'contained',
+                            color: 'primary',
+                            size: 'small',
+                            disabled: true,
+                            sx: { pointerEvents: 'none', opacity: 0.8 }
+                          }, 'Learn More & Install')
+                        : h(Button, { variant: 'contained', color: 'primary', size: 'small', href: it.href }, 'Learn More & Install')
                     )
-                  ))
-                )
+                  )
+                ))
               )
             );
           }
 
-          const rootEl = document.getElementById('catalog-root');
+          function AppShell(){
+            return h(ThemeProvider, { theme },
+              h(CssBaseline, null),
+              h(Catalog, { items: items })
+            );
+          }
+
+          const rootEl = document.getElementById('app-root');
           if (rootEl) {
             const root = createRoot(rootEl);
-            root.render(h(Catalog));
+            root.render(h(AppShell));
           }
         })();
       </script>
