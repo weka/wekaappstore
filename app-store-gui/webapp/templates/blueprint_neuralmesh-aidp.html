@@ -25,6 +25,8 @@
     .btn-purple:hover { background: var(--weka-purple-dark); }
     .muted { color: #9ca3af; }
     .badge { padding: 2px 8px; border-radius: 9999px; font-size: 12px; }
+    /* Make permission badges smaller only within the Blueprint Permissions section */
+    .perm-card .badge { padding: 1px 6px; font-size: 10px; line-height: 1.2; }
   </style>
 </head>
 <body class="min-h-screen">
@@ -71,6 +73,203 @@
           <img src="data:image/png;base64,{{ aidp_img_b64 }}" alt="NeuralMesh AIDP architecture diagram" class="w-full rounded-md" />
         </div>
         {% endif %}
+
+        <!-- Blueprint Permissions -->
+        <div class="card rounded-lg p-6 perm-card">
+          <h2 class="text-xl font-semibold mb-4">Blueprint Permissions</h2>
+          <p class="text-sm muted mb-5">This blueprint installs two service accounts — one for the Kopf operator that reconciles AIDP resources, and one for the web backend that serves the GUI. Each has the minimum permissions listed below, split by cluster-scoped vs. namespaced resources.</p>
+
+          <div class="grid md:grid-cols-2 gap-6 text-base md:text-lg leading-7">
+            <!-- aidp-gui-operator -->
+            <div>
+              <h3 class="text-lg md:text-xl font-semibold mb-3">aidp-gui-operator <span class="muted text-sm font-normal">(kopf operator)</span></h3>
+
+              <div class="space-y-4">
+                <div>
+                  <div class="muted text-xs font-semibold uppercase tracking-wide mb-2">Cluster-scoped</div>
+                  <div class="space-y-3">
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">PersistentVolumes</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">CustomResourceDefinitions <span class="muted text-xs font-normal">(apiextensions.k8s.io)</span></div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">Namespaces</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">ClusterKopfPeerings <span class="muted text-xs font-normal">(kopf.dev + zalando.org)</span></div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#1e40af; color:#dbeafe;">UPDATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="muted text-xs font-semibold uppercase tracking-wide mb-2">Namespaced</div>
+                  <div class="space-y-3">
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">FileProcessingClusters + /status <span class="muted text-xs font-normal">(processing.weka.io)</span></div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">WekaFilesystemMounts + /status <span class="muted text-xs font-normal">(storage.weka.io)</span></div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">Deployments <span class="muted text-xs font-normal">(apps)</span></div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">PVCs, Services, ConfigMaps, Secrets</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">Events <span class="muted text-xs font-normal">(via kopf.event())</span></div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">KopfPeerings</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#1e40af; color:#dbeafe;">UPDATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- aidp-gui -->
+            <div>
+              <h3 class="text-lg md:text-xl font-semibold mb-3">aidp-gui <span class="muted text-sm font-normal">(web backend)</span></h3>
+
+              <div class="space-y-4">
+                <div>
+                  <div class="muted text-xs font-semibold uppercase tracking-wide mb-2">Cluster-scoped</div>
+                  <div class="space-y-3">
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">CSIDrivers, StorageClasses <span class="muted text-xs font-normal">(storage.k8s.io — read-only prereq checks)</span></div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">PersistentVolumes</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="muted text-xs font-semibold uppercase tracking-wide mb-2">Namespaced</div>
+                  <div class="space-y-3">
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">FileProcessingClusters + /status <span class="muted text-xs font-normal">(CRUD from the GUI)</span></div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">WekaFilesystemMounts <span class="muted text-xs font-normal">(read-only inventory)</span></div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">Deployments <span class="muted text-xs font-normal">(read + restart the operator)</span></div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">PVCs, ConfigMaps, Secrets <span class="muted text-xs font-normal">(admin reads + operator token/config updates)</span></div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div class="card rounded-lg p-6">
           <h2 class="text-xl font-semibold mb-3">What this blueprint installs</h2>
