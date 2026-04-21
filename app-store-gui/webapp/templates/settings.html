@@ -279,6 +279,29 @@
       </div>
       <div id="bp-result" class="text-xs text-white/80 mt-3"></div>
     </section>
+
+    <!-- Section 6: Debug -->
+    <section class="card rounded-lg p-5">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="font-semibold">Debug</h3>
+          <p class="muted text-sm">Development-only toggles. Preferences persist in browser localStorage.</p>
+        </div>
+      </div>
+      <div class="space-y-3">
+        <label class="flex items-start justify-between gap-4 cursor-pointer">
+          <div class="flex-1">
+            <div class="text-sm font-medium">Hide conversational planning section on home page</div>
+            <div class="muted text-xs mt-0.5">Hides the "Describe the deployment you want..." section and its "Plan With Chat" hero button. Takes effect on the next home-page load.</div>
+          </div>
+          <div class="relative inline-flex items-center shrink-0 mt-0.5">
+            <input type="checkbox" id="debug-hide-planning" class="sr-only peer" />
+            <div class="w-11 h-6 bg-gray-700 rounded-full peer-checked:bg-[var(--weka-purple)] transition-colors"></div>
+            <div class="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+          </div>
+        </label>
+      </div>
+    </section>
   </main>
 
   <script>
@@ -545,6 +568,17 @@
     }
     // initial load
     loadBlueprints();
+
+    // -------- Debug toggles --------
+    const debugHidePlanningEl = document.getElementById('debug-hide-planning');
+    if (debugHidePlanningEl) {
+      // Restore saved state on load
+      debugHidePlanningEl.checked = localStorage.getItem('debug.hidePlanningStudio') === 'true';
+      // Persist on change
+      debugHidePlanningEl.addEventListener('change', () => {
+        localStorage.setItem('debug.hidePlanningStudio', debugHidePlanningEl.checked ? 'true' : 'false');
+      });
+    }
   </script>
 </body>
 </html>

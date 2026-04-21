@@ -39,7 +39,19 @@
     .bg-orb { position: absolute; filter: blur(80px); opacity: 0.4; pointer-events: none; }
     .orb-purple { background: radial-gradient(closest-side, rgba(107,47,179,0.6), transparent 70%); }
     .orb-blue { background: radial-gradient(closest-side, rgba(59,130,246,0.25), transparent 70%); }
+
+    /* Debug toggle: hide Planning Studio section + its hero anchor when Settings → Debug → Hide conversational planning is on. */
+    html.hide-planning-studio #planning-studio,
+    html.hide-planning-studio a[href="#planning-studio"] { display: none !important; }
   </style>
+  <script>
+    // Run synchronously before body paints to avoid FOUC.
+    try {
+      if (localStorage.getItem('debug.hidePlanningStudio') === 'true') {
+        document.documentElement.classList.add('hide-planning-studio');
+      }
+    } catch (e) { /* localStorage disabled — show normally */ }
+  </script>
 </head>
 <body class="min-h-screen">
   <header class="brand-grad border-b border-white/10">
