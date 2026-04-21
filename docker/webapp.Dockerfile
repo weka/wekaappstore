@@ -25,8 +25,8 @@ WORKDIR /app
 COPY ../app-store-gui/requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# copy source
-COPY ../app-store-gui/webapp ./app
+# copy source — preserve the `webapp` folder name so `from webapp.*` absolute imports in main.py resolve
+COPY ../app-store-gui/webapp ./webapp
 
 # create a non-root user
 RUN useradd -u 10001 -m appuser
@@ -35,4 +35,4 @@ USER appuser
 EXPOSE 8000
 
 # default to uvicorn; for production scale consider gunicorn (see below)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "webapp.main:app", "--host", "0.0.0.0", "--port", "8000"]
