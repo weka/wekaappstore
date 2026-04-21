@@ -43,7 +43,7 @@ patterns-established:
   - "Phase validation delegation: Phase N+1 runs Phase N --live as Check 1, aborts if Phase N fails"
   - "Evidence capture script pattern: named --pre/--post modes, evidence/ directory, WARN-only on individual kubectl failures"
 
-requirements-completed: [E2E-01, E2E-02, E2E-03, E2E-04]
+requirements-completed: []  # Plan 01 delivered E2E infrastructure prep only (scripts + unrouted HTTPRoute/Service manifests). E2E-01..04 were never completed — see .planning/v3.0-KNOWN-ISSUES.md. Frontmatter corrected 2026-04-21.
 
 duration: 2min
 completed: 2026-03-25

@@ -3,7 +3,8 @@
 ## Milestones
 
 - ✅ **v2.0 OpenClaw MCP Tool Integration** - Phases 6-10 (shipped 2026-03-22)
-- 🚧 **v3.0 Live EKS Deployment and Agent Testing** - Phases 11-14 (in progress)
+- ✅ **v3.0 Live EKS Deployment** - Phases 11-13 (shipped 2026-04-21, rescoped from original v3.0 "...and Agent Testing")
+- 🔜 **v3.1 E2E Chat Validation** - Phase 14 deferred here along with 4 known issues from v3.0 retry (see `.planning/v3.0-KNOWN-ISSUES.md`)
 
 ## Phases
 
@@ -16,14 +17,16 @@ See MILESTONES.md for full v2.0 summary.
 
 </details>
 
-### 🚧 v3.0 Live EKS Deployment and Agent Testing (In Progress)
+### ✅ v3.0 Live EKS Deployment (Shipped 2026-04-21, rescoped)
 
-**Milestone Goal:** Deploy OpenClaw/NemoClaw and the MCP server to EKS, register tools via Streamable HTTP sidecar, and validate the full agent chat experience with a happy-path blueprint deployment.
+**Milestone Goal (rescoped):** Deploy OpenClaw/NemoClaw and the MCP server to EKS, register tools via Streamable HTTP sidecar. Infrastructure-only — agent chat validation (E2E-01..04) and Phase 14 moved to v3.1.
+
+**Rescope context:** A 2026-04-21 retry of the Phase 14 chat session surfaced real code and config gaps — MCP inspect wrappers never call `load_incluster_config()`; init container's openclaw.json is missing required runtime keys; 8B model perseveration on error state. Full root-cause analysis in `.planning/v3.0-KNOWN-ISSUES.md`. Infrastructure deliverables proven functional via direct MCP invocation — only the end-to-end chat experience blocked.
 
 - [x] **Phase 11: Streamable HTTP Transport** - Add HTTP transport mode to MCP server (code-only, no cluster needed) (completed 2026-03-23)
 - [x] **Phase 12: NemoClaw EKS Topology** - Deploy NemoClaw/OpenClaw to EKS using agent-sandbox CRD; validate topology before manifests (completed 2026-03-24)
 - [x] **Phase 13: Kubernetes Manifests and Sidecar Wiring** - Author complete K8s manifest set; wire MCP sidecar into OpenClaw pod (completed 2026-03-24)
-- [ ] **Phase 14: End-to-End Validation** - Validate full happy-path blueprint deployment through live agent chat
+- [~] **Phase 14: End-to-End Validation** — descoped; Plan 14-01 infra prep retained as shipped. Plan 14-02 chat session moves to v3.1 along with FIX-01..04 and E2E-01..04.
 
 ## Phase Details
 
@@ -75,20 +78,14 @@ Plans:
 - [ ] 13-02-PLAN.md — Update Sandbox CR with init container, MCP sidecar, git-sync, and volumes; create validation script
 - [ ] 13-03-PLAN.md — Deploy manifests to EKS cluster, run live validation, human verification
 
-### Phase 14: End-to-End Validation
-**Goal**: Agent completes the full SKILL.md tool chain against a live EKS cluster and live WEKA storage; happy-path blueprint deployment succeeds through chat
+### Phase 14: End-to-End Validation — descoped to v3.1
+**Status**: Plan 14-01 infrastructure prep retained in v3.0 as shipped. Plan 14-02 chat session moved to v3.1.
 **Depends on**: Phase 13
-**Requirements**: E2E-01, E2E-02, E2E-03, E2E-04
-**Success Criteria** (what must be TRUE):
-  1. Agent returns real cluster resource data (GPU, CPU, RAM, namespaces) when asked about cluster state through chat
-  2. Agent lists and describes blueprints from the live catalog through chat
-  3. Agent generates, validates, and applies a WekaAppStore CR through the full SKILL.md workflow (inspect → validate → apply); CR appears in `kubectl get wekaappstores`
-  4. Agent reports deployment status after apply (operator reconciliation outcome visible in chat)
-**Plans:** 1/2 plans executed
-
-Plans:
-- [ ] 14-01-PLAN.md — Infrastructure prep: prereq validation, Service+HTTPRoute manifests, evidence capture scripts
-- [ ] 14-02-PLAN.md — E2E chat session: port-forward access, SKILL.md steps 1-12, evidence capture and verification
+**Original requirements**: E2E-01, E2E-02, E2E-03, E2E-04 — now deferred to v3.1
+**Rescope reason**: 2026-04-21 retry surfaced code gap (inspect tool wrappers miss `load_incluster_config`), config gap (init container openclaw.json minimal), and model reliability gap (Llama 3.1 8B). Full details in `.planning/v3.0-KNOWN-ISSUES.md`.
+**Plans:**
+- [x] 14-01-PLAN.md — Infrastructure prep: prereq validation, Service+HTTPRoute manifests, evidence capture scripts (shipped; artifacts remain useful for v3.1 retry)
+- [~] 14-02-PLAN.md — Descoped. Will re-execute in v3.1 after FIX-01..04 are addressed.
 
 ## Progress
 
@@ -104,4 +101,4 @@ Plans:
 | 11. Streamable HTTP Transport | 2/2 | Complete    | 2026-03-24 | - |
 | 12. NemoClaw EKS Topology | 2/2 | Complete    | 2026-03-24 | - |
 | 13. Kubernetes Manifests and Sidecar Wiring | 3/3 | Complete    | 2026-03-24 | - |
-| 14. End-to-End Validation | 1/2 | In Progress|  | - |
+| 14. End-to-End Validation | 1/2 | Descoped → v3.1 | 2026-04-21 | - |

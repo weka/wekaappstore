@@ -5,7 +5,11 @@
 
 ## v3.0 Requirements
 
-Requirements for the Live EKS Deployment and Agent Testing milestone. Each maps to roadmap phases.
+Requirements for the Live EKS Deployment milestone (scoped to infrastructure delivery).
+
+**Note:** Original v3.0 scope included E2E-01..04 (agent chat validation). After the 2026-04-21 retry session surfaced code and config gaps, these four requirements were moved to v3.1 along with the bugs that blocked them. See Future Requirements section and `.planning/v3.0-KNOWN-ISSUES.md`.
+
+Each requirement below maps to a roadmap phase.
 
 ### MCP Transport
 
@@ -29,16 +33,25 @@ Requirements for the Live EKS Deployment and Agent Testing milestone. Each maps 
 - [x] **NCLAW-03**: NemoClaw egress policy explicitly allows loopback access to MCP sidecar port
 - [x] **NCLAW-04**: SKILL.md loaded by agent at registration time
 
-### E2E Validation
+## Future Requirements (v3.1 — E2E Chat Validation)
 
-- [x] **E2E-01**: Agent can inspect cluster resources and WEKA storage through chat
-- [x] **E2E-02**: Agent can list and describe blueprints through chat
-- [x] **E2E-03**: Agent can generate, validate, and apply a WekaAppStore CR through the full SKILL.md workflow
-- [x] **E2E-04**: Agent reports deployment status after apply
+Deferred from v3.0 after 2026-04-21 retry session discovered code and config gaps blocking the E2E chat experience. See `.planning/v3.0-KNOWN-ISSUES.md` for root causes.
 
-## Future Requirements
+### E2E Validation (moved from v3.0)
 
-Deferred to v3.1+ after live agent behavior is observed.
+- **E2E-01**: Agent can inspect cluster resources and WEKA storage through chat
+- **E2E-02**: Agent can list and describe blueprints through chat
+- **E2E-03**: Agent can generate, validate, and apply a WekaAppStore CR through the full SKILL.md workflow
+- **E2E-04**: Agent reports deployment status after apply
+
+### Prerequisite fixes for E2E retry
+
+- **FIX-01**: `mcp-server/tools/inspect_cluster.py` and `inspect_weka.py` call `load_incluster_config()` before using the kubernetes-python client (Issue 1)
+- **FIX-02**: Init container openclaw.json includes `tools.exec.host`, `agents.defaults.sandbox.mode`, and model provider config (Issue 2)
+- **FIX-03**: Phase 13/14 validation scripts invoke each MCP tool over HTTP and assert non-null response data (Nyquist gap)
+- **FIX-04**: Evaluate upgrading the NIM model from Llama 3.1 8B to a larger variant for reliable multi-step tool use (Issue 3)
+
+### Other v3.1+ candidates
 
 - **LIVE-02**: SKILL.md tuning based on real agent behavior
 - **LIVE-03**: Multi-blueprint coexistence assessment tool
@@ -73,16 +86,16 @@ Deferred to v3.1+ after live agent behavior is observed.
 | NCLAW-02 | Phase 13 | Complete |
 | NCLAW-03 | Phase 12 | Complete |
 | NCLAW-04 | Phase 13 | Complete |
-| E2E-01 | Phase 14 | Complete |
-| E2E-02 | Phase 14 | Complete |
-| E2E-03 | Phase 14 | Complete |
-| E2E-04 | Phase 14 | Complete |
+| E2E-01 | Phase 14 (descoped → v3.1) | Deferred |
+| E2E-02 | Phase 14 (descoped → v3.1) | Deferred |
+| E2E-03 | Phase 14 (descoped → v3.1) | Deferred |
+| E2E-04 | Phase 14 (descoped → v3.1) | Deferred |
 
 **Coverage:**
-- v3.0 requirements: 17 total
-- Mapped to phases: 17
-- Unmapped: 0
+- v3.0 requirements: 13 total (after rescope)
+- Mapped to phases: 13 (all satisfied)
+- Deferred to v3.1: 4 (E2E-01..04)
 
 ---
 *Requirements defined: 2026-03-23*
-*Last updated: 2026-03-23 after v3.0 roadmap creation*
+*Last updated: 2026-04-21 — rescoped v3.0 to infrastructure-only; E2E-01..04 moved to v3.1. See v3.0-KNOWN-ISSUES.md.*

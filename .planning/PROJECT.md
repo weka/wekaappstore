@@ -10,18 +10,13 @@ The primary users are platform users and cluster admins who interact with OpenCl
 
 OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
 
-## Current Milestone: v3.0 Live EKS Deployment and Agent Testing
+## Previous Milestone: v3.0 Live EKS Deployment (Shipped 2026-04-21, rescoped)
 
-**Goal:** Deploy OpenClaw/NemoClaw and the MCP server to Chris's EKS cluster, register the MCP tools via Streamable HTTP sidecar, and validate the full agent chat experience with a happy-path blueprint deployment.
+**Shipped:** Infrastructure delivered — HTTP transport, EKS deployment via agent-sandbox CRD, K8s manifests, sidecar wiring, RBAC, SKILL.md ConfigMap, init container openclaw.json, git-sync blueprint catalog. Direct MCP tool invocation verified functional.
 
-**Target features:**
-- Streamable HTTP transport added to MCP server (alongside existing stdio)
-- NemoClaw/OpenClaw deployed to EKS
-- MCP server running as sidecar container alongside NemoClaw pod
-- Agent can chat, inspect cluster, browse blueprints, validate YAML, and deploy a blueprint end-to-end
-- Happy-path E2E validation against real K8s and WEKA resources
+**Descoped to v3.1:** E2E chat validation (E2E-01..04) + four prerequisite fixes. See `.planning/v3.0-KNOWN-ISSUES.md`.
 
-## Current State (after v2.0)
+## Current State (after v3.0)
 
 The MCP server is complete and container-ready. 8 tools are registered and tested (103 tests). SKILL.md defines the agent workflow. Deprecated v1.0 backend-brain code has been removed.
 
@@ -49,14 +44,13 @@ The MCP server is complete and container-ready. 8 tools are registered and teste
 - ✓ SKILL.md defines the agent workflow for blueprint planning, validation, and installation — v2.0
 - ✓ Mock agent harness can exercise the full tool chain without a live OpenClaw instance — v2.0
 - ✓ Deprecated v1.0 backend-brain code (session service, family matcher, compiler, session routes) is removed — v2.0
+- ✓ MCP server supports Streamable HTTP transport (port 8080, stateless, `/health` endpoint) — v3.0 (XPORT-01..04)
+- ✓ OpenClaw/NemoClaw deployed to EKS GPU node via experimental agent-sandbox CRD — v3.0 (NCLAW-01, NCLAW-03)
+- ✓ Kubernetes manifest set with dedicated RBAC, SKILL.md ConfigMap, MCP sidecar wiring, init-container-generated openclaw.json, git-sync blueprint catalog — v3.0 (K8S-01..05, NCLAW-02, NCLAW-04)
 
 ### Active
 
-- [ ] Streamable HTTP transport for MCP server (sidecar deployment pattern)
-- [ ] NemoClaw/OpenClaw deployed and running in EKS
-- [ ] MCP server registered with OpenClaw as sidecar via Streamable HTTP
-- [ ] Agent can complete happy-path blueprint deployment through chat
-- [ ] SKILL.md and openclaw.json updated for HTTP transport and real deployment
+(No active milestone — ready to start next. See `.planning/v3.0-KNOWN-ISSUES.md` for deferred v3.1 scope and `PRD-gui-app-categories.md` for candidate next milestone.)
 
 ### Out of Scope
 
@@ -99,4 +93,4 @@ OpenClaw connects via WebSocket Gateway, uses OpenAI-compatible model API, and r
 | Deploy NemoClaw/OpenClaw via agent-sandbox CRD on EKS | Experimental CRD provides sandbox isolation, GPU scheduling, and volume management out of the box; avoids hand-rolling Deployment + RBAC + PV scaffolding. Gateway must use --bind=loopback (not lan) since non-loopback requires controlUi.allowedOrigins config; loopback is correct for sidecar deployment | Validated in Phase 12 — pod Running with NVIDIA A10G on EKS in wekaappstore namespace |
 
 ---
-*Last updated: 2026-03-23 after v3.0 milestone start*
+*Last updated: 2026-04-21 after v3.0 rescope (infrastructure shipped; E2E chat validation deferred to v3.1 — see v3.0-KNOWN-ISSUES.md)*

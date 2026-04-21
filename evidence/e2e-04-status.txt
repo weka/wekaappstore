@@ -1,0 +1,5 @@
+NAME                                                          READY   STATUS    RESTARTS       AGE     IP            NODE                                         NOMINATED NODE   READINESS GATES
+openclaw-sandbox                                              3/3     Running   0              8m49s   172.3.10.33   ip-172-3-1-203.us-west-2.compute.internal    <none>           <none>
+wekaappstore-weka-app-store-operator-chart-646b67f465-hvscw   1/1     Running   0              48d     172.3.10.63   ip-172-3-11-183.us-west-2.compute.internal   <none>           <none>
+wekaappstoregui-deployment-7dc6967df6-srfx6                   1/1     Running   85 (15h ago)   48d     172.3.10.79   ip-172-3-1-154.us-west-2.compute.internal    <none>           <none>
+No resources found in wekaappstore namespace.

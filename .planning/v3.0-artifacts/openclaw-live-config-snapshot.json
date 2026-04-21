@@ -1,0 +1,69 @@
+{
+  "models": {
+    "providers": {
+      "nim": {
+        "baseUrl": "http://nim-llm.rag.svc.cluster.local:8000/v1",
+        "apiKey": "not-needed",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "meta/llama-3.1-8b-instruct",
+            "name": "Local NIM Llama 3.1 8B",
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 131072,
+            "maxTokens": 4096
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "nim/meta/llama-3.1-8b-instruct"
+      },
+      "models": {
+        "nim/meta/llama-3.1-8b-instruct": {}
+      },
+      "sandbox": {}
+    }
+  },
+  "tools": {
+    "exec": {
+      "host": "auto"
+    }
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "gateway": {
+    "controlUi": {
+      "dangerouslyAllowHostHeaderOriginFallback": true
+    }
+  },
+  "mcp": {
+    "servers": {
+      "weka-app-store-mcp": {
+        "url": "http://localhost:8080/mcp",
+        "transport": "streamable-http",
+        "skill": "/home/node/.openclaw/SKILL.md"
+      }
+    }
+  },
+  "meta": {
+    "lastTouchedVersion": "2026.4.15",
+    "lastTouchedAt": "2026-04-21T05:50:55.047Z"
+  }
+}
