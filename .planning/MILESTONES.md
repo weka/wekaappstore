@@ -23,6 +23,12 @@
 - Pre-existing unrelated duplicate `async function refreshAuthStatus()` at `index.html` lines 436 and 529 (infrastructure script block, outside the React IIFE) — worth cleaning up in a future polish pass
 - 3 inline comments rephrased during 15-03 to avoid tripping the plan's own grep invariants — documented in 15-03 SUMMARY
 
+**Post-ship patches (applied after v4.0 was archived and tagged):**
+
+- **2026-04-21 — AIDP blueprint rebrand and category card sizing.** The single blueprint in the AIDP category was renamed from "AI Agent for Enterprise Research" to "NeuralMesh AIDP" with a new product-positioned description ("Embed data on your NeuralMesh storage automatically and keep it in-sync with your data"), `comingSoon` banner removed, and `href` changed from `/blueprint/ai-agent-enterprise-research` to `/blueprint/neuralmesh-aidp`. Flask detail template renamed to match (`blueprint_neuralmesh-aidp.html`) with title/h1/description updated; `app_map` placeholder comment in `main.py` updated to new slug. Category cards in the home-screen Categories row shrunk ~20-25% (subtitle2 title, caption description, tighter padding `p: 1.25`, grid spacing `1.5` instead of `2.5`) to look more like a tab row and less like full cards.
+  - Reverses v4.0 REQUIREMENTS.md Out-of-Scope item "Renaming the AI Agent for Enterprise Research blueprint" (was excluded during planning; product decision changed after shipping).
+  - All changes scoped to `app-store-gui/webapp/templates/index.html`, `blueprint_neuralmesh-aidp.html` (renamed), and a one-line comment in `main.py`. No new dependencies.
+
 ---
 
 ## v3.0 Live EKS Deployment (Shipped: 2026-04-21, rescoped from "...and Agent Testing")

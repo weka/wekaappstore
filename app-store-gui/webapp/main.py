@@ -794,7 +794,7 @@ async def blueprint_detail(request: Request, name: str):
         "cluster-init": os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml"),
         # Wire OpenFold to its blueprint manifest folder so Deploy works
         "openfold": os.path.join(BLUEPRINTS_DIR, "openfold-protein", "openfold-stack.yaml"),
-        # "ai-agent-enterprise-research": os.path.join("Production Deployments", "ai-agent-enterprise-research.yaml"),
+        # "neuralmesh-aidp": os.path.join("Production Deployments", "neuralmesh-aidp.yaml"),
     }
     yaml_path = app_map.get(name)
     status = get_cluster_status()

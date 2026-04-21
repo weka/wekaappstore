@@ -127,7 +127,7 @@
             </div>
             <div class="rounded-lg border border-white/10 bg-white/5 p-4">
               <div class="font-medium text-white">Supported families</div>
-              <div class="muted mt-1">AI Agent for Enterprise Research, OpenFold, and NVIDIA VSS.</div>
+              <div class="muted mt-1">NeuralMesh AIDP, OpenFold, and NVIDIA VSS.</div>
             </div>
           </div>
         </div>
@@ -246,12 +246,11 @@
               category: 'warp'
             },
             {
-              title: 'AI Agent for Enterprise Research',
-              desc: 'This will build an AI Agent that conducts Research on your domain specific data summarising and conducting research.',
-              href: '/blueprint/ai-agent-enterprise-research',
+              title: 'NeuralMesh AIDP',
+              desc: 'Embed data on your NeuralMesh storage automatically and keep it in-sync with your data',
+              href: '/blueprint/neuralmesh-aidp',
               tags: ['NVIDIA'],
-              category: 'aidp',
-              comingSoon: true
+              category: 'aidp'
             }
           ];
 
@@ -306,15 +305,15 @@
           function Categories({ categories, selected, onSelect }) {
             return h(Box, { sx: { flexGrow: 1 } },
               h(Typography, {
-                variant: 'h5',
+                variant: 'h6',
                 component: 'h2',
-                sx: { mb: 0.5, fontWeight: 600 }
+                sx: { mb: 0.25, fontWeight: 600 }
               }, 'Browse by category'),
               h(Typography, {
-                variant: 'body2',
-                sx: { color: 'text.secondary', mb: 3 }
+                variant: 'caption',
+                sx: { color: 'text.secondary', mb: 2, display: 'block' }
               }, 'Pick a family to narrow the catalog below.'),
-              h(Grid, { container: true, spacing: 2.5, alignItems: 'stretch' },
+              h(Grid, { container: true, spacing: 1.5, alignItems: 'stretch' },
                 categories.map((cat) => {
                   const isSelected = selected === cat.key;
                   const anySelected = selected !== 'all';
@@ -344,9 +343,9 @@
                         sx: { flexGrow: 1, alignItems: 'stretch', height: '100%' }
                         // Omitting `component` prop: CardActionArea defaults to native <button>
                       },
-                        h(CardContent, { sx: { display: 'flex', flexDirection: 'column', flexGrow: 1, gap: 1 } },
-                          h(Typography, { variant: 'h6', component: 'h3' }, cat.label),
-                          h(Typography, { variant: 'body2', sx: { color: 'text.secondary' } }, cat.description)
+                        h(CardContent, { sx: { display: 'flex', flexDirection: 'column', flexGrow: 1, gap: 0.25, p: 1.25, '&:last-child': { pb: 1.25 } } },
+                          h(Typography, { variant: 'subtitle2', component: 'h3', sx: { fontWeight: 600, lineHeight: 1.3 } }, cat.label),
+                          h(Typography, { variant: 'caption', sx: { color: 'text.secondary', lineHeight: 1.4 } }, cat.description)
                         )
                       )
                     )
