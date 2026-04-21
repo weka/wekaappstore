@@ -1,242 +1,252 @@
 # Stack Research
 
-**Domain:** MCP server in Python — WEKA App Store OpenClaw tool integration
-**Researched:** 2026-03-23
-**Confidence:** MEDIUM-HIGH — MCP SDK Streamable HTTP verified via PyPI and gofastmcp.com docs (HIGH); OpenClaw K8s operator sidecar pattern verified via official docs (HIGH); openclaw.json HTTP mcpServers format verified via multiple community sources (MEDIUM); NemoClaw-specific EKS details still LOW due to alpha status
+**Domain:** Brownfield React/MUI CDN single-file feature addition — v4.0 App Categories filter
+**Researched:** 2026-04-21
+**Confidence:** HIGH (all claims verified against live CDN bundle or official docs)
 
 ---
 
-## Context: Milestone Scope — v3.0 Additions Only
+## Context: What This Research Is NOT
 
-This document **extends** the v2.0 STACK.md. Everything in the previous STACK.md remains valid and is not repeated here. The v2.0 validated stack is:
-
-- `mcp[cli]>=1.26.0` — FastMCP with stdio transport (production)
-- `kubernetes>=27.0.0` — K8s API client (reused by tools)
-- `PyYAML>=6.0.1` — YAML parsing (reused by validate/apply)
-- `pytest>=8.0.0`, `pytest-asyncio` — test runner
-
-**v3.0 adds:** Streamable HTTP transport on the MCP server, OpenClaw/NemoClaw deployment to EKS via the `openclaw-rocks` Kubernetes operator, and sidecar wiring to register the MCP server over HTTP.
+This is not a new-project stack selection. The PRD hard-locks the runtime to what is already in `index.html`. This document maps **which specific APIs within that locked runtime** the Categories feature needs, distinguishes what is already present vs newly introduced, and confirms no new CDN dependencies are required.
 
 ---
 
-## Recommended Stack — New Additions for v3.0
+## Ground Truth: Existing CDN Loads (lines 17–21 of index.html)
 
-### Core Technologies
+```html
+<script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/@emotion/react@11.11.4/dist/emotion-react.umd.min.js" crossorigin></script>
+<script src="https://unpkg.com/@emotion/styled@11.11.0/dist/emotion-styled.umd.min.js" crossorigin></script>
+<script src="https://unpkg.com/@mui/material@5.15.14/umd/material-ui.development.js" crossorigin></script>
+```
 
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| `mcp[cli]` (Streamable HTTP transport) | `>=1.26.0` (already pinned) | Add HTTP transport mode to existing FastMCP server | No new package needed — Streamable HTTP is built into `mcp>=1.9`. Call `mcp.run(transport="streamable-http", host="0.0.0.0", port=8080)` and the `/mcp` endpoint is live. The existing `mcp[cli]>=1.26.0` pin already covers this. |
-| OpenClaw Kubernetes Operator | `oci://ghcr.io/openclaw-rocks/charts/openclaw-operator` (latest) | Deploy and manage OpenClaw agent instances on EKS via the `OpenClawInstance` CRD | Official community operator from `openclaw-rocks/k8s-operator`. Manages the full pod (StatefulSet, Service, RBAC, NetworkPolicy, PVC), handles sidecar injection via `spec.sidecars`, and accepts arbitrary custom containers running alongside the main agent container. Verified via official openclaw.rocks docs. |
-| OpenClaw container image | `alpine/openclaw:2026.3.11` (or latest `alpine/openclaw`) | Agent runtime in the OpenClawInstance pod | Verified via dev.to deployment guide (March 2026). Exposes gateway on port 18789. The operator's nginx gateway-proxy sidecar handles external traffic forwarding to the loopback-bound gateway. |
+Globals exposed after these loads:
 
-### Supporting Libraries
-
-No new Python libraries are required. All Streamable HTTP transport support is already included in `mcp>=1.9`. The sidecar pattern only requires Kubernetes manifests/YAML changes, not Python code changes.
-
-| What | Where | Notes |
-|------|-------|-------|
-| Streamable HTTP server | `mcp.run()` call in `server.py` | Switch transport arg from default stdio to `"streamable-http"` for the HTTP variant. See integration section below. |
-| Environment variable `MCP_PORT` | `server.py` and `config.py` | Expose port as env var so the Kubernetes manifest can configure it without rebuilding the image. Default: `8080`. |
-| Kubernetes `ConfigMap` for openclaw config | `OpenClawInstance` spec | MCP server registration goes into `spec.config.raw.agents.defaults.mcpServers` as a `streamable-http` entry pointing to `http://localhost:8080/mcp`. |
-
-### Development Tools
-
-| Tool | Purpose | Notes |
-|------|---------|-------|
-| `helm` v3.x | Install the openclaw-rocks operator on EKS | `helm install openclaw-operator oci://ghcr.io/openclaw-rocks/charts/openclaw-operator --namespace openclaw-operator-system --create-namespace` |
-| `kubectl port-forward` | Local access to OpenClaw gateway during dev | `kubectl port-forward svc/my-agent 18789:18789 -n openclaw` — exposes the agent chat gateway locally |
-| `mcp dev server.py` | Interactive MCP Inspector for HTTP transport smoke-test | Already available via `mcp[cli]`; run with `--transport streamable-http` flag to test HTTP mode |
+| Global | Source | Version |
+|--------|--------|---------|
+| `window.React` | react.development.js | 18.3.1 (confirmed from bundle header) |
+| `window.ReactDOM` | react-dom.development.js | 18.x |
+| `window.MaterialUI` | material-ui.development.js | 5.15.14 |
+| `window.emotionReact` | emotion-react.umd.min.js | 11.11.4 |
+| `window.emotionStyled` | emotion-styled.umd.min.js | 11.11.0 |
 
 ---
 
-## Installation
+## Question 1: MUI UMD Component Access
 
-No new Python packages. All changes are in existing code and Kubernetes manifests.
+### UMD Global Name Confirmation
 
-```bash
-# Verify mcp[cli]>=1.26.0 is already installed (it should be from v2.0)
-pip show mcp
-
-# Install OpenClaw operator on EKS (one-time cluster setup)
-helm install openclaw-operator \
-  oci://ghcr.io/openclaw-rocks/charts/openclaw-operator \
-  --namespace openclaw-operator-system \
-  --create-namespace
+**Confirmed:** The MUI 5.15.14 UMD bundle header explicitly sets:
+```javascript
+global.MaterialUI = {}
 ```
+All exported components are properties of `window.MaterialUI`. The destructuring pattern `const { Card, CardActionArea, ... } = MaterialUI;` is correct and proven by the existing code at lines 169–182 of `index.html`.
+
+### Components Already Destructured in index.html (lines 169–182)
+
+```javascript
+const {
+  createTheme,       // theme factory
+  ThemeProvider,     // context provider
+  CssBaseline,       // CSS reset
+  Card,              // card container
+  CardContent,       // card body padding wrapper
+  CardActions,       // card footer action row
+  CardActionArea,    // clickable button overlay on card
+  Typography,        // text with variant system
+  Button,            // action button
+  Grid,              // 12-col responsive layout
+  Box,               // generic styled div
+  Chip,              // pill label
+  Stack              // flex row/column
+} = MaterialUI;
+```
+
+**All of these are already present in the existing destructuring.** No new MUI component names need to be added to the destructure list.
+
+### Components Needed by the Categories Feature
+
+| Component | UMD Access | Already in Destructure | Purpose |
+|-----------|-----------|----------------------|---------|
+| `Card` | `MaterialUI.Card` | YES | Outer card shell for each category |
+| `CardActionArea` | `MaterialUI.CardActionArea` | YES | Clickable button wrapper (provides keyboard focus, button semantics) |
+| `CardContent` | `MaterialUI.CardContent` | YES | Padded content area inside category card |
+| `Chip` | `MaterialUI.Chip` | YES | "N apps" count badge |
+| `Typography` | `MaterialUI.Typography` | YES | Category title (variant="h6") and description (variant="body2") |
+| `Grid` | `MaterialUI.Grid` | YES | 3-column responsive layout for the category row |
+| `Box` | `MaterialUI.Box` | YES | Empty-state container, layout wrappers |
+| `ThemeProvider` | `MaterialUI.ThemeProvider` | YES | Shared theme context — Categories and Catalog must share one root |
+
+**Verdict: Zero new MUI component names needed.** The existing destructure covers every component the Categories feature requires.
+
+### CardActionArea Specifics
+
+`CardActionArea` extends `ButtonBase`, which renders a native `<button>` element by default. Key properties:
+
+- **HTML element:** `<button>` (implicit `role="button"`)
+- **Keyboard behavior:** Enter and Space are handled natively by the `<button>` element — no custom key handler needed
+- **`aria-pressed` support:** Native `<button>` elements have an implicit `button` role, so `aria-pressed` can be passed as a prop directly in JSX. `CardActionArea` passes through arbitrary HTML attributes to its root element via ButtonBase inheritance. Use: `h(CardActionArea, { 'aria-pressed': selected === categoryKey, onClick: ... })`
+- **`component` prop:** Accepts a `component` prop through ButtonBase. For the categories feature, keep the default (`button`) — do NOT set `component: 'a'` (that is the pattern used on catalog cards that navigate; category cards toggle state in place and must NOT navigate)
+- **`focusHighlight`:** CardActionArea renders a `<span>` as a focus highlight overlay automatically — no extra markup needed for focus visibility
+
+**HIGH confidence** — verified against official MUI 5 API docs at mui.com/material-ui/api/card-action-area/ and mui.com/material-ui/react-card/.
 
 ---
 
-## Integration Points
+## Question 2: React 18 APIs
 
-### 1. Adding HTTP Transport to server.py
+### APIs Needed for Categories Feature
 
-The MCP server currently runs stdio only. Add HTTP support by reading a transport env var:
+| API | Access via UMD Global | Already Used in index.html | Purpose |
+|-----|--------------------|--------------------------|---------|
+| `createElement` (aliased `h`) | `React.createElement` | YES (line 166) | All JSX-equivalent calls |
+| `useState` | `React.useState` | NO — needs to be added to destructure | Selected-category state (`'all' \| 'neuralmesh-aidp' \| 'warp' \| 'partner'`) |
+| `useMemo` | `React.useMemo` | YES (line 166) | Filtered items derivation |
+| `useEffect` | `React.useEffect` | NO — needs to be added to destructure | Hash sync on mount (read initial hash) |
+| `createRoot` | `ReactDOM.createRoot` | YES (line 167) | Already used to mount the existing Catalog |
 
-```python
-# mcp-server/server.py (additions only)
-import os
+### Additions to the Destructure Block
 
-if __name__ == "__main__":
-    from config import validate_required
-    validate_required()
-    transport = os.environ.get("MCP_TRANSPORT", "stdio")
-    if transport == "streamable-http":
-        port = int(os.environ.get("MCP_PORT", "8080"))
-        mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
-    else:
-        mcp.run()  # stdio default — unchanged for local dev
+The existing line 166:
+```javascript
+const { createElement: h, useMemo } = React;
 ```
 
-**Key facts (HIGH confidence — verified via PyPI and gofastmcp.com):**
-- Transport string is `"streamable-http"` (hyphen, not underscore)
-- MCP endpoint is always at `/mcp` path — `http://localhost:8080/mcp`
-- `host="0.0.0.0"` is required in a container so the sidecar is reachable from within the pod
-- No new dependencies needed — Streamable HTTP is included in `mcp>=1.9`
-- For a stateless server (no per-session state), initialize with `FastMCP("name", stateless_http=True)` for horizontal scaling compatibility
-
-**Also update config.py** to add `MCP_TRANSPORT` and `MCP_PORT` as optional env vars so they appear in documentation and validation output.
-
-### 2. Dockerfile Update
-
-The existing `CMD ["python", "-m", "server"]` runs stdio. For the sidecar container, the deployment YAML overrides this via `args`:
-
-```yaml
-# In the OpenClawInstance sidecar spec — no Dockerfile change needed
-containers:
-- name: weka-mcp-server
-  image: wekachrisjen/weka-app-store-mcp:latest
-  args: ["python", "-m", "server"]
-  env:
-  - name: MCP_TRANSPORT
-    value: "streamable-http"
-  - name: MCP_PORT
-    value: "8080"
-  - name: BLUEPRINTS_DIR
-    value: "/blueprints"
-  - name: KUBERNETES_AUTH_MODE
-    value: "in-cluster"
+Must become:
+```javascript
+const { createElement: h, useMemo, useState, useEffect } = React;
 ```
 
-The existing Dockerfile CMD stays as-is. The container behaves as stdio by default and as HTTP when `MCP_TRANSPORT=streamable-http` is injected.
+That is the only change to the React destructure.
 
-### 3. OpenClawInstance CRD — Sidecar Registration
+### React 18 Mounting — `createRoot` vs `ReactDOM.render`
 
-The operator manages OpenClaw agent pods via the `OpenClawInstance` CRD. To add the MCP server sidecar and register it over HTTP:
+**Critical:** The existing code already uses `createRoot` (line 167 and 305–307), which is the React 18 concurrent-mode API. `ReactDOM.render` is deprecated in React 18. The existing approach is correct.
 
-```yaml
-apiVersion: openclaw.rocks/v1alpha1
-kind: OpenClawInstance
-metadata:
-  name: weka-agent
-  namespace: openclaw
-spec:
-  envFrom:
-    - secretRef:
-        name: openclaw-api-keys        # ANTHROPIC_API_KEY or OPENAI_API_KEY
-  storage:
-    persistence:
-      enabled: true
-      size: 10Gi
-  # MCP server sidecar — communicates with the agent over localhost
-  sidecars:
-    - name: weka-mcp-server            # must not collide with reserved names
-      image: wekachrisjen/weka-app-store-mcp:latest
-      ports:
-        - containerPort: 8080
-          name: mcp-http
-      env:
-        - name: MCP_TRANSPORT
-          value: "streamable-http"
-        - name: MCP_PORT
-          value: "8080"
-        - name: BLUEPRINTS_DIR
-          value: "/blueprints"
-        - name: KUBERNETES_AUTH_MODE
-          value: "in-cluster"
-      resources:
-        requests:
-          cpu: 200m
-          memory: 256Mi
-        limits:
-          cpu: 500m
-          memory: 512Mi
-      # readOnlyRootFilesystem enforced by operator for custom sidecars
-  # Register the sidecar MCP server in OpenClaw's config
-  config:
-    raw:
-      agents:
-        defaults:
-          mcpServers:
-            weka-app-store:
-              transport: "streamable-http"
-              url: "http://localhost:8080/mcp"
-```
+**Architecture for shared state:** The PRD specifies and this research confirms: mount **one** React root on a single `<div>`, render an `AppShell` (or `CatalogWithCategories`) component that contains both `Categories` and `Catalog` as children under a single `ThemeProvider`. This is simpler than a two-root event-bus approach and is the standard React pattern.
 
-**Sidecar naming constraints (HIGH confidence — operator docs):**
-Reserved container names rejected by the operator webhook: `openclaw`, `gateway-proxy`, `chromium`, `tailscale`, `ollama`, `web-terminal`. Use `weka-mcp-server`.
+Implementation shape:
+```javascript
+function App() {
+  const [selected, setSelected] = useState('all');
 
-**Port choice:** Port `8080` avoids conflict with OpenClaw's gateway on `18789` and the bridge on `18790`.
+  // Sync hash on mount
+  useEffect(() => {
+    const hash = window.location.hash;  // e.g. "#category=warp"
+    const match = hash.match(/^#category=(.+)$/);
+    if (match) setSelected(match[1]);
+  }, []);
 
-**localhost routing:** Both containers share a network namespace in the pod. The MCP server on `localhost:8080` is directly reachable from the OpenClaw agent container — no Service or ingress needed.
+  const filtered = useMemo(
+    () => selected === 'all' ? items : items.filter(i => i.category === selected),
+    [selected]
+  );
 
-### 4. openclaw.json Update (from stdio to HTTP)
-
-The existing `openclaw.json` in the repo documents the stdio startup contract. For the EKS sidecar deployment, this changes to an HTTP endpoint:
-
-```json
-{
-  "name": "weka-app-store-mcp",
-  "description": "MCP server for the WEKA App Store.",
-  "transport": "streamable-http",
-  "url": "http://localhost:8080/mcp",
-  "env": {
-    "required": ["BLUEPRINTS_DIR"],
-    "optional": ["KUBERNETES_AUTH_MODE", "LOG_LEVEL", "MCP_PORT"]
-  },
-  "container": "wekachrisjen/weka-app-store-mcp:latest",
-  "skill": "mcp-server/SKILL.md"
+  return h(ThemeProvider, { theme },
+    h(CssBaseline, null),
+    h(Categories, { selected, onSelect: setSelected }),
+    h(Catalog, { items: filtered })
+  );
 }
 ```
 
-The `startup` block (command/args for stdio) is removed for the HTTP deployment variant. Keep the stdio block for local dev documentation.
+The single `createRoot` call replaces the existing one on `#catalog-root`.
 
-### 5. RBAC — ServiceAccount for In-Cluster K8s Access
+**HIGH confidence** — React 18 UMD exports verified. `useState` and `useEffect` are stable React hooks present since React 16.8, fully in the React 18.3.1 bundle.
 
-The MCP server sidecar uses `KUBERNETES_AUTH_MODE=in-cluster` to call the K8s API. The `OpenClawInstance` operator creates a ServiceAccount, but it needs to be annotated with permission to list/get pods, nodes, namespaces, storageclasses, and custom resources:
+---
 
-```yaml
-# ClusterRole for MCP server tools (read-only + WekaAppStore apply)
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: weka-mcp-server-role
-rules:
-  - apiGroups: [""]
-    resources: ["nodes", "namespaces", "pods", "persistentvolumes"]
-    verbs: ["get", "list"]
-  - apiGroups: ["storage.k8s.io"]
-    resources: ["storageclasses"]
-    verbs: ["get", "list"]
-  - apiGroups: ["warp.io"]
-    resources: ["wekaappstores"]
-    verbs: ["get", "list", "create"]
-  - apiGroups: ["apiextensions.k8s.io"]
-    resources: ["customresourcedefinitions"]
-    verbs: ["get", "list"]
+## Question 3: Browser APIs for URL Hash Sync
+
+### APIs Needed
+
+| API | Access | Browser Support | Purpose |
+|-----|--------|-----------------|---------|
+| `window.location.hash` | `window.location.hash` | Universal | Read initial hash on mount |
+| `history.replaceState(state, '', url)` | `history.replaceState` | Baseline: widely available since July 2015 — all modern browsers | Update hash without adding a history entry |
+| `hashchange` event | `window.addEventListener('hashchange', fn)` | Universal | Optional: respond to browser Back/Forward when hash changes externally |
+
+### Implementation Pattern
+
+**On mount** (inside `useEffect(fn, [])`):
+```javascript
+const hash = window.location.hash;       // "#category=warp" or "" or "#catalog"
+const match = hash.match(/^#category=([a-z-]+)$/);
+if (match) setSelected(match[1]);
 ```
 
-Bind this to the ServiceAccount the operator creates for the `OpenClawInstance` pod.
+**On category selection** (inside click handler):
+```javascript
+if (newSelected === 'all') {
+  history.replaceState(null, '', window.location.pathname);  // clears hash
+} else {
+  history.replaceState(null, '', '#category=' + newSelected);
+}
+```
+
+**Why `replaceState` not `location.hash = ...`:**
+- `location.hash = '#category=warp'` triggers a `hashchange` event AND adds a new browser history entry, meaning Back walks through every category toggle. This violates PRD success criterion "Category selection does not pollute browser history."
+- `history.replaceState` modifies the current history entry in place — no new entry, no `hashchange` event fired, Back leaves the page in one press.
+
+**Hash conflict avoidance:** The regex `^#category=([a-z-]+)$` only matches hashes that start with `#category=`. The existing anchors `#catalog` and `#planning-studio` are not matched and are left untouched.
+
+**`hashchange` listener (optional but recommended):** Adding a `hashchange` listener inside the same `useEffect` handles the edge case where the user uses Back/Forward to a previously-set hash URL (which `replaceState` alone does not re-trigger). Pattern:
+```javascript
+useEffect(() => {
+  const sync = () => {
+    const match = window.location.hash.match(/^#category=([a-z-]+)$/);
+    setSelected(match ? match[1] : 'all');
+  };
+  sync();  // initial read
+  window.addEventListener('hashchange', sync);
+  return () => window.removeEventListener('hashchange', sync);
+}, []);
+```
+
+**HIGH confidence** — verified against MDN docs for `history.replaceState` and `aria-pressed`.
+
+---
+
+## Question 4: Are Any Needed APIs Missing from the Loaded CDN Bundle?
+
+**No. Zero gaps. The existing CDN bundle covers 100% of what the Categories feature requires.**
+
+Verification checklist:
+
+| Need | Status | Evidence |
+|------|--------|---------|
+| `MaterialUI.Card` | Present | Already destructured and used in existing Catalog |
+| `MaterialUI.CardActionArea` | Present | Already destructured at line 175 — used on catalog cards as `component: 'a'` |
+| `MaterialUI.CardContent` | Present | Already destructured at line 174 |
+| `MaterialUI.CardActions` | Present | Already destructured at line 173 |
+| `MaterialUI.Chip` | Present | Already destructured at line 179; used for tags |
+| `MaterialUI.Typography` | Present | Already destructured at line 176 |
+| `MaterialUI.Grid` | Present | Already destructured at line 178 |
+| `MaterialUI.Box` | Present | Already destructured at line 177 |
+| `MaterialUI.Stack` | Present | Already destructured at line 180 — used in Catalog |
+| `React.useState` | Present in React 18 UMD | Need to add to destructure — not currently destructured |
+| `React.useEffect` | Present in React 18 UMD | Need to add to destructure — not currently destructured |
+| `React.useMemo` | Present in React 18 UMD | Already destructured at line 166 |
+| `ReactDOM.createRoot` | Present | Already used at line 167 |
+| `history.replaceState` | Browser built-in | Baseline: all modern browsers since 2015 |
+| `window.location.hash` | Browser built-in | Universal |
+| `aria-pressed` on `<button>` | HTML attribute | Universal — native button role supports it |
+
+**No new `<script>` tags. No new CDN dependencies. The only code changes are inside the existing inline `<script>` block in index.html.**
 
 ---
 
 ## Alternatives Considered
 
-| Recommended | Alternative | When to Use Alternative |
-|-------------|-------------|-------------------------|
-| Streamable HTTP on port 8080 inside pod | stdio subprocess spawned by OpenClaw | Use stdio for local dev and single-user desktop scenarios — it's simpler and is the current production config. Use HTTP for Kubernetes sidecar because OpenClaw can't spawn a subprocess from inside a co-located container |
-| `spec.sidecars` custom container in `OpenClawInstance` | Separate Kubernetes Deployment with ClusterIP Service | Use separate Deployment only if the MCP server needs to be shared across multiple OpenClaw agent instances. For a single-agent pod, sidecar is simpler, shares network namespace, and requires no inter-pod DNS or service |
-| `openclaw-rocks/k8s-operator` Helm chart | Raw manifests (Deployment, Service, PVC, RBAC by hand) | Use raw manifests if the operator adds unacceptable overhead or if the cluster policy blocks CRD installation. The operator Helm chart is the official documented path and handles all the pod assembly complexity |
-| Port 8080 for MCP HTTP | Port 3721 (openclaw-mcp-server community default) | Port choice is arbitrary inside the pod. Use 8080 because it's the de facto HTTP alt-port convention and avoids confusion with OpenClaw's own ports (18789, 18790) |
+| Recommended | Alternative | Why Not |
+|-------------|-------------|---------|
+| Single React root with lifted state | Two roots + CustomEvent bus | More complex, harder to reason about, PRD explicitly recommends against it |
+| `history.replaceState` for hash update | `location.hash = ...` assignment | `location.hash =` adds a history entry on each click, breaking the back-button requirement |
+| `hashchange` listener for hash sync | Poll `location.hash` on interval | Event-driven is zero-cost; polling is wasteful and introduces lag |
+| `aria-pressed` on CardActionArea | Custom `role="button"` + `aria-pressed` on a `<div>` | CardActionArea already renders a `<button>` which has implicit button role — no need to re-declare role |
+| Lift state to a shared parent component | `useContext` with a context provider | Context adds indirection with no benefit when both components are siblings in the same tree |
 
 ---
 
@@ -244,41 +254,57 @@ Bind this to the ServiceAccount the operator creates for the `OpenClawInstance` 
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| SSE transport (`"sse"`) | SSE transport is deprecated per the MCP spec as of March 2025 and superseded by Streamable HTTP. Some clients may still support it but it is being removed | `transport="streamable-http"` |
-| `stateless_http=True` on this server | The WEKA MCP tools are already stateless by design (no session state). Setting `stateless_http=True` disables the MCP session-id mechanism entirely, which may break clients that expect session tracking. Leave it at default (stateful session management is handled by the SDK, not by the tools) | Default `FastMCP("name")` without `stateless_http` |
-| `asyncio_mode = "auto"` in pytest config | Auto mode causes pytest-asyncio to claim all async tests globally, conflicting with anyio (pulled in by `mcp`). Already flagged in v2.0 STACK.md | `asyncio_mode = "strict"` with explicit `@pytest.mark.asyncio` |
-| Exposing the MCP HTTP port as a Kubernetes Service | The MCP server is an agent-private tool endpoint — no other workload should call it directly. Exposing it as a Service opens a security surface and is not needed when the sidecar and agent are co-located | Keep MCP on localhost within the pod; no Service, no Ingress |
-| NIM/NemoClaw as the agent runtime for this milestone | NemoClaw is alpha (announced March 16 2026) with no published Kubernetes operator or stable config schema. OpenClaw is the stable deployment target for v3.0. NemoClaw is a future milestone item | `alpine/openclaw` + `openclaw-rocks` operator |
+| `ReactDOM.render(...)` | Deprecated in React 18 — triggers a warning and does not use the concurrent renderer | `ReactDOM.createRoot(el).render(...)` (already used) |
+| `location.hash = '#category=warp'` | Adds a browser history entry on every click, breaking the back-button behavior | `history.replaceState(null, '', '#category=warp')` |
+| `react-router` or any hash-router library | New dependency — violates PRD constraint | Native `window.location.hash` + `history.replaceState` + `hashchange` listener |
+| Mounting Categories and Catalog on separate React roots | Requires an event bus for state sharing; complex and fragile | Single root on `#catalog-root` (rename or keep) wrapping both components |
+| Adding `role="button"` to CardActionArea explicitly | Redundant — ButtonBase already renders a `<button>` element with implicit button role | Just pass `aria-pressed` as a prop directly |
 
 ---
 
 ## Version Compatibility
 
-| Package | Compatible With | Notes |
-|---------|-----------------|-------|
-| `mcp[cli]>=1.26.0` | Streamable HTTP | Confirmed available in `mcp>=1.9`. `1.26.0` is the latest stable (PyPI, Jan 24 2026). No separate package needed for HTTP transport. |
-| `mcp[cli]>=1.26.0` | Python >=3.10 | Existing container uses `python:3.10-slim` — compatible |
-| OpenClaw operator (latest) | Kubernetes 1.28+ | EKS current default AMIs (1.29, 1.30, 1.31) are all compatible |
-| `alpine/openclaw:2026.3.11` | OpenClaw operator latest | Verified via dev.to guide (March 2026) |
+| Package | Version in Use | Compatibility Notes |
+|---------|---------------|---------------------|
+| `@mui/material` | 5.15.14 | `CardActionArea` present since MUI v4; `aria-pressed` pass-through confirmed via ButtonBase HTML attribute forwarding |
+| `react` | 18.3.1 (confirmed from UMD banner) | `useState`, `useEffect`, `useMemo` stable since React 16.8 |
+| `react-dom` | 18.x | `createRoot` is the v18 API — already in use |
+| `@emotion/react` | 11.11.4 | Required peer dep for MUI 5 `sx` prop resolution — already loaded |
+| `@emotion/styled` | 11.11.0 | Required peer dep for MUI 5 styled components — already loaded |
+
+---
+
+## Implementation Checklist for Planner
+
+1. **Rename or extend the mount target.** The existing `<div id="catalog-root">` becomes the mount point for the unified `App` component. No new `<div>` needed unless the PRD section placement requires it (a new `<div id="app-root">` between Planning Studio and the catalog `<section>` may be cleaner).
+
+2. **Extend the React destructure** (line 166):
+   - Add `useState` and `useEffect` to `const { createElement: h, useMemo } = React;`
+
+3. **No new MUI destructure additions needed.** All required components are already in the existing destructure block.
+
+4. **Add `category` field to the 5 items** in the array at lines 217–251 per the PRD mapping table.
+
+5. **Write `Categories` component** using only: `Card`, `CardActionArea`, `CardContent`, `Typography`, `Chip`, `Grid`, `Box` — all already destructured.
+
+6. **Write `App` wrapper component** that owns `useState('all')`, `useEffect` hash sync, `useMemo` filter, and renders `ThemeProvider > Categories > Catalog`.
+
+7. **Replace existing `root.render(h(Catalog))` call** with `root.render(h(App))`.
+
+8. **No new `<script>` tags. No new CDN loads. No Python changes.**
 
 ---
 
 ## Sources
 
-- PyPI `mcp` package — v1.26.0 confirmed latest stable (Jan 24 2026): https://pypi.org/project/mcp/
-- gofastmcp.com deployment docs — `mcp.run(transport="streamable-http", host, port)` signature: https://gofastmcp.com/deployment/running-server
-- MCPcat Streamable HTTP guide — `/mcp` endpoint path, production config: https://mcpcat.io/guides/building-streamablehttp-mcp-server/
-- OpenClaw K8s operator official install docs: https://docs.openclaw.ai/install/kubernetes
-- openclaw-rocks/k8s-operator GitHub — `spec.sidecars`, reserved container names, sidecar architecture: https://github.com/openclaw-rocks/k8s-operator
-- DeepWiki openclaw-rocks/k8s-operator sidecar docs — three sidecar categories, gateway-proxy constraint: https://deepwiki.com/openclaw-rocks/k8s-operator/5.1-sidecar-containers
-- openclaw.rocks deploy guide — `OpenClawInstance` CRD YAML with `spec.sidecars`: https://openclaw.rocks/blog/deploy-openclaw-kubernetes
-- Community `openclaw-mcp-server` reference — `streamable-http` URL format `http://HOST:PORT/mcp`: https://github.com/rodgco/openclaw-mcp-server
-- masteryodaa/openclaw-sdk DeepWiki — `HttpMcpServer` `transport: "streamable-http"`, `url` field: https://deepwiki.com/masteryodaa/openclaw-sdk/2.15-mcp-server-integration
-- dev.to OpenClaw on Kubernetes — `alpine/openclaw:2026.3.11` image, port 18789: https://dev.to/thenjdevopsguy/running-openclaw-on-kubernetes-57ki
-- MCP spec Streamable HTTP (March 26 2025) — official transport introduction: https://blog.cloudflare.com/streamable-http-mcp-servers-python/
+- `app-store-gui/webapp/templates/index.html` lines 17–21 (CDN script tags), 166–182 (existing destructure), 253–307 (existing Catalog + mount) — PRIMARY GROUND TRUTH
+- MUI 5 CDN UMD bundle header at `https://unpkg.com/@mui/material@5.15.14/umd/material-ui.development.js` — confirmed `global.MaterialUI = {}` export name — HIGH confidence
+- MUI API docs: https://mui.com/material-ui/api/card-action-area/ — ButtonBase inheritance, `component` prop, slot structure — HIGH confidence
+- MUI React Card docs: https://mui.com/material-ui/react-card/ — Card family component list — HIGH confidence
+- MDN: https://developer.mozilla.org/en-US/docs/Web/API/History/replaceState — `replaceState` parameters, browser compat (baseline: all modern browsers since 2015) — HIGH confidence
+- MDN: https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-pressed — `aria-pressed` valid on native button elements, no explicit role attribute needed — HIGH confidence
+- React docs: https://react.dev/reference/react/useState — `useState` exported from React package; accessible as `React.useState` in UMD — HIGH confidence
 
 ---
-
-*Stack research for: Streamable HTTP transport + NemoClaw/OpenClaw EKS sidecar deployment (WEKA App Store v3.0 milestone)*
-*Researched: 2026-03-23*
-*Extends: previous STACK.md (v2.0 stdio MCP server — still valid, not replaced)*
+*Stack research for: v4.0 App Categories — brownfield addition to WEKA App Store GUI*
+*Researched: 2026-04-21*

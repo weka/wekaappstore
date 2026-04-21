@@ -1,276 +1,312 @@
 # Pitfalls Research
 
-**Domain:** Adding Streamable HTTP MCP transport and NemoClaw/OpenClaw EKS sidecar deployment to an existing MCP server
-**Researched:** 2026-03-23
-**Confidence:** HIGH for MCP transport and Kubernetes patterns (official spec + SDK issues verified); MEDIUM for NemoClaw-specific behavior (early preview software, March 2026 release, interfaces may change)
-
----
-
-> **Note on scope:** This document covers pitfalls specific to v3.0 additions: Streamable HTTP transport, EKS sidecar deployment, NemoClaw sandbox behavior, and OpenClaw tool registration via HTTP. Pitfalls for the existing MCP server tool contract (response shape, approval gate, YAML validation, deprecated code) are documented in the v2.0 pitfalls file and remain valid.
+**Domain:** CDN-React category filter + URL-hash sync on existing Flask/Jinja + MUI 5.15 + Tailwind single-file template
+**Researched:** 2026-04-21
+**Confidence:** HIGH (all findings verified against the actual `index.html` source)
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: Mounting Streamable HTTP on Existing FastAPI App Breaks the Session Manager
+### Pitfall 1: Hash Parsing Collision With Existing Scroll Anchors
+
+**Severity:** BLOCKER
 
 **What goes wrong:**
-The current `server.py` runs as a standalone stdio process. When adding Streamable HTTP transport, the natural instinct is to mount `mcp.streamable_http_app()` onto the existing FastAPI app using `app.mount("/mcp", mcp_app)`. This fails with `RuntimeError: Task group is not initialized. Make sure to use run()`. The MCP app's Starlette lifespan (which initializes the session manager) is not invoked when the app is mounted as a sub-application inside FastAPI — only the outer FastAPI lifespan runs.
+The page already has `href="#catalog"` (line 82) and `href="#planning-studio"` (line 83) as native browser scroll anchors. If the category filter reads `window.location.hash` with a simple equality check (`=== '#category=warp'`) it will work, but the reciprocal risk is real: if the mount-time hash reader interprets any hash that doesn't start with `#category=` as a signal to reset to All, it introduces no bug today but breaks silently the moment a future anchor is added whose name accidentally matches a prefix. More concretely: a naive reader that does `if (hash.includes('category'))` would fire on `#my-category-list` or similar future anchors.
 
-A secondary failure mode: mounting at `/mcp` produces 307 redirects and 404s because the MCP endpoint path is hardcoded inside the returned Starlette app, making FastAPI's mount prefix stack incorrectly.
+The correct parse is a **strict prefix-match with key extraction**:
 
-**Why it happens:**
-The FastMCP python SDK returns a pre-configured Starlette ASGI application. Starlette/FastAPI nested lifespan composition is not automatic — each mounted sub-app's lifespan must be explicitly wrapped and invoked by the parent app's lifespan context manager. Most developers do not know this because normal FastAPI sub-apps (APIRouter, StaticFiles) do not use lifespan.
-
-**How to avoid:**
-Run the MCP server as a standalone Uvicorn/ASGI process separate from the existing FastAPI backend. Both processes run in the same pod but on different ports (e.g., FastAPI on 8080, MCP on 8001). They communicate only via shared volume mounts and environment variables — not through FastAPI app mounting. This approach avoids the lifespan problem entirely and keeps the transport boundary clean.
-
-If colocation in a single process is required, use a combined lifespan: create an `asynccontextmanager` that calls both the FastAPI app lifespan and `mcp.streamable_http_app()` lifespan in sequence, pass it as the `lifespan=` argument to the outer FastAPI app, then add MCP routes manually to the outer app rather than using `app.mount()`.
-
-**Warning signs:**
-- `RuntimeError: Task group is not initialized` on the first HTTP MCP request after startup.
-- 307 redirects to `/mcp/mcp` (double prefix) when accessing the MCP endpoint.
-- The MCP server works fine in stdio mode but fails immediately when `transport="streamable-http"` is added.
-
-**Phase to address:**
-Streamable HTTP transport implementation phase — design the process boundary (separate process vs. single process) before writing any transport code.
-
----
-
-### Pitfall 2: NemoClaw's Deny-All Egress Policy Blocks the Sidecar MCP Server
-
-**What goes wrong:**
-NemoClaw's default sandbox policy (`openclaw-sandbox.yaml`) blocks all outbound network egress except a hardcoded allowlist: Anthropic APIs, NVIDIA inference endpoints, GitHub, npm registry, Telegram, and OpenClaw services. When OpenClaw (inside the NemoClaw sandbox) tries to register and call the sidecar MCP server at `http://localhost:8001/mcp`, the OpenShell runtime blocks the connection and logs the attempt. The agent either fails to initialize tools at all or receives connection errors on every tool call.
-
-This is not a configuration bug — it is the policy working correctly. The mistake is deploying without explicitly whitelisting `localhost:8001` (or the equivalent loopback address) in the egress policy before the agent starts.
-
-**Why it happens:**
-NemoClaw's documentation focuses on remote endpoint allowlisting. Developers assume loopback traffic is inherently permitted (it is in standard Linux networking), but OpenShell's network policy enforcement operates at the application layer and applies to all outbound connections including localhost. The sidecar MCP server is an "unknown" endpoint until explicitly added.
-
-**How to avoid:**
-Before deploying, add the sidecar MCP server's loopback address to the NemoClaw network policy. Edit `nemoclaw-blueprint/policies/openclaw-sandbox.yaml` to include `127.0.0.1:8001` (or the configured port) in the egress allowlist. Run `nemoclaw onboard` after the policy change. Verify the policy is applied before starting the agent by inspecting the TUI's policy view.
-
-If NemoClaw is deployed to EKS using the `agent-sandbox` CRD pattern (rather than its default k3s-in-Docker mode), verify that the CRD's network policy fields support the same loopback allowlisting — this is an open research item since NemoClaw's EKS support is community-driven and not officially documented.
-
-**Warning signs:**
-- OpenShell TUI shows a blocked connection attempt to `127.0.0.1` when the agent starts up.
-- Tool calls time out immediately rather than returning errors (connection refused vs. timeout distinguish different failure modes).
-- NemoClaw TUI prompts the operator to approve or deny a connection to `localhost` — this is the policy working as designed.
-
-**Phase to address:**
-NemoClaw deployment configuration phase — policy file must be prepared and verified before the agent pod is started.
-
----
-
-### Pitfall 3: NemoClaw Requires k3s-in-Docker, Not Native EKS Pod Scheduling
-
-**What goes wrong:**
-NemoClaw's primary installation model is Docker + k3s embedded in Docker, running on an Ubuntu VM. It installs OpenShell, creates an isolated k3s cluster inside Docker, and manages the agent within that nested cluster. This model does not map onto a standard EKS pod. Running `nemoclaw install` on an EKS node does not produce a working deployment — it attempts to create a Docker-based k3s cluster inside a container, which requires privileged mode, nested container runtimes, and Docker-in-Docker that EKS worker nodes typically do not permit.
-
-The community workaround is to use the `agent-sandbox` CRD from `kubernetes-sigs/agent-sandbox` as the sandbox runtime instead of OpenShell's embedded k3s. This requires deploying the `agent-sandbox` controller to the EKS cluster and configuring NemoClaw to use it as the runtime backend. As of March 2026 this is community-driven (GitHub Issue #407 in NVIDIA/NemoClaw) and not officially supported.
-
-**Why it happens:**
-NemoClaw is presented as "run OpenClaw more securely in Kubernetes" but the Kubernetes in question is the embedded k3s cluster it creates inside Docker, not the user's existing cluster. The marketing implies standard Kubernetes compatibility that does not currently exist for managed services like EKS.
-
-**How to avoid:**
-Do not attempt to run `nemoclaw install` directly on EKS worker nodes. Two viable approaches:
-
-1. **Separate VM approach:** Deploy NemoClaw on a dedicated EC2 instance alongside the EKS cluster. The VM runs NemoClaw's k3s-in-Docker stack. The sidecar MCP server runs in EKS as a standard pod. NemoClaw calls the MCP server over the cluster's internal DNS or a Service endpoint rather than localhost. This gives up the low-latency sidecar benefit but avoids the EKS compatibility gap.
-
-2. **agent-sandbox CRD approach (experimental):** Deploy the `agent-sandbox` controller to EKS, configure NemoClaw to use it as the runtime backend. This is documented in GitHub Issue #407 but is not officially supported. Treat it as experimental for this milestone.
-
-**Warning signs:**
-- `nemoclaw install` requires Docker daemon access from within the pod (likely a privileged container request).
-- Pod fails to start with `permission denied` on `/var/run/docker.sock` or similar.
-- The node reports nested container creation failures in `kubelet` logs.
-
-**Phase to address:**
-Infrastructure and deployment planning phase — select the deployment topology before any Kubernetes manifests are written.
-
----
-
-### Pitfall 4: OpenClaw HTTP MCP Registration Expects a Stable URL, Not a Pod IP
-
-**What goes wrong:**
-In `openclaw.json`, an MCP server registered via HTTP uses a URL field: `"url": "http://<address>/mcp"`. If that address is a Pod IP, it changes every time the pod restarts. After a pod restart, OpenClaw's registration still points to the old IP. The agent starts, fails to connect to the MCP server, and reports tool unavailability — or worse, connects to a different workload that happens to reuse the old IP.
-
-**Why it happens:**
-Local testing uses `http://localhost:8001/mcp` which is stable. When moving to EKS, developers copy the pod IP from `kubectl get pods -o wide` and hardcode it in the config. Pod IPs are ephemeral — they are not stable across restarts, node migrations, or rolling updates.
-
-**How to avoid:**
-Register the MCP server using a Kubernetes Service ClusterIP DNS name: `http://weka-mcp-server.<namespace>.svc.cluster.local:8001/mcp`. Services have stable DNS names and ClusterIPs regardless of which pod backs them. Create a headless Service pointing to the MCP server pod before configuring OpenClaw. If NemoClaw runs on a separate VM (approach 1 from Pitfall 3), use a LoadBalancer or NodePort Service to expose the MCP server and register the stable endpoint.
-
-For the sidecar pattern specifically (NemoClaw and MCP server in the same pod), `localhost` is the correct address since both containers share the same network namespace. This is stable across pod IP changes.
-
-**Warning signs:**
-- `openclaw.json` contains a dotted-decimal IP address.
-- After deploying a new pod version, agents report tools unavailable without any code change.
-- `openclaw.json` is generated at deployment time from `kubectl get pod` output rather than from a Service DNS name.
-
-**Phase to address:**
-OpenClaw registration and deployment configuration phase — finalize the MCP server address scheme before writing `openclaw.json` or `generate_openclaw_config.py` output.
-
----
-
-### Pitfall 5: Streamable HTTP Session ID Is Not Forwarded by All MCP Clients
-
-**What goes wrong:**
-When the MCP server issues an `Mcp-Session-Id` header in its `InitializeResult` response, the protocol requires clients to include that header in all subsequent requests. Several MCP clients (including some versions of OpenClaw's internal MCP client) use `fetch()` internally and do not persist or forward the `Mcp-Session-Id` header across requests. The server then treats each subsequent request as a new session, re-initializes state, and either returns 400 Bad Request or creates a new session on every tool call.
-
-The FastMCP Python SDK has a documented issue (Issue #808) where the server does not recognize the `X-Session-ID` header even when the client sends it correctly. Both the server and client sides have active known issues as of early 2026.
-
-**Why it happens:**
-Streamable HTTP transport is relatively new (TypeScript SDK 1.10.0, April 2025; Python SDK support followed later). Session management was an afterthought in many client implementations that assumed stateless operation. When both server and client implementations are immature simultaneously, session header forwarding is the first thing to break.
-
-**How to avoid:**
-Design the MCP server to operate in stateless mode for this milestone. Do not rely on `Mcp-Session-Id` for any required functionality. The MCP spec allows servers to omit the session ID entirely, in which case clients do not need to forward anything. For a sidecar deployment with a single OpenClaw client, stateless mode is sufficient — there is no horizontal scaling concern and no need for session affinity.
-
-If stateful sessions are needed in future, test session header forwarding explicitly with the version of OpenClaw/NemoClaw deployed before enabling it.
-
-**Warning signs:**
-- Each tool call triggers a new `initialize` handshake in the server logs (stateless symptom).
-- Server logs show 400 responses to requests after the first `initialize`.
-- OpenClaw reports tools available after `initialize` but unavailable during the planning session.
-
-**Phase to address:**
-Streamable HTTP transport implementation phase — make stateless vs. stateful decision explicit in the server implementation before writing session management code.
-
----
-
-### Pitfall 6: MCP Server Container Starts After OpenClaw Tries to Register Tools
-
-**What goes wrong:**
-In the sidecar pod, OpenClaw starts and immediately attempts to register tools from `openclaw.json`. If the MCP server container has not yet completed startup (Python imports, Kubernetes client initialization, tool registration), the registration request arrives at a port that is not yet listening. OpenClaw logs a connection error and marks the tools as unavailable. Depending on the client, it may not retry registration after startup.
-
-Kubernetes starts both containers concurrently unless startup ordering is explicitly configured. There is no built-in guarantee that the MCP server sidecar is ready before the main OpenClaw container starts tool registration.
-
-**Why it happens:**
-Kubernetes init containers run before the main containers, but sidecar-pattern containers (defined as init containers with `restartPolicy: Always` in Kubernetes 1.29+) start before the main container only if defined that way. Most sidecar configurations use regular containers in `spec.containers`, which start concurrently. Developers test locally where startup times are short and the race does not manifest.
-
-**How to avoid:**
-Define the MCP server as a native sidecar (init container with `restartPolicy: Always` in Kubernetes 1.29+ / EKS 1.29+). This guarantees the MCP server starts and passes its `startupProbe` before the main OpenClaw container starts. Add a startup probe to the MCP server container:
-
-```yaml
-startupProbe:
-  httpGet:
-    path: /health
-    port: 8001
-  failureThreshold: 30
-  periodSeconds: 2
+```javascript
+function parseCategoryHash() {
+  const raw = window.location.hash; // e.g. "#category=warp"
+  if (!raw.startsWith('#category=')) return 'all';
+  const key = raw.slice('#category='.length); // 'warp', 'neuralmesh-aidp', 'partner'
+  const valid = ['neuralmesh-aidp', 'warp', 'partner'];
+  return valid.includes(key) ? key : 'all';
+}
 ```
 
-Add a `/health` endpoint to the MCP server that returns 200 only after all tools are registered and the server is accepting connections.
+The exact condition to check is: `raw.startsWith('#category=')`. Any hash that does not start with exactly `#category=` must be ignored by the category system and left for the browser to handle as a scroll anchor.
+
+**Why it happens:**
+Developers treat `window.location.hash` as a clean namespace. In this page it is not — the hero CTA buttons hard-code `#catalog` and `#planning-studio` as href values, so those fragments are already in regular user flows. A category click that does `window.location.hash = '#category=warp'` will not interfere with those anchors, but any mount-time code that doesn't parse `#catalog` correctly will incorrectly suppress the All-state default.
+
+**How to avoid:**
+Always parse with `startsWith('#category=')` first. Validate the extracted key against the enum `['neuralmesh-aidp', 'warp', 'partner']` and fall back to `'all'` for anything unrecognized, including `''` (no hash) and `'#catalog'`.
 
 **Warning signs:**
-- OpenClaw logs show tool registration errors only on pod cold starts, not during operation.
-- The problem disappears if the pod is given extra time before first use (masking the race).
-- No `startupProbe` is defined on the MCP server container.
+- Category cards re-render on first load even when the URL has `#catalog` or `#planning-studio`
+- Clicking "Explore Blueprints" (href `#catalog`) somehow triggers a category filter change
 
 **Phase to address:**
-Kubernetes manifests and deployment phase — container startup ordering must be specified in the pod spec, not left to chance.
+Phase 15 — Task: URL hash sync implementation. Must be in the first task that touches `window.location.hash`.
 
 ---
 
-### Pitfall 7: Kubernetes RBAC Gives the Sidecar Pod the Operator's Permissions
+### Pitfall 2: History Pollution From `replaceState` Called With the Same Hash
+
+**Severity:** BLOCKER (for "should pass" criterion: back button leaves the page in one press)
 
 **What goes wrong:**
-If the NemoClaw/MCP sidecar pod uses the same service account as the WEKA operator, it inherits full cluster-write permissions including the ability to create, update, and delete `WekaAppStore` CRDs, modify RBAC bindings, and access Secrets. The MCP server's apply tool needs only `create` on `wekaappstores` resources. The inspection tools need only `get`/`list` on nodes, namespaces, storage classes, and pods. Running with operator-level permissions violates least-privilege and creates a blast radius if the MCP server is compromised through prompt injection or a dependency vulnerability.
+The PRD requires that `history.replaceState` be used so clicking categories does not fill the back stack. `replaceState` does overwrite the current entry, so repeated clicks on different categories produce only one history entry — correct. However, there is a footgun at mount time: if the component reads the hash on mount AND calls `replaceState` during initialization (e.g. to normalize the URL), it replaces the entry the browser created when navigating to the page. The user then cannot press Back to leave the site because the `replaceState` has overwritten the original entry.
 
-**Why it happens:**
-The existing WEKA App Store already has an operator service account with broad permissions. It is expedient to reuse it rather than creating a new account. The default EKS pod identity (node instance role) may also grant broad IAM permissions that are not needed by the MCP server.
+Additionally, `replaceState` is not a no-op when called with the same URL — unlike `window.location.hash = '#same-value'` (which browsers silently skip if the hash is identical), `replaceState` always executes and in some browsers marks the entry as programmatically replaced, which can affect the `popstate` event listener behavior.
 
-**How to avoid:**
-Create a dedicated service account `weka-mcp-server-sa` with a ClusterRole that grants:
-- `get`, `list` on `nodes`, `namespaces`, `storageclasses`, `pods`
-- `get`, `list` on `persistentvolumes`, `persistentvolumeclaims`
-- `create` on `wekaappstores` (in the operator's namespace)
-- `get`, `list` on `wekaappstores` (for status tool)
+The correct pattern:
 
-Block access to `secrets`, `configmaps`, `serviceaccounts`, RBAC resources, and all non-inspection resources. Annotate the service account with IRSA to scope AWS permissions to nothing (or read-only CloudWatch if logging is required).
-
-**Warning signs:**
-- The pod spec references `serviceAccountName: weka-operator-sa`.
-- No custom ClusterRole or Role exists for the MCP server.
-- `kubectl auth can-i delete wekaappstores --as=system:serviceaccount:<ns>:weka-mcp-server-sa` returns "yes".
-
-**Phase to address:**
-Kubernetes manifests phase — service account and RBAC must be defined before deployment, not added as a follow-up hardening task.
-
----
-
-### Pitfall 8: The MCP Server's Origin Validation Blocks Intra-Pod Requests
-
-**What goes wrong:**
-The MCP specification (section: Streamable HTTP, Security Warning) requires servers to validate the `Origin` header on all incoming connections to prevent DNS rebinding attacks. When OpenClaw calls the MCP server from within the same pod via `http://localhost:8001/mcp`, the request may have no `Origin` header, or the header may be set to `null` (a common browser security behavior for same-origin requests). If the FastMCP server's Origin validation rejects requests with missing or `null` Origin headers, every intra-pod tool call fails with 403 Forbidden.
-
-**Why it happens:**
-Origin validation is designed for browser-facing servers. MCP client implementations that do not originate from a browser (like OpenClaw's programmatic fetch client) may not send an Origin header at all. The server-side default validation behavior may be overly strict for a pod-internal transport scenario.
-
-**How to avoid:**
-Explicitly configure the FastMCP server's allowed origins to include the intra-pod case. For a sidecar deployment, the simplest safe configuration is: allow requests with no Origin header (loopback-only binding already prevents external access) while still binding the server to `127.0.0.1` rather than `0.0.0.0`. Do not disable Origin validation for publicly accessible endpoints. Verify the FastMCP server is bound to `127.0.0.1` in the pod network namespace so external network actors cannot reach it regardless of Origin policy.
-
-**Warning signs:**
-- `403 Forbidden` responses to tool calls in the server log with an Origin-related message.
-- Tool calls succeed from a curl test that includes `-H "Origin: http://localhost"` but fail from the OpenClaw client.
-- The server is bound to `0.0.0.0` in the Kubernetes pod (exposes to cluster network) instead of `127.0.0.1`.
-
-**Phase to address:**
-Streamable HTTP transport implementation phase — Origin policy and binding address must be set explicitly when configuring the HTTP transport.
-
----
-
-### Pitfall 9: openclaw.json Generated at Build Time Does Not Survive Pod Restarts
-
-**What goes wrong:**
-`generate_openclaw_config.py` produces `openclaw.json` with the MCP server URL embedded. If this file is baked into the container image or generated once at build time, it becomes stale when:
-- The MCP server port changes.
-- The deployment namespace changes.
-- The transport changes from stdio to HTTP (requiring `"url"` instead of `"command"`/`"args"` fields).
-
-The agent starts with an outdated registration and cannot reach the tools. Because `openclaw.json` is inside the image, fixing it requires a new image build and redeploy.
-
-**Why it happens:**
-During v2.0 development, the generate script targets local stdio registration where the command is a fixed path (`python server.py`). HTTP registration requires a URL, which is environment-specific. The build-time generation pattern works for static local registrations but breaks for environment-specific deployments.
-
-**How to avoid:**
-Generate `openclaw.json` at pod startup using an init container or a startup script that injects the correct URL from environment variables. Store the generated file in an `emptyDir` volume shared between containers. The generation command becomes:
-
-```bash
-MCP_SERVER_URL=http://localhost:8001/mcp python generate_openclaw_config.py > /shared/openclaw.json
+```javascript
+function setCategory(key) {
+  const next = key === 'all' ? window.location.pathname : `${window.location.pathname}#category=${key}`;
+  // Only call replaceState if the URL is actually changing
+  if (window.location.href !== (window.location.origin + next)) {
+    history.replaceState(null, '', next);
+  }
+  setSelected(key); // React state setter
+}
 ```
 
-The `generate_openclaw_config.py` script must be updated to support HTTP transport output (producing `"url": "$MCP_SERVER_URL"`) in addition to the existing stdio output.
+On mount, **do not call `replaceState` at all** — only read the current hash with `parseCategoryHash()` and call `setSelected(key)` with no history side effect.
+
+**Why it happens:**
+Developers conflate "sync the hash on mount" with "write the hash on mount." Initialization is a read operation, not a write. Writing on mount creates an entry or modifies the landing entry, corrupting the back stack.
+
+**How to avoid:**
+- Mount: read hash, call `setSelected`, do NOT call `history.replaceState`.
+- User click: call `history.replaceState` only when `key !== currentSelected` (to avoid redundant calls on double-click of the same card) and update React state.
+- Toggle off: call `history.replaceState(null, '', window.location.pathname)` (no hash) and set state to `'all'`.
 
 **Warning signs:**
-- `openclaw.json` contains a hardcoded localhost URL baked into the container image.
-- The file is not in a ConfigMap, mounted volume, or generated at startup.
-- Changing the MCP server port requires a new image build.
+- Browser back button from the home page takes the user back to the home page (in All state) instead of leaving the site
+- Two back presses are required to leave the page after landing on `/#category=warp`
 
 **Phase to address:**
-OpenClaw registration and deployment configuration phase — config generation must be runtime, not build-time, for EKS deployment.
+Phase 15 — Task: URL hash sync implementation. Verifier checklist: open `/#category=warp` directly, press Back exactly once, confirm you leave the site.
 
 ---
 
-### Pitfall 10: The SSE Transport Is Being Deprecated — Do Not Implement It
+### Pitfall 3: JSX Written in a Codebase That Uses Raw `React.createElement`
+
+**Severity:** BLOCKER (will throw a syntax error at runtime; page goes blank)
 
 **What goes wrong:**
-Developers researching MCP HTTP transport find documentation and examples for the older `HTTP+SSE` transport (protocol version 2024-11-05). Implementing SSE transport instead of Streamable HTTP results in a server that requires two endpoints (`/sse` for the SSE stream, `/messages` for POST), maintains persistent connections, limits horizontal scaling, and will lose client support as the deprecation completes (effective April 1, 2026, per the SSE Transport Deprecation announcement).
+**Verified from code inspection:** `index.html` line 166 reads `const { createElement: h, useMemo } = React;`. The entire existing component — `Catalog`, all `Grid`, `Card`, `CardActionArea`, `Chip` calls — uses the `h(Component, props, ...children)` pattern throughout. There is no Babel-standalone script tag, no htm import, and no JSX anywhere in the file. CDN-loaded scripts are evaluated directly by the browser JS engine, which does not understand `<JSX />` syntax.
 
-**Why it happens:**
-The SSE transport has significantly more community examples, blog posts, and StackOverflow answers than the newer Streamable HTTP transport. Searching for "MCP HTTP Python" returns SSE-first results. The older FastMCP tutorials use `transport="sse"`. It is easy to implement the wrong transport.
+If any new code for the `Categories` component is written in JSX (even one line like `return <Box>...</Box>`), the browser will throw a `SyntaxError: Unexpected token '<'` and the entire inline script block will fail to execute. The catalog will also disappear because both components share the same IIFE.
 
 **How to avoid:**
-Use `transport="streamable-http"` explicitly in the FastMCP server. Do not implement the SSE endpoints. Verify the MCP spec version in use is 2025-03-26 or later. Add a comment to the server startup code identifying the transport version.
+Every element in the `Categories` component must use `h()` calls matching the existing pattern:
 
-If backward compatibility with older OpenClaw versions is needed, implement the Streamable HTTP transport only and check the OpenClaw version being deployed against the MCP protocol version it supports. If OpenClaw only supports SSE, that is an argument to upgrade OpenClaw, not to implement a deprecated transport.
+```javascript
+// WRONG — will crash at runtime
+function Categories() {
+  return <Box sx={{ mb: 4 }}><Typography>Browse by category</Typography></Box>;
+}
+
+// CORRECT — matches existing codebase convention
+function Categories({ selected, onSelect }) {
+  return h(Box, { sx: { mb: 4 } },
+    h(Typography, { variant: 'h6' }, 'Browse by category')
+  );
+}
+```
 
 **Warning signs:**
-- `server.py` imports or references `SseServerTransport`.
-- The server exposes a `/sse` endpoint.
-- Online tutorials used as references are dated before April 2025.
+- Blank page or missing catalog after adding the `Categories` component
+- Browser console shows `SyntaxError: Unexpected token '<'` pointing to the inline script
 
 **Phase to address:**
-Streamable HTTP transport implementation phase — confirm the transport name explicitly in code review before merging.
+Phase 15 — Every task that writes new React component code. Must be enforced as a code-review gate: grep the new component code for `<[A-Z]` (capital letter after `<`) — any match means JSX was accidentally used.
+
+---
+
+### Pitfall 4: MUI `CardActionArea` `aria-pressed` Prop — Pass-Through Is Safe But Not Guaranteed to Render on the DOM Element
+
+**Severity:** WARNING
+
+**What goes wrong:**
+MUI `CardActionArea` extends `ButtonBase`, which in turn renders a native `<button>` element by default. MUI's ButtonBase forwards unrecognized props to the underlying DOM element via React's standard prop spreading. `aria-pressed` is a valid HTML attribute on `<button>`, so passing `{ 'aria-pressed': isSelected }` to `CardActionArea` will reach the DOM in MUI 5.15 — **but only when `component` is not overridden**. In the existing catalog, `CardActionArea` is used with `component: 'a'` (line 277), which renders an `<a>` element. `aria-pressed` on `<a>` is technically valid but less semantically natural than on `<button>`.
+
+For category cards, `component` must NOT be set to `'a'` — the card is a toggle button, not a link. Leave `component` at its default (renders `<button>`), and pass `aria-pressed` directly:
+
+```javascript
+h(CardActionArea, {
+  onClick: () => onSelect(cat.key),
+  'aria-pressed': selected === cat.key,
+  // Do NOT set component: 'a' — these are buttons not links
+}, /* children */)
+```
+
+MUI 5.15 confirmed to forward `aria-*` props through ButtonBase's prop spreading to the native element. No `sx` override or wrapper is needed.
+
+The secondary risk: if `aria-pressed` is passed as a boolean `true`/`false`, React will render it as the string `"true"` / `"false"` on the DOM — which is exactly what the `aria-pressed` attribute specification requires. Do not convert to string manually.
+
+**Why it happens:**
+Developers copy the existing catalog's `CardActionArea` usage (which has `component: 'a'`) as a template for the new category cards, then wonder why the semantic role is wrong or why clicking doesn't behave like a button.
+
+**How to avoid:**
+- Category cards: omit `component` prop from `CardActionArea` (defaults to `<button>`)
+- Pass `aria-pressed` as a boolean: `'aria-pressed': selected === cat.key`
+- Verify in DevTools that the rendered DOM shows `<button aria-pressed="true">` (not `<a>`)
+
+**Warning signs:**
+- Category cards render as `<a>` elements (inspect DOM)
+- Keyboard focus shows the element has `role="link"` not `role="button"` (screen reader announces "link" not "button")
+- `aria-pressed` attribute missing from DOM
+
+**Phase to address:**
+Phase 15 — Task: `Categories` component initial implementation. Verifier: inspect DOM for `<button aria-pressed="true/false">` after clicking a category.
+
+---
+
+### Pitfall 5: Tailwind Preflight Active — MUI Baseline Styles Partially Overridden
+
+**Severity:** WARNING
+
+**What goes wrong:**
+**Verified from code inspection:** Line 15 of `index.html` loads `https://cdn.tailwindcss.com` with no configuration object disabling preflight. Tailwind's Play CDN injects preflight (a Normalize.css-derived reset) by default. There is no `tailwind.config` object in the HTML that sets `corePlugins: { preflight: false }`.
+
+This means preflight IS active. Preflight resets: `button` element styles (removes border, background, padding), `a` element color/decoration, and heading font sizes. MUI components use Emotion's CSS-in-JS, which injects styles with higher specificity than the Tailwind preflight reset — so MUI components are largely unaffected for their own visual styling. However, two real collision points exist:
+
+1. **Button focus outline:** Tailwind preflight sets `outline: none` on buttons via `*, ::before, ::after { box-sizing: border-box; border-width: 0; ... }`. MUI's `CardActionArea` (a `<button>`) applies its own focus-visible ring via `::after` pseudo-element overlay, which survives the reset. This is fine in practice.
+
+2. **Card wrapper `<Box>` with Tailwind classes:** Using Tailwind utility classes like `className="mx-auto max-w-6xl"` on a `Box` wrapping MUI components is safe — Tailwind utilities have low specificity and MUI's `sx` prop styles use Emotion's class injection which wins. The PRD recommends this pattern and it is used throughout the existing template (e.g., `class="max-w-6xl mx-auto px-4"`).
+
+The real failure mode: adding a Tailwind class that resets something MUI relies on at the same DOM level. For example, adding `className="flex"` to a `Card` component itself (not a wrapper) will conflict with MUI's `display` styles set through Emotion. Always apply Tailwind classes to wrapper `<div>` or `Box` elements, never directly to MUI component roots.
+
+**How to avoid:**
+- Apply Tailwind classes only to outer wrapper `<Box>` or plain `<div>` elements, never as `className` on `Card`, `CardActionArea`, `CardContent`, `Chip`, `Grid`, or `Typography` components.
+- The existing pattern is correct: `h(Box, { className: 'max-w-6xl mx-auto px-4', sx: { py: 4 } }, /* MUI children */)`.
+- Do not add a `tailwind.config` block to disable preflight — it would change existing page behavior.
+
+**Warning signs:**
+- Category cards lose border-radius or shadow despite `sx` specifying them (Tailwind class applied to MUI root)
+- Chip inside card loses background color (Tailwind `bg-*` class on the Chip itself)
+
+**Phase to address:**
+Phase 15 — Task: Categories section layout and styling. Verifier checklist: confirm no Tailwind utility class is set as `className` directly on an MUI component root.
+
+---
+
+## Moderate Pitfalls
+
+### Pitfall 6: `useMemo` for Filter — Premature at Current Scale, Required at Moderate Growth
+
+**Severity:** INFO (now), WARNING (when catalog exceeds ~50 items)
+
+**What goes wrong:**
+With 5 items, `items.filter(i => selected === 'all' || i.category === selected)` runs in microseconds and `useMemo` adds no measurable benefit. The existing catalog already imports `useMemo` from React (line 166: `const { createElement: h, useMemo } = React`) but does not use it. If the filter is placed inside the render function without `useMemo`, it will re-run on every parent state change (including the `selected` toggle itself — which is always the trigger). This is correct behavior: the filter should re-run when `selected` changes.
+
+The real risk is a future developer wrapping the entire `items` array definition inside `useMemo` with an empty dependency array `[]` to "optimize" it, creating a stale closure over a snapshot of `items` that never updates if `items` is ever made dynamic.
+
+The threshold where `useMemo` on the filter computation matters: approximately 200+ items with a complex filter predicate. At 5-50 items, the overhead of `useMemo` itself (dependency comparison) exceeds the savings.
+
+**How to avoid:**
+- Do not use `useMemo` on the filter at launch. Keep it as an inline expression in the render path.
+- `useMemo` is appropriate if and when `items` is loaded asynchronously or contains 100+ entries.
+- The correct future pattern (when needed): `const filtered = useMemo(() => items.filter(i => ...), [selected, items])`.
+
+**Warning signs:**
+- Stale filter results (shows wrong items after state change) — diagnostic: `useMemo` with missing or empty deps array.
+
+**Phase to address:**
+Phase 15 — Note in code comments that `useMemo` is deferred intentionally until catalog exceeds ~50 items.
+
+---
+
+### Pitfall 7: Opacity Cascade — Unselected Card at `opacity: 0.7` Dims the Count Chip
+
+**Severity:** WARNING
+
+**What goes wrong:**
+The PRD specifies unselected category cards drop to `opacity: 0.7`. CSS `opacity` is inherited by all descendants — the count `Chip` inside the unselected card will render at 70% opacity. In this codebase, the Chip has `background: rgba(255,255,255,0.06)` and `color: #e5e7eb` (set in the MUI theme override at lines 211-213). At 70% opacity, the effective alpha of the Chip background drops to ~0.042 and the text drops to roughly `rgba(229, 231, 235, 0.7)`.
+
+The count text `#e5e7eb` at 70% on `#0b0c10` background: luminance calculation gives a contrast ratio of approximately 8.5:1 even at 70% opacity (the original text is very light on very dark). This does clear WCAG AA (4.5:1 minimum). The chip is still readable.
+
+However, the chip may visually appear "washed out" compared to baseline. The question is aesthetic, not accessibility-blocking. If the design intent is that the count chip remains crisp even on a dimmed card, apply `opacity: 0.7` to the card's background and border layers using a separate overlay approach (wrapping the non-chip content in an inner `Box` with opacity) rather than on the card root. This is more complex and likely not worth it for the initial implementation.
+
+**How to avoid:**
+Apply `opacity: 0.7` via `sx={{ opacity: selected === 'all' || selected === cat.key ? 1 : 0.7 }}` on the `Card` root. Accept that the Chip inherits this. Do not add per-element opacity overrides unless QA feedback specifically flags chip readability.
+
+**Phase to address:**
+Phase 15 — Task: selected/unselected visual states. Verifier: visually inspect the dimmed card at 0.7 opacity and confirm the chip count text is still legible.
+
+---
+
+### Pitfall 8: Keyboard Toggle Reliability — Enter Twice Does Cycle Correctly, But Focus Ring May Disappear
+
+**Severity:** WARNING
+
+**What goes wrong:**
+`CardActionArea` renders as `<button>`, which fires `onClick` on both Enter and Space by default (native browser behavior, no MUI intervention needed). Pressing Enter twice on the same category card will correctly cycle: first press → `onClick` fires → `setSelected('warp')` → state updates → React re-renders → card shows `aria-pressed="true"`; second press → `onClick` fires → `setSelected('all')` (toggle off) → `aria-pressed="false"`. MUI does not eat keypresses on native `<button>` elements.
+
+The real issue: after the second press (toggle off), the `Card` component re-renders with new `sx` props (removing the selected border/glow). MUI's Emotion CSS-in-JS injects new class names on re-render. In some browser/MUI combinations, the focus-visible ring (`:focus-visible` pseudo-class) is briefly lost during the re-render because the element receives new className strings. This is a documented MUI behavior on state-driven style changes to `ButtonBase`.
+
+MUI 5.15 mitigates this with the `focusVisibleClassName` prop on `ButtonBase`. `CardActionArea` exposes `focusVisibleClassName` as a passthrough prop.
+
+**How to avoid:**
+- Do not add custom `onKeyDown` handlers — native `<button>` Enter/Space handling is correct.
+- Add `focusVisibleClassName: 'Mui-focusVisible'` to each `CardActionArea` to pin the focus ring class name and prevent it from disappearing during re-render.
+- Test keyboard navigation: Tab to first card, Enter, Tab to second card, Enter, Shift+Tab, Enter again — confirm focus ring is visible throughout.
+
+**Warning signs:**
+- Focus ring disappears after state change
+- Screen reader does not announce `aria-pressed` value change (means the button identity changed in the DOM)
+
+**Phase to address:**
+Phase 15 — Task: accessibility pass. Must be tested with keyboard-only navigation before marking the task done.
+
+---
+
+### Pitfall 9: MUI Theme Token Drift — `primary.main` vs CSS Variable
+
+**Severity:** INFO
+
+**What goes wrong:**
+The MUI theme at line 187 reads `--weka-purple` at theme creation time: `primary: { main: getComputedStyle(document.documentElement).getPropertyValue('--weka-purple').trim() || '#6b2fb3' }`. This is a one-time read. If the CSS variable `--weka-purple` is later changed (e.g., a future inline `<style>` update changes it from `#6b2fb3` to a new brand color), the MUI theme will not update — it was created once at script evaluation and baked in as a hex string. The category cards using `borderColor: 'primary.main'` in their `sx` prop will keep the old purple.
+
+This is not a bug introduced by v4.0 — it exists today for the existing catalog cards too. But the new category cards will add another `primary.main` reference, increasing the surface area of the drift.
+
+The correct resilient pattern is to reference the CSS variable directly in `sx` via the MUI theme's CSS variable syntax, but MUI 5.15 UMD does not fully support the CSS theme variables API (that arrived with MUI 6). In MUI 5.15 on CDN, the only option is to re-read the CSS variable if needed:
+
+```javascript
+// Resilient: reads the live CSS variable at render time (not at theme creation)
+sx={{ borderColor: `var(--weka-purple)` }}
+// vs current pattern (baked at theme creation, drifts if CSS var changes):
+sx={{ borderColor: 'primary.main' }}
+```
+
+**How to avoid:**
+For the selected border glow, use `borderColor: 'var(--weka-purple)'` in the `sx` prop directly instead of `borderColor: 'primary.main'`. This reads the live CSS variable at paint time. Both work identically today but the CSS var reference is more resilient to future token changes and matches the existing `btn-purple` pattern used in the Tailwind section of the page.
+
+**Phase to address:**
+Phase 15 — Task: selected/unselected visual states. Low priority; acceptable to defer to a follow-up style pass if initial implementation uses `primary.main`.
+
+---
+
+### Pitfall 10: Mobile Viewport — 3-Card Row Requires Explicit `xs: 12` on Grid Items
+
+**Severity:** WARNING
+
+**What goes wrong:**
+The PRD requires 3-across on `md+` and stacked (full-width) on mobile. The existing catalog uses `h(Grid, { item: true, xs: 12, md: 4, key: idx }, ...)`. If the Categories row uses a similar `Grid` with `xs: 12, md: 4`, cards will stack correctly on mobile. The pitfall is the `Chip` inside the category card — `Chip` has a default `maxWidth` and may overflow horizontally on narrow viewports if the chip label is long (e.g., "NeuralMesh AIDP · 3 apps").
+
+A `Chip` with a long label on a 320px wide card will not truncate by default — it wraps or causes horizontal scroll on the chip's parent container if the parent has `overflow: hidden`. MUI Chip does not apply `text-overflow: ellipsis` without explicit `sx` styling.
+
+Specific risk: on an iPhone SE (375px viewport), a category card that is `xs: 12` (full width minus padding) at ~343px wide will fit a single Chip of ~120px. The label "3 apps" is short enough to fit. However, if the Chip is placed inline with the title in a `Stack` that doesn't wrap, it can force the card to expand horizontally.
+
+**How to avoid:**
+- Use `Grid item xs={12} md={4}` (same as existing catalog cards) — confirmed safe.
+- Place the count Chip on its own line inside the card (below the description), not inline with the title.
+- If Chip and title are in the same `Stack`, set `flexWrap: 'wrap'` on the Stack's `sx`.
+- Test at 375px viewport width (iPhone SE breakpoint) before marking done.
+
+**Warning signs:**
+- Horizontal scrollbar appears on mobile at `overflow-x: auto` on `<main>` or `<body>`
+- Category cards overflow their column at 375px viewport width
+
+**Phase to address:**
+Phase 15 — Task: responsive layout. Verifier checklist: open in browser DevTools responsive mode at 375px, confirm no horizontal scroll.
 
 ---
 
@@ -278,12 +314,11 @@ Streamable HTTP transport implementation phase — confirm the transport name ex
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| Mount MCP app on existing FastAPI with `app.mount()` | One process, one port | Lifespan initialization failure; 307 redirect loops; hard to debug | Never — run as separate process or use combined lifespan |
-| Hardcode MCP URL in `openclaw.json` image | Simple build | Breaks on port/namespace change; requires image rebuild for config change | Never for EKS deployment |
-| Use same service account as operator | No new RBAC work | Blast radius if MCP server is compromised; violates least-privilege | Never — RBAC is a one-time setup |
-| Implement SSE transport for faster start | More examples available | Deprecated April 2026; OpenClaw may drop support | Never — Streamable HTTP is a 2025 standard |
-| Skip startup probe on MCP sidecar | Simpler manifests | Race condition on pod cold start; intermittent tool registration failures | Never for production; acceptable for one-off local testing only |
-| Bind MCP server to `0.0.0.0` in pod | Accessible for debugging | Exposes MCP to entire cluster network; Origin bypass possible | Never in production; acceptable only behind a NetworkPolicy that blocks all external access |
+| Hard-code `items` array with `category` field in `index.html` | No backend change needed; single-file scope | Category assignment requires a code deploy; doesn't scale to dynamic catalog | Acceptable for v4.0 (PRD explicitly descopes externalization) |
+| Read `--weka-purple` once at theme creation time | Simple; matches current codebase pattern | Theme drifts if CSS variable changes | Acceptable until next brand refresh |
+| Skip `useMemo` on filter | Simpler code | Performance degrades at ~100+ items | Acceptable at current 5-item catalog |
+| Mount both `Categories` and `Catalog` under a single React root | Avoids cross-component event bus | Requires refactoring the existing `Catalog` IIFE into a shared scope | Preferred by PRD; should be done this way |
+| Use `replaceState` for all category clicks | Prevents back-stack pollution | If user wants to "undo" category selection they lose the ability | Acceptable — PRD explicitly specifies this behavior |
 
 ---
 
@@ -291,13 +326,11 @@ Streamable HTTP transport implementation phase — confirm the transport name ex
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| FastMCP + FastAPI mount | `app.mount("/mcp", mcp.streamable_http_app())` — lifespan not invoked | Run as separate process on separate port; or compose lifespans manually |
-| NemoClaw sandbox + sidecar | Assume loopback traffic is always permitted | Add `127.0.0.1:<port>` to `openclaw-sandbox.yaml` egress allowlist before deploying |
-| openclaw.json HTTP registration | Use `"command"/"args"` stdio fields for HTTP server | Use `"url"` field pointing to `http://localhost:<port>/mcp`; generate at pod startup |
-| EKS pod identity for MCP server | Reuse operator service account | Create `weka-mcp-server-sa` with read-only + scoped apply ClusterRole |
-| Sidecar startup ordering | Both containers start concurrently, OpenClaw loses the race | Define MCP server as native sidecar init container with `startupProbe` |
-| MCP session management | Implement stateful sessions assuming client will forward `Mcp-Session-Id` | Default to stateless mode; do not require session ID for single-client sidecar pattern |
-| NemoClaw on EKS | Run `nemoclaw install` on EKS worker node | Use separate EC2 VM with Docker, or community `agent-sandbox` CRD (experimental) |
+| MUI 5.15 UMD + Tailwind CDN | Applying Tailwind classes as `className` on MUI component roots | Apply Tailwind only to wrapper `<div>` or `<Box>` elements; let MUI's `sx` control MUI component internals |
+| `window.location.hash` + MUI component mount | Calling `replaceState` during mount to "initialize" the hash | Read the hash on mount (state-only); never write to history during initialization |
+| MUI `CardActionArea` as a toggle button | Copying the existing catalog's `component: 'a'` pattern | Omit `component` prop for toggle buttons; let it default to `<button>` |
+| React UMD `createElement` alias | Writing JSX in a file loaded as a plain `<script>` | Use `h()` convention matching the existing codebase; never write `<JSX />` syntax |
+| MUI `Chip` inside opacity-dimmed card | Expecting the Chip to remain at full opacity | Accept inherited opacity; verify contrast is still WCAG AA (it is at 0.7 on this dark background) |
 
 ---
 
@@ -305,33 +338,36 @@ Streamable HTTP transport implementation phase — confirm the transport name ex
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| Stateful MCP sessions with Kubernetes HPA | Session affinity required; sticky sessions break with pod scale-out | Use stateless mode for sidecar deployment; sticky sessions only if scaling is needed | When pod count > 1 |
-| Python MCP server cold start delay | First tool call after pod restart takes 5-10 seconds while Python imports initialize | Add `startupProbe` with sufficient `failureThreshold`; pre-warm via health endpoint | Every pod restart in EKS (rolling updates, node replacements) |
-| Large `openclaw.json` with many MCP servers | OpenClaw loads all tool schemas at session start; context budget consumed | Keep tool descriptions concise (under 200 tokens each); 8 tools already defined — do not add more without removing others | With 8+ verbose tools registered simultaneously |
+| Filter recomputes on every render without `useMemo` | Imperceptible at 5 items | Acceptable now; add `useMemo` when items exceed ~50 | Never a real problem below 100 items in a CDN-React context |
+| `replaceState` called on every render cycle (not just on user click) | Back button broken; browser warns about excessive history manipulation | Call `replaceState` only inside the `onClick` handler, not inside `useEffect` with `selected` as dep | Immediately — any call outside user-gesture context is a bug |
+| `getComputedStyle` called on every render to read `--weka-purple` | Minor CSSOM thrash on every card render | Read it once at theme creation (current pattern); or use `var(--weka-purple)` directly in `sx` | Not a real-world concern at this scale |
 
 ---
 
-## Security Mistakes
+## UX Pitfalls
 
-| Mistake | Risk | Prevention |
-|---------|------|------------|
-| MCP server bound to `0.0.0.0` in pod | Any pod in the cluster can call the apply tool directly, bypassing OpenClaw's approval flow | Bind to `127.0.0.1`; for sidecar pattern this is the only address needed |
-| NemoClaw sandbox egress unrestricted (policy disabled for convenience) | Agent can exfiltrate cluster data or call external endpoints | Maintain deny-by-default policy; add only `127.0.0.1:<mcp-port>` plus required inference endpoints |
-| Production WEKA API credentials shared with NemoClaw sandbox | Credentials exposed to agent context; sandbox policy drift could allow exfiltration | Pass only a read-only WEKA API token to the MCP server; never give the agent direct WEKA API access |
-| Operator service account token accessible from sidecar | Sidecar can read the token from `/var/run/secrets/kubernetes.io/serviceaccount/token` and use it for unrestricted cluster operations | Use a dedicated service account for the sidecar pod; mount only the MCP-specific service account |
+| Pitfall | User Impact | Better Approach |
+|---------|-------------|-----------------|
+| Partner category ships empty with no explanation | Users think the filter is broken | Empty state copy is explicit: "No apps in this category yet." — PRD explicitly handles this |
+| No visual feedback between click and re-render | On slow connections, user may double-click | MUI `CardActionArea` ripple provides immediate visual feedback; no additional loading state needed at this scale |
+| Unselected cards at `opacity: 0.7` look disabled, not just unfocused | Users may not understand they can still click unselected cards | Maintain `cursor: pointer` on all cards regardless of opacity; hover lift (`translateY(-2px)`) should apply to all states |
+| Back button doesn't leave the page | User frustration if `pushState` accidentally used | Use `replaceState` only; verify with one-back-press exit test |
+| Category cards too tall on mobile due to long descriptions | Layout breaks on 375px viewport | Keep card descriptions under ~80 characters; verify mobile layout in DevTools before shipping |
 
 ---
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **Streamable HTTP transport:** Often the SSE transport is implemented instead — verify `server.py` uses `transport="streamable-http"` and does not expose `/sse` endpoint.
-- [ ] **NemoClaw egress policy:** Often loopback address is omitted — verify `openclaw-sandbox.yaml` explicitly allows `127.0.0.1:<mcp-port>` before agent start.
-- [ ] **openclaw.json HTTP registration:** Often still uses `"command"/"args"` stdio format — verify it uses `"url": "http://localhost:<port>/mcp"` for the HTTP transport.
-- [ ] **Sidecar startup ordering:** Often both containers start concurrently — verify MCP server is defined as native sidecar init container with `restartPolicy: Always` and a `startupProbe`.
-- [ ] **Service account RBAC:** Often the operator service account is reused — verify `weka-mcp-server-sa` exists with its own ClusterRole and is referenced in the pod spec.
-- [ ] **MCP server binding:** Often bound to `0.0.0.0` — verify the Uvicorn/FastMCP server starts with `host="127.0.0.1"` in the pod.
-- [ ] **generate_openclaw_config.py:** Often generates stdio config only — verify it supports `--transport http` output with `"url"` field and is called at pod startup, not build time.
-- [ ] **NemoClaw EKS compatibility:** Often assumed to be a standard pod — verify the deployment topology decision (separate VM vs. agent-sandbox CRD) is documented and tested before wiring the MCP server endpoint.
+- [ ] **Hash sync on direct load:** Verify `/#category=warp` lands in WARP-filtered state — not just that clicking a card updates the hash.
+- [ ] **Toggle-off clears hash:** Verify clicking the active card removes `#category=warp` from the URL entirely (back to bare path).
+- [ ] **One back press exits:** Open `/#category=warp`, press Back once — confirm you leave the site (not land on All-state home page).
+- [ ] **Keyboard toggle cycle:** Tab to a card, press Enter twice, confirm toggle on → off without losing focus ring.
+- [ ] **aria-pressed on DOM:** Open DevTools, inspect a category card — verify `<button aria-pressed="true">` when selected, `aria-pressed="false"` when not.
+- [ ] **No JSX syntax:** Search the new component code for `<[A-Z]` — any match is an accidentally-written JSX element that will crash at runtime.
+- [ ] **Mobile layout:** DevTools responsive view at 375px — confirm no horizontal scroll bar appears.
+- [ ] **Partner empty state rendered:** Select Partner category — confirm "No apps in this category yet." message appears (not a blank grid).
+- [ ] **ThemeProvider still wraps both components:** DevTools `React DevTools` tree shows `ThemeProvider` as an ancestor of both `Categories` and `Catalog` components.
+- [ ] **Existing anchors still scroll:** Click "Explore Blueprints" (href `#catalog`) — confirm page scrolls to catalog section; click does NOT trigger a category filter change.
 
 ---
 
@@ -339,13 +375,11 @@ Streamable HTTP transport implementation phase — confirm the transport name ex
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| FastMCP mounted on FastAPI (lifespan failure) | MEDIUM | Move to separate process on separate port; update pod spec and service; update `openclaw.json` URL |
-| NemoClaw blocks sidecar (egress policy) | LOW | Edit policy YAML, run `nemoclaw onboard`; no code changes needed |
-| NemoClaw incompatible with EKS | HIGH | Switch to separate VM deployment; update MCP server Service to expose externally; update OpenClaw registration URL; retests required |
-| Pod IP hardcoded in `openclaw.json` | LOW | Move config generation to pod startup script; parameterize URL from env var |
-| MCP server starts after OpenClaw (race condition) | LOW | Add native sidecar definition and `startupProbe` to pod spec |
-| Wrong service account used | LOW | Create new service account and ClusterRole; update pod spec; no data migration |
-| SSE transport implemented instead of Streamable HTTP | MEDIUM | Rewrite server transport; test new transport end-to-end; update `openclaw.json` registration format |
+| JSX accidentally used (page blank) | LOW | Find the `<` character in new component code, convert each element to `h()` call; no other file changes needed |
+| Hash parsing collision | LOW | Replace the hash reader with the `startsWith('#category=')` pattern; 2-line fix |
+| History pollution (back button broken) | LOW | Audit all `replaceState` / `pushState` calls; remove any inside `useEffect` or mount code; move to `onClick` handler only |
+| Wrong `CardActionArea` component prop | LOW | Remove `component: 'a'` from category card; verify in DOM it renders as `<button>` |
+| Tailwind class on MUI root breaking styles | MEDIUM | Wrap MUI component in a plain `<div>` or `<Box>`, move Tailwind class to the wrapper |
 
 ---
 
@@ -353,35 +387,30 @@ Streamable HTTP transport implementation phase — confirm the transport name ex
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| FastMCP + FastAPI lifespan failure | Transport implementation | MCP server runs as standalone process; curl to `/health` returns 200 before any agent test |
-| NemoClaw egress blocks sidecar | Deployment config | NemoClaw TUI shows no blocked connection to `127.0.0.1` on agent start |
-| NemoClaw EKS incompatibility | Architecture/topology decision | Deployment topology documented and smoke-tested before writing any K8s manifests |
-| Pod IP in openclaw.json | Registration config | `openclaw.json` is generated at pod startup from env vars; no dotted-decimal IP in the file |
-| Session ID forwarding failure | Transport implementation | Server runs in stateless mode; no `Mcp-Session-Id` required; tool calls succeed without session header |
-| Sidecar startup race | K8s manifests | MCP server defined as native sidecar; pod start logs show MCP server ready before OpenClaw init |
-| Operator service account reuse | K8s manifests | `kubectl auth can-i create wekaappstores --as=system:serviceaccount:<ns>:weka-mcp-server-sa` returns "yes"; `kubectl auth can-i delete nodes` returns "no" |
-| Origin header rejection | Transport implementation | Intra-pod curl with no Origin header returns 200; server bound to `127.0.0.1` confirmed in startup logs |
-| Build-time openclaw.json | Registration config | Changing `MCP_SERVER_PORT` env var produces correct `openclaw.json` at startup without image rebuild |
-| SSE transport implemented instead of Streamable HTTP | Transport implementation | Code review confirms `transport="streamable-http"`; no `/sse` endpoint exists |
+| Hash collision with `#catalog`, `#planning-studio` | Phase 15 — URL hash sync task | Direct navigation to `/#catalog` does not trigger category filter logic |
+| History pollution (back button) | Phase 15 — URL hash sync task | Press Back once from `/#category=warp` — site is left, not reset to All |
+| JSX without build step (runtime crash) | Phase 15 — every component task | `grep` new code for `<[A-Z]`; zero matches required |
+| `CardActionArea` component prop (renders as `<a>` not `<button>`) | Phase 15 — initial Categories component | DOM inspection: category cards are `<button>` elements |
+| Tailwind preflight + MUI style collision | Phase 15 — layout/styling task | No Tailwind class directly on MUI component root |
+| `replaceState` called on mount (corrupts back stack) | Phase 15 — URL hash sync task | One-back-press exit test from direct URL |
+| Mobile layout overflow | Phase 15 — responsive layout task | No horizontal scrollbar at 375px viewport |
+| Chip readability at 0.7 opacity | Phase 15 — visual states task | Visual QA: chip count text legible on dimmed card |
+| `aria-pressed` missing from DOM | Phase 15 — accessibility task | DevTools attribute inspection after click |
+| Keyboard toggle focus ring loss | Phase 15 — accessibility task | Keyboard-only navigation test through all three cards |
 
 ---
 
 ## Sources
 
-- [MCP Specification 2025-03-26: Transports](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports) — Streamable HTTP session management, Origin validation requirements, backwards compatibility (HIGH confidence — official spec)
-- [MCP Python SDK Issue #1367: Mounting Streamable HTTP on FastAPI fails](https://github.com/modelcontextprotocol/python-sdk/issues/1367) — lifespan initialization failure, redirect loop root cause (HIGH confidence — active SDK issue)
-- [MCP Python SDK Issue #808: FastMCP does not recognize X-Session-ID header](https://github.com/modelcontextprotocol/python-sdk/issues/808) — session header recognition bug (HIGH confidence — verified SDK issue)
-- [MCP Python SDK Issue #737: RuntimeError: Received request before initialization was complete](https://github.com/modelcontextprotocol/python-sdk/issues/737) — premature session manager shutdown when embedded in FastAPI (HIGH confidence — verified SDK issue)
-- [NVIDIA NemoClaw GitHub: Support OpenShift deployment via agent-sandbox CRD — Issue #407](https://github.com/NVIDIA/NemoClaw/issues/407) — EKS/OpenShift deployment community workaround (MEDIUM confidence — community issue, not official)
-- [NVIDIA NemoClaw Documentation: Network Policies](https://docs.nvidia.com/nemoclaw/latest/reference/network-policies.html) — deny-all egress default, allowlist configuration (HIGH confidence — official NVIDIA docs)
-- [Scaling HTTP Streamable MCP Servers on Kubernetes: Handling Sticky Sessions](https://zhimin-wen.medium.com/scaling-http-streamable-mcp-servers-on-kubernetes-handling-sticky-sessions-24212857c8ca) — session affinity requirements, stateless mode recommendation (MEDIUM confidence — community article)
-- [Why MCP Deprecated SSE and Went with Streamable HTTP — fka.dev](https://blog.fka.dev/blog/2025-06-06-why-mcp-deprecated-sse-and-go-with-streamable-http/) — SSE deprecation rationale and timeline (HIGH confidence — verified against spec)
-- [SSE Transport Deprecation: Migration to Streamable HTTP — Keboola](https://changelog.keboola.com/sse-transport-deprecation-migration-to-streamable-http/) — deprecation effective date April 2026 (MEDIUM confidence — third-party migration announcement)
-- [Kubernetes Sidecar Containers: Start Sidecar First](https://scalefactory.com/blog/2025/06/19/start-sidecar-first-in-kubernetes/) — native sidecar init container pattern for startup ordering (HIGH confidence — Kubernetes official KEP + community guide)
-- [EKS Security Best Practices — Wiz](https://www.wiz.io/academy/container-security/eks-security-best-practices) — IRSA least-privilege, instance role inheritance pitfall (MEDIUM confidence — vendor guide aligned with AWS official docs)
-- [Getting Started With NemoClaw: Avoid the Obvious Mistakes — Stormap](https://stormap.ai/post/getting-started-with-nemoclaw-install-onboard-and-avoid-the-obvious-mistakes) — infrastructure stack misunderstanding, policy management mistakes (MEDIUM confidence — community guide)
-- Codebase review: `mcp-server/server.py`, `mcp-server/generate_openclaw_config.py` — current stdio transport pattern, config generation baseline (HIGH confidence — direct inspection)
+- Direct inspection of `app-store-gui/webapp/templates/index.html` (lines 15, 82-84, 164-310) — HIGH confidence
+- [MUI CardActionArea API](https://mui.com/material-ui/api/card-action-area/) — props inherit from ButtonBase; aria-* forwarding confirmed by ButtonBase's "Props of the native component are also available" clause — MEDIUM confidence
+- [Tailwind Preflight documentation](https://tailwindcss.com/docs/preflight) — preflight enabled by default with CDN — HIGH confidence
+- [Tailwind Play CDN preflight disable discussion](https://github.com/tailwindlabs/tailwindcss/discussions/15967) — confirmed no `tailwind.config` in `index.html` means preflight is active — HIGH confidence
+- [MDN: History.replaceState()](https://developer.mozilla.org/en-US/docs/Web/API/History/replaceState) — replaceState is not a no-op on same-URL calls — HIGH confidence
+- [React useMemo documentation](https://react.dev/reference/react/useMemo) — threshold guidance for when memoization is worthwhile — HIGH confidence
+- [MUI Chip dark theme contrast issues](https://github.com/mui/material-ui/issues/9407) — Chip contrast on dark backgrounds; opacity cascade behavior — MEDIUM confidence
+- PRD risk table (`.planning/PRD-gui-app-categories.md` — Risks section) — directly maps to pitfalls 1, 3, 4, 5 above — HIGH confidence
 
 ---
-*Pitfalls research for: Streamable HTTP MCP transport and NemoClaw/OpenClaw EKS sidecar deployment*
-*Researched: 2026-03-23*
+*Pitfalls research for: CDN-React + MUI 5.15 category filter + URL hash sync on Flask/Jinja single-file template*
+*Researched: 2026-04-21*

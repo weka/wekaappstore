@@ -1,327 +1,215 @@
 # Feature Research
 
-**Domain:** Live EKS Deployment — Streamable HTTP MCP Transport + NemoClaw/OpenClaw Integration
-**Researched:** 2026-03-23
-**Confidence:** HIGH for transport mechanics and FastMCP API; MEDIUM for NemoClaw/OpenClaw-specific config (early preview, evolving); LOW for NemoClaw EKS-specific Kubernetes YAML (insufficient official detail yet)
+**Domain:** Top-level category filter UI for an internal app-catalog / blueprint-library (WEKA App Store v4.0)
+**Researched:** 2026-04-21
+**Confidence:** HIGH (toggle semantics, URL convention, count chips, empty states, accessibility); MEDIUM (label convention); LOW (anti-feature prevalence)
 
 ---
 
-## Context: What Is Already Built (Do Not Rebuild)
+## Preamble: Research Scope
 
-This milestone is v3.0. The following exist and must NOT be touched unless a specific task requires it:
+This document covers only the _new_ feature surface for v4.0: a 3-card category-filter row above the existing flat blueprint grid.
+Existing features (flat grid, hero, Planning Studio, tags chips on cards) are out of scope and are treated as fixed context.
 
-| Already Shipped | Location |
-|-----------------|----------|
-| 8-tool MCP server (stdio transport) | `mcp-server/server.py` |
-| 103 tests covering all tools | `mcp-server/tests/` |
-| SKILL.md agent workflow | `mcp-server/SKILL.md` |
-| Mock agent harness | `mcp-server/harness/` |
-| Dockerfile + CI/CD to Docker Hub | `mcp-server/Dockerfile`, `.github/workflows/` |
-| openclaw.json (stdio config) | `mcp-server/openclaw.json` |
-| FastMCP scaffold via `mcp.server.fastmcp.FastMCP` | `mcp-server/server.py` |
-
-**What this milestone adds:** Streamable HTTP transport mode, NemoClaw deployment to EKS, sidecar wiring, and end-to-end happy-path validation with a real agent.
+The six PRD open questions are addressed in-line within each section.
 
 ---
 
 ## Feature Landscape
 
-### Table Stakes (Required for Milestone to Succeed)
+### Table Stakes (Users Expect These)
 
-These features must exist before the live agent chat experience is possible. Missing any one of them breaks the deployment or integration loop.
+Features users assume exist in any mature catalog filter. Missing these makes the feature feel broken or unfinished.
 
-| Feature | Why Required | Complexity | Dependencies on Existing |
-|---------|--------------|------------|--------------------------|
-| Streamable HTTP transport on MCP server | OpenClaw registers MCP tools via HTTP URL in sidecar pattern, not stdio subprocess in K8s. Without HTTP transport the agent cannot reach the server. | LOW | `FastMCP.run(transport="streamable-http")` or `mcp.http_app()`. No tool code changes. Existing `server.py` adds one run-mode branch. |
-| HTTP server runs on configurable port (default 8000) | Port must be consistent with the OpenClaw registration config. Configurable so it can be changed without rebuild. | LOW | Add `MCP_PORT` env var to `config.py`. Pass to `mcp.run()` call. |
-| Single `/mcp` endpoint path (POST + GET) | MCP Streamable HTTP spec requires one endpoint supporting both POST (client requests) and GET (SSE subscription). This is the canonical MCP endpoint. | LOW | FastMCP `path` parameter defaults to `/mcp/`. No additional routing needed. |
-| Session ID header (`Mcp-Session-Id`) management | Spec requires servers to assign a session ID at init and clients to include it on subsequent requests. FastMCP handles this automatically. | LOW | Built into FastMCP. No custom code. |
-| Origin header validation (security) | MCP spec security requirement: servers MUST validate `Origin` header to prevent DNS rebinding attacks. Required on non-localhost HTTP deployments. | LOW-MEDIUM | FastMCP includes this by default on Starlette-backed servers when binding to non-loopback addresses. Verify in deployment config. |
-| Container exposes port 8000 | Dockerfile EXPOSE and Kubernetes containerPort must match the MCP endpoint port so the OpenClaw container can reach the sidecar on `localhost:8000/mcp`. | LOW | Add `EXPOSE 8000` to Dockerfile and update entrypoint to use HTTP transport. |
-| `openclaw.json` updated for HTTP transport | Registration config currently specifies `"transport": "stdio"` with a command/args startup block. For sidecar deployment, it must use `"transport": "streamable-http"` with a `"url": "http://localhost:8000/mcp"` field. | LOW | Edit `mcp-server/openclaw.json`. No code changes. Confirmed format from community docs and OpenClaw mcpServers pattern. |
-| NemoClaw deployed to EKS cluster | The agent must be running somewhere. NemoClaw is the deployment target for this milestone. | MEDIUM | Requires NVIDIA NemoClaw (early preview as of 2026-03-16). Uses OpenShell sandbox runtime. Installer script or Helm chart. EKS GPU node required for NIM inference. |
-| MCP server container deployed as sidecar in NemoClaw pod | OpenClaw/NemoClaw communicates with MCP servers on `localhost` inside the pod. The MCP server must be a sidecar container, not a separate Service. Both containers must be in the same pod spec. | MEDIUM | `spec.sidecars` in OpenClaw operator CRD, or equivalent NemoClaw pod spec. Container name must not conflict with reserved names (`openclaw`, `gateway-proxy`, etc.). |
-| Environment variables injected into MCP sidecar | The MCP server needs `BLUEPRINTS_DIR`, `KUBERNETES_AUTH_MODE`, and optionally `KUBECONFIG` or in-cluster service account. These must be passed via pod env or ConfigMap/Secret. | LOW-MEDIUM | Same env var model as current Dockerfile. In-cluster auth (`KUBERNETES_AUTH_MODE=incluster`) preferred on EKS. |
-| Agent can complete happy-path blueprint deployment end-to-end | This is the milestone acceptance criterion. The agent must call inspect_cluster, inspect_weka, list_blueprints, get_blueprint, get_crd_schema, validate_yaml, apply, and status against a real cluster and real WEKA. | HIGH | Requires all of the above plus: live EKS cluster, live WEKA, NemoClaw running, tools registered. |
-| SKILL.md updated to reference HTTP transport context | SKILL.md may contain hints about stdio startup or local invocation. Any such references must be updated or removed for the HTTP deployment model. | LOW | Review `mcp-server/SKILL.md` for transport-specific language. Minor edit if needed. |
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| Single-select toggle with visual active state | Every catalog UI with a tab-strip or chip row (GitHub Marketplace, Figma Community, VS Code Marketplace, Hugging Face Hub) shows the selected category as visually distinguished. Users expect exactly one category to be active or none (All). | LOW | `aria-pressed="true"` on the active card satisfies both visual and screen-reader needs. |
+| Clicking the active category returns to All | Material Design 3 `FilterChip` spec and the `ChoiceChip` / `ChipGroup(singleSelection=true)` behavior both allow deselection by re-tapping the active chip. The PRD correctly models this. Comparable: Apple Music genre tabs (tap selected genre → returns to "All"), Figma Community (tap active tab → shows all). | LOW | `history.replaceState` with `''` hash clears the URL on toggle-off. One-liner in the click handler. |
+| URL hash sync (`#category=<key>`) for deep links | Hugging Face Models uses `?pipeline_tag=` (query string); GitHub Marketplace uses `?category=` (query string). Both are server-rendered pages that need the server to read the parameter. The WEKA App Store filter is **client-side only**, served from a single Flask template with no per-category server route — this is the key distinction. For client-side-only state, hash fragments are the canonical convention: the server never sees the fragment, there are no spurious cache misses, and `hashchange` events drive state natively. `replaceState` (not `pushState`) is correct for filter toggles: it updates the address bar without adding a history entry per click, so one press of Back leaves the page entirely rather than walking through category history. | LOW | Parse on mount: `window.location.hash.startsWith('#category=')`. `history.replaceState(null,'','#category='+key)` on select; `history.replaceState(null,'','')` on deselect. No back-button pollution. |
+| Empty state when category has zero matches | LogRocket filtering best-practices and Pencil & Paper enterprise-filter analysis both flag empty results as a critical UX moment. The user must understand why the grid is empty. Static copy is correct for a _known, intentional_ empty category (Partner ships with zero items by design). The PRD's choice of "No apps in this category yet." is the right pattern — it is informational without implying a search error. | LOW | Render a centered `Typography` block inside the grid column. No CTA needed (there is nowhere to navigate TO for a catalog that has no matching items yet). |
+| Keyboard accessibility via `aria-pressed` | WCAG 2.2 (now the legal standard in ADA lawsuits as of 2024) requires toggle buttons to communicate state programmatically, not through color alone. `aria-pressed` is the correct attribute for a button that has two states (selected / not selected). Screen readers announce "NeuralMesh AIDP, button, pressed" / "not pressed" automatically when `aria-pressed` is updated. | LOW | MUI `CardActionArea` renders as `role="button"` and is keyboard-focusable; add `aria-pressed={selected === key}` explicitly. |
+| Mobile-responsive stacking (3-across on md+, single column on mobile) | The existing catalog grid already stacks on mobile. A horizontal row of 3 cards that does not stack on a 375px viewport would be a regression. Users expect the same responsive contract as the rest of the page. | LOW | Mirror the existing grid's `xs={12} sm={12} md={4}` breakpoints on the Categories MUI Grid. |
 
-### Differentiators (Competitive Advantage)
+**PRD Open Question 4 — Default landing state (All vs. NeuralMesh AIDP):** Table-stakes convention is "All" on first load. Every comparable catalog (GitHub Marketplace, Hugging Face, Figma Community, VS Code Marketplace) defaults to showing everything. Defaulting to a filtered state on first load would surprise users who arrived without a hash in the URL. Recommend: keep **All** as default. If the WEKA field team wants to deep-link to NeuralMesh AIDP for demos, the hash URL (`/#category=neuralmesh-aidp`) handles that without changing the default.
 
-These features are not strictly required for the milestone acceptance criterion but meaningfully improve the experience or reduce operational risk.
+**PRD Open Question 5 — Category order:** Left-to-right order should follow the user's expected hierarchy: WEKA first-party → WEKA second-party product → third-party. "NeuralMesh AIDP → WARP → Partner" is the correct order. This matches how GitHub Marketplace (Apps → Actions → Models) and VS Code Marketplace (Programming Languages → Snippets → Themes) order their category families: first-party core, then extended product lines, then community/partner.
+
+---
+
+### Differentiators (Worth Considering)
+
+Features that distinguish the implementation beyond the baseline. None are required for launch; all are worth scoping with the PRD owner.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| Dual transport support (HTTP + stdio) | Preserve stdio mode for local development and mock harness while adding HTTP for EKS. Developers can still run `python -m server` locally. No CI/CD breakage. | LOW-MEDIUM | FastMCP transport is selected at run time via `if __name__ == "__main__"` branch or env var. Existing stdio tests and harness continue to work unchanged. |
-| Health endpoint at `/healthz` | Kubernetes liveness and readiness probes need an HTTP endpoint. Without it, the pod has no signal for restart logic. Standard Kubernetes expectation for any HTTP sidecar. | LOW | Add a small FastAPI/Starlette route outside the MCP path, or use a separate health server. FastMCP's Starlette app can have additional routes mounted. |
-| In-cluster RBAC: minimal service account | MCP server needs read access to Kubernetes resources (pods, nodes, namespaces, storage classes) and write access to WekaAppStore CRs. A purpose-built ServiceAccount with minimal Role/RoleBinding is cleaner than using a broad cluster-admin credential. | MEDIUM | Create `ServiceAccount`, `Role`, `RoleBinding` in the deployment manifests. Verbs: `get`, `list`, `watch` on nodes/namespaces/storageclasses; `create`, `get`, `list`, `watch` on WekaAppStore CRs. |
-| `docker-compose` for local HTTP mode | Lets developers test the HTTP transport locally before EKS deployment. Simulates the sidecar network topology with containers on the same Docker network. | LOW | Add a `docker-compose.yml` with OpenClaw and MCP server containers on shared network. One command for local E2E. |
-| E2E validation script against real cluster | A script or pytest scenario that exercises the full agent tool chain against the live EKS cluster and WEKA, verifiable without manual OpenClaw chat. Confirms tool wiring is correct before running the full agent experience. | MEDIUM | Extend the existing harness or add a separate integration test mode. Run against real K8s + real WEKA via env var flag. |
+| Live "N apps" count chip on each category card | The PRD already includes this in the card anatomy (the wireframe shows "3 apps / 2 apps / 0 apps"). LogRocket and Pencil & Paper both recommend count indicators as strong UX — they let users predict what the filter will return before clicking. For a 3-category list the count is computed at render time from the inline `items` array (no API call). Count is always current. | LOW | `items.filter(i => i.category === key).length`. Render as MUI `Chip` inside the card. PRD marks this as a "Should pass" criterion, so it is effectively expected — treat as P1 unless scope is cut. |
+| Spelled-out subtitle beneath acronym label | PRD Open Question 2 asks whether "NeuralMesh AIDP" should show the spelled-out form. The pattern on comparable platforms: Hugging Face uses task short names ("Text Classification", not "TC"); VS Code Marketplace uses full category names ("Programming Languages", not "PL"); GitHub Marketplace uses plain English names. For audience-internal acronyms (WEKA field engineers and power users know AIDP), the acronym as a title is acceptable. The differentiating option is: title = acronym ("NeuralMesh AIDP"), subtitle = spelled-out ("AI Data Platform blueprints") — this is exactly what the PRD wireframe already shows as the one-line description. The differentiator worth flagging: a `title` attribute or `aria-label` on the card that reads the full name improves accessibility for external audiences who encounter the page without context. | LOW | `aria-label="NeuralMesh AI Data Platform category"` on the `CardActionArea` provides screen-reader context without changing visible copy. |
+| "Show all" explicit affordance (text link) | GitHub Marketplace shows a "Clear filter" link when a category is active. For a 3-card row where All is reachable by re-clicking the active card, an explicit "Show all" link removes the discoverability burden: users do not have to discover that clicking a selected card deactivates it. The PRD mentions "a subtle 'Show all' affordance" as part of the All state description. | LOW | A small grey text link ("Show all") appearing below the category row only when a category is active. Disappears when All is the state. |
+| Transition animation on grid filter | When switching categories, the catalog grid re-renders. A 150ms opacity fade on the grid on category change reduces the perceived "flash" of cards appearing/disappearing. GitHub Marketplace and Figma Community both use subtle transitions. | LOW | CSS `transition: opacity 150ms ease` on the grid wrapper. Add a short state-driven class. No library needed. |
 
-### Anti-Features (Commonly Requested, Often Problematic)
+**PRD Open Question 3 — Partner empty state copy:** "No apps in this category yet." is the minimal table-stakes copy. The differentiating option is a call-to-action line: "Partner blueprints coming soon — talk to us about contributing." This is worth discussing with PMM/marketing before lock. It converts a dead-end state into a soft CTA. Complexity is LOW (one string change). The recommendation: go with the CTA variant if there is a concrete partnership pipeline; go with the minimal copy if Partner is an internal grouping with no public-facing recruitment intent.
+
+**PRD Open Question 6 — Single `category` value vs. array:** Single value is correct for launch. Every comparable catalog (VS Code Marketplace, GitHub Marketplace, npm) assigns a primary category and optionally a secondary. For a 5-item catalog with 3 categories, the complexity of multi-category membership is not worth the model change. If a blueprint like "OSS RAG" genuinely straddles two families, resolve it by product decision (which family is its primary home?) rather than adding array complexity. Array support is a legitimate v4.1 follow-up once the catalog grows beyond ~15 items.
+
+---
+
+### Anti-Features (Explicitly Do Not Build)
+
+Features that seem reasonable for a category filter but create concrete problems for a 3-category, ~5-item catalog.
 
 | Feature | Why Requested | Why Problematic | Alternative |
 |---------|---------------|-----------------|-------------|
-| Exposing MCP server as a separate Kubernetes Service with NodePort or LoadBalancer | Seems natural — makes the server accessible without sidecar complexity. | Breaks the localhost communication model. Adds network hops, TLS requirements, and authentication complexity. OpenClaw's MCP integration is designed around localhost/sidecar for in-cluster use. Networking surface increases security risk. | Keep MCP server as sidecar. OpenClaw reaches it on `localhost:8000/mcp`. |
-| Running both stdio and HTTP simultaneously in one process | Appealing as a "flexible" deployment. | MCP stdio assumes stdin/stdout are the protocol stream. Running HTTP in the same process that is also listening on stdin for MCP messages creates a conflict. The two transports are architecturally separate modes. | Select transport via env var (`MCP_TRANSPORT=http` or `MCP_TRANSPORT=stdio`) at startup. Single process, single mode. |
-| Persisting SSE streams as long-lived connections in K8s | Seems necessary for real-time tool progress. | Long-lived SSE in K8s sidecars requires careful resource limits, liveness probe tuning, and reconnect logic. The apply tool completes in one request (CR submission is fast). Operator does async work independently. | Return HTTP 200 synchronously for tool calls. Use status polling (existing `status` tool) for post-apply progress. FastMCP supports both SSE and sync response — let the SDK decide. |
-| Adding agent planning logic or YAML generation to the MCP server | Developers want to reduce agent load. | Reintroduces the v1.0 backend-brain anti-pattern that was explicitly removed. The entire architectural pivot was from backend-brain to OpenClaw-native reasoning. Adding planning logic back means the agent's YAML output and the server's YAML generation diverge. | Keep all reasoning in OpenClaw. Server provides tools and CRD schema. Agent generates YAML. Server validates it. |
-| Storing NemoClaw API keys in MCP server environment | Seems convenient for a single-pod deployment. | The MCP server never needs the model API key. Only NemoClaw needs it. Spreading credentials across containers increases blast radius. | Store model API keys only in the OpenClaw/NemoClaw container env or Kubernetes Secret mounted to that container. MCP server needs only its own K8s credentials. |
-| Removing the existing stdio tests to simplify the test suite | Seems like cleanup once HTTP transport is added. | The mock harness and 103 stdio-mode tests are the only regression safety net. Removing them leaves the tool logic unprotected. HTTP integration tests are a complement, not a replacement. | Keep all existing stdio tests. Add HTTP transport integration tests as an additional suite. |
+| Search input within the category filter | Larger catalogs (npm, Docker Hub) have search bars inside filtered views. Users familiar with those surfaces may ask for it. | A search bar over 5 items is absurd and clutters the page above the fold. Pencil & Paper explicitly warns: "Offering advanced filters for a 10-item list adds unnecessary complexity." The catalog grid is already fully visible in one scroll — there is nothing to search. | Add search only when the catalog exceeds ~20 items (a follow-up milestone trigger). |
+| Sort controls (A–Z, newest first, most popular) | Sort is table stakes in large-catalog marketplaces (Figma Community, npm). | With 5 items, sort order is meaningless. Sorting 3 cards in a filtered NeuralMesh AIDP view by alphabetical order provides zero navigational value. Sort controls would be a misleading affordance implying depth that does not exist. | Fixed manual ordering in the `items` array controlled by the PRD owner. Externalize `items` to a backend JSON file when the catalog grows. |
+| Tooltip descriptions on category cards that duplicate the card subtitle | Tooltips with expanded explanations are common in data-dense UIs (Grafana, Datadog). | The card already has a one-line description. A tooltip that repeats that same description is redundant UI noise. If the label needs explaining, fix the label — do not add a tooltip. Tooltip hover is also inaccessible on touch devices. | The one-line description on the card body IS the tooltip. Keep it visible at all times. |
+| "Recently viewed" or "Suggested for you" filter state | Personalization features appear on Apple App Store, Hugging Face. | These require server-side session state or `localStorage`. The PRD explicitly rules out `localStorage` persistence. There is no session model for the catalog page. Building fake personalization (always showing the same "recent" item) misleads users. | Let the URL hash handle "return to last context" — if a field engineer bookmarks `/#category=warp`, the bookmark IS their "recently viewed" workflow. |
+| Multi-select filtering (select NeuralMesh AIDP + Partner simultaneously) | Multi-select is powerful in large catalogs (Figma Community allows multiple category+tag combinations). | With 3 mutually exclusive product families, multi-select is semantically incoherent: a blueprint is either a WEKA AIDP app or a Partner app, not both. Multi-select would require union logic, checkbox UI, and a "0 apps match NeuralMesh AIDP AND Partner simultaneously" empty state. The PRD explicitly places this out of scope. | Single-select is the correct model for mutually exclusive product families. |
+| `pushState` per click (polluting browser history with each category toggle) | Seems natural for "deep link each state." | Each click generates a back-button entry. Three clicks → three Back presses to leave the page. Users who use Back to leave the catalog will be confused. LogRocket and the Remy Sharp "how tabs should work" article both identify this as a known UX pitfall with hash-based tab state. `replaceState` is the documented solution. | `history.replaceState` (not `pushState`) per the PRD spec and the MDN guidance. One Back press leaves the page. |
+| Category-level analytics events per hover | A/B testing infrastructure may want hover data. | Not part of this PRD scope. Adding `onMouseEnter` analytics hooks to individual category cards in an inline script block creates a maintenance burden with no current dashboard to consume the data. | Add analytics only when an analytics platform (Segment, Amplitude, GA4) is actually integrated. Track `click` events if and when that integration arrives. |
+| Animated icon or SVG per category card | Icon-based category cards look polished on Hugging Face and GitHub Marketplace. | The WEKA App Store uses text-only glassmorphism cards throughout. Adding per-category SVG icons breaks the visual language of existing catalog cards, requires asset management, and would not inherit from the CDN-based MUI theme. | Rely on the card title typography and the purple selected-state border glow to provide visual differentiation. Icons are a v5 concern when the design system is formalized. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-[Streamable HTTP transport in server.py]
-    └──requires──> FastMCP http_app() or run(transport="streamable-http") API
-    └──requires──> port config in config.py
-    └──enables──> [HTTP sidecar registration]
+[URL hash sync]
+    └──requires──> [client-side category state (React useState)]
+                       └──requires──> [category field on each items[] entry]
 
-[Dockerfile HTTP entrypoint]
-    └──requires──> Streamable HTTP transport mode in server.py
-    └──enables──> [NemoClaw sidecar pod spec]
+[Count chip on category card]
+    └──requires──> [category field on each items[] entry]
 
-[openclaw.json HTTP registration config]
-    └──requires──> known MCP endpoint URL (localhost:8000/mcp)
-    └──enables──> [NemoClaw agent tool registration]
+[Empty state message]
+    └──requires──> [client-side category state]
+                       └──requires──> [category field on each items[] entry]
 
-[NemoClaw deployed to EKS]
-    └──requires──> EKS cluster with GPU node (NIM inference)
-    └──requires──> NVIDIA NemoClaw installer or Helm chart
-    └──requires──> OpenClaw operator or NemoClaw pod spec
+[aria-pressed selected state]
+    └──enhances──> [visual selected border/glow state]
 
-[MCP sidecar in NemoClaw pod]
-    └──requires──> Dockerfile HTTP entrypoint
-    └──requires──> MCP container image published to Docker Hub
-    └──requires──> pod spec: spec.sidecars or NemoClaw equivalent
-    └──requires──> env vars: BLUEPRINTS_DIR, KUBERNETES_AUTH_MODE=incluster
-    └──requires──> ServiceAccount with K8s RBAC
+["Show all" explicit affordance (differentiator)]
+    └──enhances──> [toggle-off / return to All behavior]
 
-[openclaw.json HTTP registration config]
-    └──must be loaded by NemoClaw at startup
-    └──references──> http://localhost:8000/mcp URL
-
-[Live agent chat experience]
-    └──requires──> NemoClaw deployed to EKS
-    └──requires──> MCP sidecar running in pod
-    └──requires──> openclaw.json HTTP config loaded
-    └──requires──> live EKS cluster (real K8s resources)
-    └──requires──> live WEKA storage (real WEKA API)
-    └──enables──> happy-path E2E validation
-
-[SKILL.md + openclaw.json]
-    └──already ship -- update transport references only
-    └──no tool code changes required
+[Grid transition animation (differentiator)]
+    └──enhances──> [client-side category state filter]
 ```
 
 ### Dependency Notes
 
-- **HTTP transport is a prerequisite for everything:** NemoClaw sidecar pattern requires HTTP. Without it the agent cannot call the tools in a pod-based deployment. This is Phase 1 of the milestone.
-- **NemoClaw EKS deployment has external dependency on NVIDIA early preview:** NemoClaw was announced March 16, 2026 as early preview. APIs and deployment mechanisms may change without notice. Build deployment manifests defensively and expect at least one revision.
-- **Sidecar pod spec format is partially unclear:** OpenClaw operator uses `spec.sidecars` with standard Kubernetes `Container` spec. NemoClaw may have a different pod spec model. This needs hands-on verification during deployment.
-- **In-cluster RBAC is independent:** ServiceAccount and RBAC can be built and tested before NemoClaw is running. MCP server just needs `KUBERNETES_AUTH_MODE=incluster` env var.
-- **Existing 103 tests have zero dependencies on new transport:** All existing tests use FastMCP in-process transport. They continue to pass unchanged. HTTP transport adds new tests, not changes to old ones.
+- **`category` field on `items[]` is the atomic prerequisite:** every other feature — filtering, counting, empty states — derives from this single data shape change. It must land first (or simultaneously) with the `Categories` component.
+- **URL hash sync requires React state, not the other way around:** The hash is written FROM state (not read into DOM imperatively). Mount reads the hash to initialize state; thereafter React drives the hash via `replaceState`.
+- **`aria-pressed` enhances but does not depend on visual state:** even if CSS were broken, a screen reader user would still know which category is selected via `aria-pressed`. The two mechanisms are parallel, not sequential.
 
 ---
 
 ## MVP Definition
 
-### Launch With (v3.0 — this milestone)
+### Launch With (v4.0)
 
-Minimum needed to validate the live agent experience:
+The minimum feature set to validate the concept. All are P1 from the PRD's "Must pass" criteria.
 
-- [ ] `server.py` HTTP transport mode — `MCP_TRANSPORT=http` env var selects `mcp.run(transport="streamable-http", port=8000)` at startup
-- [ ] `Dockerfile` updated — entrypoint defaults to HTTP mode; EXPOSE 8000
-- [ ] `config.py` updated — `MCP_PORT`, `MCP_TRANSPORT` env vars
-- [ ] `openclaw.json` HTTP variant — `"transport": "streamable-http"`, `"url": "http://localhost:8000/mcp"`
-- [ ] Kubernetes deployment manifests — pod spec with NemoClaw + MCP sidecar containers, ServiceAccount, RBAC Role/RoleBinding, ConfigMap for env vars
-- [ ] NemoClaw running on EKS — installer script executed, OpenClaw agent accessible
-- [ ] MCP server registered with NemoClaw via openclaw.json HTTP config
-- [ ] Happy-path E2E validation — agent completes: inspect_cluster → inspect_weka → list_blueprints → get_blueprint → get_crd_schema → validate_yaml → apply → status against real cluster
+- [x] `category` field added to all 5 `items[]` entries per the PRD mapping table
+- [x] `Categories` React component rendering 3 cards above `#catalog`, inside the same `ThemeProvider`
+- [x] Single-select toggle: clicking a card sets selected category; clicking the active card returns to All
+- [x] Visual selected state (purple border + glow) and unselected dimming (opacity 0.7) matching existing card language
+- [x] Client-side grid filter: `items.filter(i => selected === 'all' || i.category === selected)`
+- [x] URL hash sync via `history.replaceState` (no `pushState`; one Back press leaves page)
+- [x] Empty state message: "No apps in this category yet." for Partner (0 apps)
+- [x] `aria-pressed` on `CardActionArea`; keyboard Enter/Space toggles selection
+- [x] Mobile-responsive (3-across md+, stacked mobile)
 
-### Add After Validation (v3.x)
+### Add After Validation (v4.1)
 
-- [ ] Health endpoint at `/healthz` — needed before production readiness; low effort, high value
-- [ ] `docker-compose` for local HTTP mode testing — useful for onboarding new developers
-- [ ] RBAC tuning — start with broad permissions, narrow after observing what the server actually calls
+Add when catalog grows or business need is confirmed.
 
-### Future Consideration (v4+)
+- [ ] "Show all" explicit affordance — add when user testing shows toggle-to-deselect is not discoverable enough
+- [ ] Grid fade transition (150ms) — add after v4.0 ships if the rerender feels jarring
+- [ ] CTA copy for Partner empty state ("Partner blueprints coming soon...") — add when a partnership pipeline exists and PMM confirms the copy
+- [ ] `aria-label` spelled-out form on category cards — add if accessibility audit flags acronym labels for external audiences
 
-- [ ] TLS on MCP endpoint — only if MCP server is ever exposed outside the pod
-- [ ] Multi-NemoClaw instance deployment — requires centralized tool registration, out of scope for v3
-- [ ] Webhook-based status streaming — only if operator adds push notifications
+### Future Consideration (v5+)
+
+Defer until catalog is significantly larger (20+ items) or a backend data source is introduced.
+
+- [ ] Category-level sorting — only meaningful with 10+ items per category
+- [ ] Search input — only meaningful with 20+ catalog items
+- [ ] Multi-category membership (array `category` field) — only meaningful when blueprints genuinely straddle families
+- [ ] Per-category icons / SVG assets — requires formal design-system work
+- [ ] Analytics instrumentation — requires analytics platform integration
 
 ---
 
 ## Feature Prioritization Matrix
 
-| Feature | Value | Cost | Priority |
-|---------|-------|------|----------|
-| HTTP transport mode in server.py | HIGH | LOW | P1 |
-| Dockerfile HTTP entrypoint + EXPOSE 8000 | HIGH | LOW | P1 |
-| config.py MCP_PORT/MCP_TRANSPORT vars | HIGH | LOW | P1 |
-| openclaw.json HTTP transport config | HIGH | LOW | P1 |
-| Kubernetes deployment manifests | HIGH | MEDIUM | P1 |
-| NemoClaw EKS install | HIGH | MEDIUM | P1 |
-| ServiceAccount + RBAC | MEDIUM | LOW-MEDIUM | P1 |
-| MCP sidecar registered with NemoClaw | HIGH | MEDIUM | P1 |
-| Happy-path E2E validation | HIGH | HIGH | P1 |
-| Health endpoint | MEDIUM | LOW | P2 |
-| docker-compose local HTTP testing | MEDIUM | LOW | P2 |
-| RBAC narrowing | LOW | LOW | P3 |
-| TLS on MCP endpoint | LOW | HIGH | P3 |
-
-**Priority key:**
-- P1: Required for milestone acceptance
-- P2: Should add once core works
-- P3: Defer to future milestone
-
----
-
-## How Streamable HTTP Transport Works (Verified)
-
-Source: [MCP Transports Spec 2025-03-26](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)
-
-The server exposes a single endpoint (e.g., `http://localhost:8000/mcp`) supporting both HTTP POST and HTTP GET.
-
-- **POST**: Client sends JSON-RPC requests. Server responds with either `application/json` (single response) or `text/event-stream` (SSE stream for multi-message responses). Client must send `Accept: application/json, text/event-stream`.
-- **GET**: Client opens an SSE stream for server-initiated messages. Server either returns `text/event-stream` or `405 Method Not Allowed`.
-- **Session IDs**: Server assigns `Mcp-Session-Id` on init. Client includes it on all subsequent requests. Clients send `DELETE` to terminate sessions.
-- **Resumability**: Server may attach event IDs to SSE events. Client uses `Last-Event-ID` header to resume after disconnect.
-
-**FastMCP implementation (HIGH confidence):**
-
-```python
-# Option 1: direct run (simplest)
-mcp.run(transport="streamable-http", host="0.0.0.0", port=8000, path="/mcp")
-
-# Option 2: ASGI app for Uvicorn (production)
-app = mcp.http_app(path="/mcp")
-# then: uvicorn server:app --host 0.0.0.0 --port 8000
-```
-
-Both options produce an endpoint at `http://HOST:8000/mcp`. FastMCP handles session management, SSE, and Origin validation automatically through its Starlette-backed ASGI app.
-
-**Transport selection in server.py (recommended pattern):**
-
-```python
-import os
-transport = os.getenv("MCP_TRANSPORT", "streamable-http")
-port = int(os.getenv("MCP_PORT", "8000"))
-
-if __name__ == "__main__":
-    from config import validate_required
-    validate_required()
-    if transport == "streamable-http":
-        mcp.run(transport="streamable-http", host="0.0.0.0", port=port, path="/mcp")
-    else:
-        mcp.run()  # stdio (default, for local dev and mock harness)
-```
+| Feature | User Value | Implementation Cost | Priority |
+|---------|------------|---------------------|----------|
+| Category field on items[] | HIGH | LOW | P1 |
+| 3-card Categories row + toggle | HIGH | LOW | P1 |
+| Visual selected state (border + glow) | HIGH | LOW | P1 |
+| Client-side grid filter | HIGH | LOW | P1 |
+| URL hash sync (replaceState) | HIGH | LOW | P1 |
+| Empty state message | HIGH | LOW | P1 |
+| aria-pressed + keyboard nav | HIGH | LOW | P1 |
+| Mobile responsive stacking | HIGH | LOW | P1 |
+| Count chip ("N apps") | MEDIUM | LOW | P1 (PRD "Should pass") |
+| Unselected opacity dimming | MEDIUM | LOW | P1 (PRD "Should pass") |
+| "Show all" explicit affordance | MEDIUM | LOW | P2 |
+| Grid fade transition | LOW | LOW | P2 |
+| CTA copy for Partner empty state | MEDIUM | LOW | P2 (PMM decision) |
+| aria-label with spelled-out name | LOW | LOW | P2 |
+| Sort controls | LOW | MEDIUM | P3 (do not build in v4) |
+| Search input | LOW | MEDIUM | P3 (do not build in v4) |
+| Category icons / SVGs | LOW | MEDIUM | P3 |
+| Multi-select | LOW | HIGH | P3 |
 
 ---
 
-## How openclaw.json HTTP Registration Works (MEDIUM confidence)
+## Competitor Feature Analysis
 
-Based on confirmed community patterns and OpenClaw mcpServers format, the HTTP sidecar registration config follows this structure:
+| Feature | GitHub Marketplace | Hugging Face Hub | VS Code Marketplace | Our Approach (v4.0) |
+|---------|--------------------|--------------------|---------------------|---------------------|
+| Category filter mechanism | Left-sidebar category links, `?type=apps&category=ai-assisted` (query string, server-rendered) | Left-sidebar task filter, `?pipeline_tag=summarization` (query string, server-rendered) | In-editor `@category:` search syntax; web uses `?category=` (query string, server-rendered) | Hash fragment `#category=<key>` (client-side only — correct for single-template Flask app with no per-category route) |
+| Deselect / return to All | "Clear filter" link appears when a category is active | Re-click task chip to deselect | Clear search query | Toggle: re-click active category card; optionally "Show all" affordance |
+| Count on filter labels | No count shown | No count shown on sidebar labels | No count shown | Count chip on card ("N apps") — differentiator that comparable platforms skip but that is easily computed and surfaces value |
+| Empty state | Filtered page is simply empty (no explicit message) | Shows "No results found" | No items shown | "No apps in this category yet." — intentional; Partner ships empty on day one by design |
+| URL / deep-link method | Query string (server reads it) | Query string (server reads it) | Query string (server reads it) | Hash fragment (browser reads it; server sees only `/`) |
+| Accessibility | `aria-current` on active sidebar item | `aria-selected` on active tab | N/A (in-editor UI) | `aria-pressed` on `CardActionArea` toggle buttons |
 
-```json
-{
-  "mcpServers": {
-    "weka-app-store-mcp": {
-      "transport": "streamable-http",
-      "url": "http://localhost:8000/mcp"
-    }
-  }
-}
-```
-
-Compared to the current `openclaw.json` stdio config:
-- Remove `"startup"` block (no subprocess needed — server is already running as sidecar)
-- Replace `"transport": "stdio"` with `"transport": "streamable-http"`
-- Add `"url"` pointing to localhost MCP endpoint
-- Keep `"name"`, `"description"`, `"tools"` array, `"skill"` reference
-
-The `openclaw.json` file or equivalent `~/.openclaw/openclaw.json` / gateway config must be loaded by the OpenClaw/NemoClaw container at startup. For Kubernetes, this is typically injected via ConfigMap mounted at the expected config path. Config path and loading mechanism must be verified against NemoClaw's current docs (early preview — may differ from base OpenClaw).
+**Key insight from competitor analysis:** All three comparables use query strings because they are server-rendered pages. The WEKA App Store filter is purely client-side in a single Jinja template. Hash fragments are the correct convention for this architecture — not because the comparables use them, but because the comparables are not analogous in architecture. The correct analogs are client-side SPA tab systems (Gmail, Single-page dashboards with tabs), all of which use hash state.
 
 ---
 
-## NemoClaw EKS Deployment Model (LOW-MEDIUM confidence)
+## PRD Open Questions — Research Input Summary
 
-NemoClaw (announced March 16, 2026, early preview) is an NVIDIA open-source reference stack that runs OpenClaw within an NVIDIA OpenShell sandboxed environment. Key architecture facts:
-
-- **OpenShell runtime**: Kubernetes-compatible; uses Landlock + seccomp + netns isolation
-- **Deployment method**: Installer script (`curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash`) or direct Helm chart
-- **GPU requirement**: NVIDIA GPU node required on EKS for NIM/Nemotron inference; NVIDIA GPU Operator must be installed
-- **MCP integration**: Inherits OpenClaw's MCP tool registration mechanism; tools registered via `openclaw.json` or gateway config
-- **Sidecar support**: OpenClaw operator supports custom sidecars via `spec.sidecars` with standard `Container` spec; NemoClaw may use same or similar pattern
-
-**EKS prerequisites (HIGH confidence from NVIDIA docs):**
-- EKS cluster with GPU node group (instance type: p3.xlarge / p3.2xlarge or newer)
-- NVIDIA GPU Operator installed via Helm
-- NVIDIA device plugin enabled (`k8s.io/gpu` resource)
-- Service account with RBAC for MCP server K8s access
-
-**Sidecar pod spec pattern (MEDIUM confidence — inferred from OpenClaw operator docs):**
-
-```yaml
-# OpenClaw operator OpenClawInstance CR or NemoClaw pod spec
-spec:
-  sidecars:
-    - name: weka-mcp-server
-      image: wekachrisjen/weka-app-store-mcp:latest
-      ports:
-        - containerPort: 8000
-      env:
-        - name: MCP_TRANSPORT
-          value: "streamable-http"
-        - name: MCP_PORT
-          value: "8000"
-        - name: BLUEPRINTS_DIR
-          value: "/blueprints"
-        - name: KUBERNETES_AUTH_MODE
-          value: "incluster"
-      volumeMounts:
-        - name: blueprints
-          mountPath: /blueprints
-```
-
-The MCP server communicates with NemoClaw over `localhost:8000/mcp` — no network hop, no Service resource needed, no TLS.
-
-**CAUTION:** NemoClaw is early preview software. Pod spec format, config file paths, and MCP registration mechanism details are not fully documented as of 2026-03-23. Plan for 1-2 iterations during deployment based on real behavior.
-
----
-
-## Dependencies on Existing Code
-
-| New Work | Existing Dependency | Change Needed |
-|----------|---------------------|---------------|
-| HTTP transport mode | `mcp-server/server.py` | Add transport branch in `__main__` block |
-| Port/transport config | `mcp-server/config.py` | Add `MCP_PORT`, `MCP_TRANSPORT` env vars |
-| Dockerfile HTTP mode | `mcp-server/Dockerfile` | Update entrypoint, add `EXPOSE 8000` |
-| openclaw.json HTTP | `mcp-server/openclaw.json` | Replace startup block with url/transport fields |
-| K8s manifests | None (new files) | Create in `k8s/` or `mcp-server/k8s/` directory |
-| SKILL.md | `mcp-server/SKILL.md` | Remove any stdio-specific startup language |
-| CI/CD | `.github/workflows/` | Verify image push still works; no transport-specific changes |
-
-**Nothing changes in tools/:** All 8 tools are transport-agnostic. The tool registration code, response shapes, approval gate, and validation logic are unaffected by switching from stdio to HTTP.
+| # | Question | Research Finding | Confidence |
+|---|----------|-----------------|------------|
+| 1 | Blueprint → category mapping (OSS RAG, NVIDIA VSS placement) | Not a UX research question — content ownership decision. No comparable-platform data applies. | N/A |
+| 2 | "NeuralMesh AIDP" vs spelled-out label | Short acronym as title + one-line spelled-out description matches VS Code Marketplace and Figma Community patterns. Add `aria-label` with full name on card action area for screen-reader audiences unfamiliar with the acronym. | HIGH |
+| 3 | Partner empty state copy | Minimal "No apps yet" is table stakes; CTA copy ("talk to us") is a differentiator worth adding when partnership pipeline is confirmed. | HIGH |
+| 4 | Default landing state | "All" is universal convention. Never filter on first load without a URL parameter. | HIGH |
+| 5 | Category order | First-party primary → first-party extended product → third-party. NeuralMesh AIDP → WARP → Partner is correct. | MEDIUM |
+| 6 | Single value vs array for `category` | Single value for v4.0. Array is a v4.1+ concern once the catalog grows. | HIGH |
 
 ---
 
 ## Sources
 
-- [MCP Transports Specification 2025-03-26](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports) — Streamable HTTP protocol details, session management, SSE behavior (HIGH confidence — official spec)
-- [FastMCP HTTP Deployment Guide](https://gofastmcp.com/deployment/http) — `run(transport="streamable-http")`, `http_app()`, Uvicorn integration (HIGH confidence — official FastMCP docs)
-- [OpenClaw Kubernetes Operator — Sidecar Containers](https://deepwiki.com/openclaw-rocks/k8s-operator/5.1-sidecar-containers) — `spec.sidecars` field, reserved container names, localhost communication pattern (MEDIUM confidence — third-party DeepWiki, consistent with GitHub repo)
-- [OpenClaw MCP Configuration — community](https://openclawvps.io/blog/add-mcp-openclaw) — `mcpServers` block with `streamable-http` transport and `url` field (MEDIUM confidence — community source, consistent with other references)
-- [MCP Server Transports — Roo Code Docs](https://docs.roocode.com/features/mcp/server-transports) — `streamable-http` config format: `{"type": "streamable-http", "url": "http://localhost:8080/mcp"}` (MEDIUM confidence — third-party, consistent with MCP spec)
-- [NVIDIA NemoClaw Overview](https://docs.nvidia.com/nemoclaw/latest/about/overview.html) — architecture, OpenShell sandbox, early preview status (MEDIUM confidence — official NVIDIA docs, early preview caveats apply)
-- [NVIDIA NemoClaw Quickstart](https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html) — installer script, sandbox connect, TUI/CLI modes (MEDIUM confidence — official NVIDIA docs)
-- [NVIDIA GPU Operator for EKS](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html) — Helm installation, EKS compatibility (HIGH confidence — official NVIDIA docs)
-- [MCP Python SDK Issue #1367 — Mounting Streamable HTTP on existing FastAPI app](https://github.com/modelcontextprotocol/python-sdk/issues/1367) — known complexity of mounting MCP endpoint on existing FastAPI app (MEDIUM confidence — official SDK issue tracker)
-- [OpenClaw Kubernetes Operator — Deploy Guide](https://openclaw.rocks/blog/deploy-openclaw-kubernetes) — `OpenClawInstance` CRD, Helm chart install, sidecar pattern (MEDIUM confidence — official OpenClaw blog)
+- [Material Design 3 — Chips guidelines](https://m3.material.io/components/chips/guidelines) — FilterChip / ChoiceChip single-select and deselect behavior
+- [MDN — History: replaceState() method](https://developer.mozilla.org/en-US/docs/Web/API/History/replaceState) — replaceState vs pushState back-button implications
+- [MDN — Working with the History API](https://developer.mozilla.org/en-US/docs/Web/API/History_API/Working_with_the_History_API) — SPA history management
+- [Remy Sharp — How tabs should work](https://remysharp.com/2016/12/11/how-tabs-should-work) — hash-based tab state, hashchange-driven architecture, back button for free
+- [DEV — Query Strings vs. Hash Fragments](https://dev.to/zahra_mirkazemi/query-strings-vs-hash-fragments-whats-the-real-difference-597n) — when hash is correct vs. query string; caching implications
+- [W3C TAG — Hash in URL usage patterns](https://www.w3.org/2001/tag/doc/hash-in-url) — authoritative W3C guidance on fragment vs. query string conventions
+- [LogRocket — Getting filters right: UX/UI design patterns and best practices](https://blog.logrocket.com/ux-design/filtering-ux-ui-design-patterns-best-practices/) — count badges strongly recommended; empty state guidance
+- [Pencil & Paper — UX pattern analysis: enterprise filtering](https://www.pencilandpaper.io/articles/ux-pattern-analysis-enterprise-filtering) — "don't add advanced filters to a 10-item list"; count indicators with "(N)" format
+- [GitHub Marketplace](https://github.com/marketplace?type=apps) — query string category filtering, no count badges, "Clear filter" affordance
+- [Hugging Face Models](https://huggingface.co/models) — `?pipeline_tag=` query string, server-rendered, no count badges on sidebar
+- [TestParty — Accessible Toggle Buttons](https://testparty.ai/blog/accessible-toggle-buttons-modern-web-apps-complete-guide) — aria-pressed, WCAG 2.2, screen reader state announcement
+- [Accessibility Developer Guide — aria-pressed](https://www.accessibility-developer-guide.com/examples/sensible-aria-usage/pressed/) — "button, pressed" / "not pressed" announcement pattern
+- [Smashing Magazine — UI Patterns for Mobile: Search, Sort, Filter](https://www.smashingmagazine.com/2012/04/ui-patterns-for-mobile-apps-search-sort-filter/) — anti-pattern: sort controls for small datasets
+- [VS Code Marketplace — category search tips](https://devblogs.microsoft.com/devops/tips-and-tricks-for-search-on-visual-studio-marketplace/) — category URL convention `?category=`
 
 ---
 
-*Feature research for: Live EKS Deployment — Streamable HTTP MCP Transport + NemoClaw/OpenClaw Agent Chat*
-*Researched: 2026-03-23*
+*Feature research for: v4.0 App Categories on WEKA App Store Home Screen*
+*Researched: 2026-04-21*
