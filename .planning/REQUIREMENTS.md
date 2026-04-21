@@ -93,20 +93,20 @@ All 14 v4.0 requirements map to Phase 15. Phase 15 has three plans; the plan col
 
 | Requirement | Phase | Plan | Status |
 |-------------|-------|------|--------|
-| CAT-01 | Phase 15 | 15-01 (Data Preparation) | Pending |
-| CAT-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
-| CAT-03 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
-| FIL-01 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
-| FIL-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
-| FIL-03 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
-| VIS-01 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
-| VIS-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
-| URL-01 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
-| URL-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
-| URL-03 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
-| A11Y-01 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
-| A11Y-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
-| A11Y-03 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Pending |
+| CAT-01 | Phase 15 | 15-01 (Data Preparation) | Complete |
+| CAT-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Complete |
+| CAT-03 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Complete |
+| FIL-01 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Complete |
+| FIL-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Complete |
+| FIL-03 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Complete |
+| VIS-01 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Complete |
+| VIS-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Complete |
+| URL-01 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Complete |
+| URL-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Complete |
+| URL-03 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Complete |
+| A11Y-01 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Complete |
+| A11Y-02 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Complete |
+| A11Y-03 | Phase 15 | 15-03 (Categories + Filter + A11Y) | Complete |
 
 **Coverage:**
 - v4.0 requirements: 14 total
