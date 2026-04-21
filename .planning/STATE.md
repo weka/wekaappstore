@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v3.0
-milestone_name: Live EKS Deployment
-status: shipped
-stopped_at: v3.0 closed (rescoped) 2026-04-21 — E2E moved to v3.1
-last_updated: "2026-04-21T16:05:00.000Z"
-last_activity: 2026-04-21 — v3.0 rescoped to infrastructure-only; E2E-01..04 + 4 prerequisite fixes deferred to v3.1; see v3.0-KNOWN-ISSUES.md
+milestone: v4.0
+milestone_name: App Categories on Home Screen
+status: planning
+stopped_at: Defining requirements (v4.0 started)
+last_updated: "2026-04-21T16:15:00.000Z"
+last_activity: 2026-04-21 — v4.0 milestone started (PRD-gui-app-categories.md)
 progress:
-  total_phases: 4
-  completed_phases: 3
-  total_plans: 9
-  completed_plans: 8
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,11 +25,13 @@ See: `.planning/PROJECT.md` (updated 2026-03-23)
 
 ## Current Position
 
-Milestone: v3.0 Live EKS Deployment — SHIPPED 2026-04-21 (rescoped)
-Status: Awaiting next milestone. Candidates: PRD-gui-app-categories.md (app categories GUI) or v3.1 (E2E chat validation via .planning/v3.0-KNOWN-ISSUES.md)
-Last activity: 2026-04-21 — v3.0 rescoped and closed
+Milestone: v4.0 App Categories on Home Screen
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-21 — v4.0 started; research pass in progress
 
-Progress: [██████████] 100% of rescoped v3.0 (13/13 requirements satisfied; E2E-01..04 moved to v3.1)
+Progress: [░░░░░░░░░░] 0% (v4.0)
 
 ## Performance Metrics
 

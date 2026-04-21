@@ -10,6 +10,25 @@ The primary users are platform users and cluster admins who interact with OpenCl
 
 OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
 
+## Current Milestone: v4.0 App Categories on Home Screen
+
+**Goal:** Introduce three top-level app categories — NeuralMesh AIDP, WARP, and Partner — as selectable cards on the home screen that filter the existing blueprint catalog in place, without changing the current visual language or requiring a frontend build step.
+
+**Target features:**
+- 3-card Categories row between Planning Studio and App Catalog
+- Client-side filter of existing catalog grid
+- URL hash synchronization (`#category=<key>`) for deep links / back button
+- Selected/unselected visual states reusing existing glassmorphism card language
+- Empty state for zero-match categories
+- Keyboard accessibility + mobile responsive
+
+**Source PRD:** `.planning/PRD-gui-app-categories.md`
+
+**Structural constraints (locked by PRD):**
+- Single-file change: `app-store-gui/webapp/templates/index.html`
+- React 18 UMD + MUI 5.15 via CDN — no build step, no new dependencies
+- Preserve existing `ThemeProvider`, design tokens, and `tags[]` metadata
+
 ## Previous Milestone: v3.0 Live EKS Deployment (Shipped 2026-04-21, rescoped)
 
 **Shipped:** Infrastructure delivered — HTTP transport, EKS deployment via agent-sandbox CRD, K8s manifests, sidecar wiring, RBAC, SKILL.md ConfigMap, init container openclaw.json, git-sync blueprint catalog. Direct MCP tool invocation verified functional.
