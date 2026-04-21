@@ -572,9 +572,9 @@
     // -------- Debug toggles --------
     const debugHidePlanningEl = document.getElementById('debug-hide-planning');
     if (debugHidePlanningEl) {
-      // Restore saved state on load
-      debugHidePlanningEl.checked = localStorage.getItem('debug.hidePlanningStudio') === 'true';
-      // Persist on change
+      // Default ON — show checkbox checked unless user has explicitly turned it off.
+      debugHidePlanningEl.checked = localStorage.getItem('debug.hidePlanningStudio') !== 'false';
+      // Persist on change (explicit true|false so the default-on logic stays coherent).
       debugHidePlanningEl.addEventListener('change', () => {
         localStorage.setItem('debug.hidePlanningStudio', debugHidePlanningEl.checked ? 'true' : 'false');
       });

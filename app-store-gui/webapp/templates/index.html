@@ -46,11 +46,12 @@
   </style>
   <script>
     // Run synchronously before body paints to avoid FOUC.
+    // Default: ON (hide planning studio) unless user has explicitly turned it off.
     try {
-      if (localStorage.getItem('debug.hidePlanningStudio') === 'true') {
+      if (localStorage.getItem('debug.hidePlanningStudio') !== 'false') {
         document.documentElement.classList.add('hide-planning-studio');
       }
-    } catch (e) { /* localStorage disabled — show normally */ }
+    } catch (e) { /* localStorage disabled — fall back to visible */ }
   </script>
 </head>
 <body class="min-h-screen">
