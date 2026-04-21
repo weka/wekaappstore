@@ -3,6 +3,118 @@
 **Defined:** 2026-03-23
 **Core Value:** OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
 
+## v4.0 Requirements
+
+Requirements for the **App Categories on Home Screen** milestone. Adds three top-level app categories (AIDP, WARP, Partner) as selectable filter cards on the WEKA App Store home page.
+
+**Source PRD:** `.planning/PRD-gui-app-categories.md`
+**Research:** `.planning/research/SUMMARY.md`
+**Scope:** Single-file change to `app-store-gui/webapp/templates/index.html`. No new dependencies, no build step, no backend changes.
+
+### Blueprint → Category Mapping
+
+| Blueprint | Category | Reason |
+|---|---|---|
+| OSS RAG | warp | RAG platform blueprint |
+| NVIDIA RAG | warp | RAG platform blueprint |
+| NVIDIA VSS | warp | WARP-family per product decision |
+| OpenFold | warp | WARP-family per product decision |
+| AI Agent for Enterprise Research | aidp | Headline NeuralMesh AI Data Platform offering |
+
+Result: AIDP=1 app, WARP=4 apps, Partner=0 apps (empty state intentional).
+
+### Category Data (CAT)
+
+- [ ] **CAT-01**: Each blueprint `item` in `index.html` has a single `category` field with value in `{aidp, warp, partner}`
+- [ ] **CAT-02**: User sees three category cards — labeled "AIDP", "WARP", "Partner" — rendered in that left-to-right order between Planning Studio and App Catalog
+- [ ] **CAT-03**: User sees each category card styled consistently with existing catalog cards (same glassmorphism, border radius, fonts, dark theme)
+
+### Filter Behavior (FIL)
+
+- [ ] **FIL-01**: User clicks a category card and the App Catalog grid below filters in place to show only apps in that category
+- [ ] **FIL-02**: User clicks the currently-selected category card and returns to the default "All" view (5 apps)
+- [ ] **FIL-03**: User viewing a category with zero matching apps sees the inline empty-state message "No apps in this category yet."
+
+### Visual State (VIS)
+
+- [ ] **VIS-01**: User sees the selected category card visually emphasized with purple border and glow matching the WEKA primary color
+- [ ] **VIS-02**: User sees unselected category cards at reduced opacity (0.7) when a category is active; all cards at full opacity when showing All
+
+### URL State Sync (URL)
+
+- [ ] **URL-01**: User can deep-link to a pre-filtered view by loading `/#category=<key>` where `<key>` is one of `aidp`, `warp`, or `partner`
+- [ ] **URL-02**: User clicking Back after one or more category interactions leaves the page in a single press (no history pollution from category toggles)
+- [ ] **URL-03**: User arriving with an unknown, malformed, or unrelated hash sees the default "All" view (hash parser ignores non-`#category=` hashes)
+
+### Responsive and Accessibility (A11Y)
+
+- [ ] **A11Y-01**: User on a mobile viewport (≤768px) sees category cards stacked vertically, each remaining tappable
+- [ ] **A11Y-02**: User navigating by keyboard can focus each category card via Tab and toggle selection via Enter or Space
+- [ ] **A11Y-03**: Screen-reader users hear the selected/unselected state of each category card via native `aria-pressed` semantics on a `<button>` element
+
+## v4.0 Future Requirements (v4.1+)
+
+Deferred after v4.0 ships. Candidates for a v4.1 polish milestone.
+
+- **CAT-04**: Live "N apps" count Chip on each category card (deferred from PRD "Should pass" tier)
+- **UX-01**: Explicit "Show all" affordance when a category is active
+- **UX-02**: 150ms opacity fade on grid during category switch
+- **UX-03**: CTA copy for Partner empty state (pending PMM decision and partnership pipeline)
+- **A11Y-04**: `aria-label` with spelled-out "NeuralMesh AI Data Platform" on the AIDP category card
+- **DATA-01**: Move `items[]` array out of `index.html` into a backend source of truth
+- **CAT-05**: Multi-value category field (array) to allow a blueprint to belong to multiple categories (requires catalog growth beyond ~15 items)
+
+## v4.0 Out of Scope
+
+Explicitly excluded from v4.0. Each entry has a reason to prevent re-introduction.
+
+| Feature | Reason |
+|---|---|
+| New React build pipeline (Vite/Webpack/npm) | PRD locks the stack to CDN React + no build step |
+| New CDN dependencies | All required MUI/React APIs already in the loaded bundle (see research STACK.md) |
+| Backend routes or API endpoints for categories | Filter is client-side only; no server involvement |
+| Search input on the catalog | Not included; out of scope per PRD |
+| Sort controls on the catalog | Not included; out of scope per PRD |
+| Multi-select filtering | v4.0 is single-select; array category field is v4.1+ |
+| Tag-based secondary filters | `tags[]` remain informational Chips on the card |
+| Per-user persistence of last-selected category | Hash-only state; no localStorage |
+| `history.pushState` per click | Pollutes back stack; `replaceState` is correct (research PITFALLS.md) |
+| Per-category icons or images on the cards | Simpler is better for a 3-card row; not worth the design overhead |
+| Tooltip descriptions that duplicate card copy | Anti-pattern; redundant |
+| "Recently viewed" surface | Catalog too small (5 items) to warrant |
+| Server-side rendering of filtered results | Flask template is static; filter runs in React on the client |
+| Category authorization / gating | Every user sees every category; no RBAC layer |
+| Renaming the "AI Agent for Enterprise Research" blueprint | Blueprint title stays; only category assignment changes |
+| Changes to blueprint detail pages, Planning Studio, `/settings` | Scope is the home page only |
+
+## Traceability
+
+Populated by the roadmapper in Step 10. Target: 13 requirements → Phase 15.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| CAT-01 | Phase 15 | Pending |
+| CAT-02 | Phase 15 | Pending |
+| CAT-03 | Phase 15 | Pending |
+| FIL-01 | Phase 15 | Pending |
+| FIL-02 | Phase 15 | Pending |
+| FIL-03 | Phase 15 | Pending |
+| VIS-01 | Phase 15 | Pending |
+| VIS-02 | Phase 15 | Pending |
+| URL-01 | Phase 15 | Pending |
+| URL-02 | Phase 15 | Pending |
+| URL-03 | Phase 15 | Pending |
+| A11Y-01 | Phase 15 | Pending |
+| A11Y-02 | Phase 15 | Pending |
+| A11Y-03 | Phase 15 | Pending |
+
+**Coverage:**
+- v4.0 requirements: 14 total
+- Mapped to phases: 14 (all to Phase 15 — roadmapper may split)
+- Unmapped: 0
+
+---
+
 ## v3.0 Requirements
 
 Requirements for the Live EKS Deployment milestone (scoped to infrastructure delivery).
