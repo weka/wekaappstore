@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v4.0
-milestone_name: App Categories on Home Screen
-status: planning
-stopped_at: Completed 15-03-PLAN.md
-last_updated: "2026-04-21T07:53:49.454Z"
-last_activity: 2026-04-21 — v4.0 roadmap created; Phase 15 has 3 plans; research complete
+milestone: null
+milestone_name: null
+status: ready_for_next_milestone
+stopped_at: v4.0 shipped and archived 2026-04-21
+last_updated: "2026-04-21T17:58:00.000Z"
+last_activity: 2026-04-21 — v4.0 App Categories on Home Screen shipped, archived, and tagged
 progress:
-  total_phases: 5
-  completed_phases: 4
-  total_plans: 12
-  completed_plans: 11
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
   percent: 0
 ---
 
@@ -18,66 +18,29 @@ progress:
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-04-21)
+See: `.planning/PROJECT.md` (updated 2026-04-21 after v4.0 shipped)
 
 **Core value:** OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
-**Current focus:** Phase 15 — App Categories Feature
+**Current focus:** No active milestone — ready for next. Candidates: v3.1 E2E chat validation (deferred from v3.0; see `v3.0-KNOWN-ISSUES.md`) or a new product direction.
 
 ## Current Position
 
-Milestone: v4.0 App Categories on Home Screen
-Phase: 15 of 15 (App Categories Feature)
-Plan: — (not yet planned)
-Status: Ready to plan
-Last activity: 2026-04-21 — v4.0 roadmap created; Phase 15 has 3 plans; research complete
+No active milestone.
 
-Progress: [░░░░░░░░░░] 0% (v4.0)
-
-## Performance Metrics
-
-**Velocity (v4.0):**
-- Total plans completed: 0
-- Average duration: —
-- Total execution time: —
-
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| - | - | - | - |
-
-*Updated after each plan completion*
-| Phase 15 P15-01 | 8 | 2 tasks | 1 files |
-| Phase 15 P02 | 611min | 2 tasks | 1 files |
-| Phase 15 P03 | ~10min | 3 tasks | 1 files |
+Last shipped: **v4.0 App Categories on Home Screen** (2026-04-21) — archive at `.planning/milestones/v4.0-*.md`.
 
 ## Accumulated Context
 
-### Decisions
+### Open Blockers / Tracked Work
 
-- [v4.0 roadmap]: One phase (Phase 15) with three plans — all three research steps operate on the same single file and IIFE scope; no step is independently shippable as a user-visible milestone
-- [v4.0 roadmap]: Blueprint → category mapping (Open Question 1) requires Chris's confirmation before Plan 15-01 can be marked done; AIDP=1, WARP=4, Partner=0 are PRD defaults
-- [v4.0 research]: JSX forbidden; `h()` only — grep `<[A-Z]` in new code must return zero matches
-- [v4.0 research]: `component: 'a'` must not appear on category `CardActionArea` — toggle buttons render as `<button>`
-- [v4.0 research]: `history.replaceState` must not fire on mount — initialization reads hash only
-- [v4.0 research]: Hash parser uses `startsWith('#category=')` to avoid collision with `#catalog` / `#planning-studio`
-- [v4.0 research]: `ThemeProvider` lifts from `Catalog` to `AppShell` — one provider wraps both siblings
-- [Phase 15]: Blueprint → category mapping locked: AI Agent for Enterprise Research=aidp; OSS RAG/NVIDIA RAG/NVIDIA VSS/OpenFold=warp; partner=0 items on launch
-- [Phase 15]: AppShell added immediately after Catalog inside the existing IIFE (no second IIFE); section#catalog wrapper retained unchanged; all 5 edits made in one atomic pass
-- [Phase 15]: Comments mentioning forbidden patterns rephrased to avoid grep false positives — code behavior unchanged
-- [Phase 15]: filteredItems computed inline (not useMemo) per PITFALL 6 — acceptable at 5-item scale
-- [Phase 15]: VALID_KEYS derived from CATEGORIES.map(c => c.key) inside AppShell for single source of truth
+- **v3.1 deferred** — E2E chat validation (E2E-01..04) plus four prerequisite fixes (inspect-tool `load_incluster_config`, init-container openclaw.json config gap, NIM model reliability, OpenClaw version upgrade). Full root-cause and fix plan in `.planning/v3.0-KNOWN-ISSUES.md`.
 
 ### Pending Todos
 
-None yet.
-
-### Blockers/Concerns
-
-- [v4.0 gate]: Chris must confirm blueprint → category mapping before Plan 15-01 sign-off (AIDP: AI Agent for Enterprise Research; WARP: OSS RAG, NVIDIA RAG, NVIDIA VSS, OpenFold; Partner: empty)
+None.
 
 ## Session Continuity
 
-Last session: 2026-04-21T07:48:53.891Z
-Stopped at: Completed 15-03-PLAN.md
+Last session: 2026-04-21 — v4.0 shipping session
+Stopped at: v4.0 archived and tagged; ready for `/gsd:new-milestone` or v3.1 pickup
 Resume file: None

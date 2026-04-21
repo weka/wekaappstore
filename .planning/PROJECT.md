@@ -10,42 +10,27 @@ The primary users are platform users and cluster admins who interact with OpenCl
 
 OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
 
-## Current Milestone: v4.0 App Categories on Home Screen
+## Current State (after v4.0)
 
-**Goal:** Introduce three top-level app categories — NeuralMesh AIDP, WARP, and Partner — as selectable cards on the home screen that filter the existing blueprint catalog in place, without changing the current visual language or requiring a frontend build step.
+No active milestone. v4.0 shipped 2026-04-21. Two natural next directions: pick up the v3.1 deferred E2E chat work (see `.planning/v3.0-KNOWN-ISSUES.md` for tool-wrapper bug, init-container config gap, and model reliability findings), or start a new product direction.
 
-**Target features:**
-- 3-card Categories row between Planning Studio and App Catalog
-- Client-side filter of existing catalog grid
-- URL hash synchronization (`#category=<key>`) for deep links / back button
-- Selected/unselected visual states reusing existing glassmorphism card language
-- Empty state for zero-match categories
-- Keyboard accessibility + mobile responsive
+**What's shipped end-to-end:**
+- 8-tool MCP server (`mcp-server/`, v2.0) with flat agent-friendly JSON responses, 103 tests, Dockerfile, CI/CD to `wekachrisjen/weka-app-store-mcp`
+- SKILL.md defining the 12-step agent workflow (v2.0)
+- OpenClaw/NemoClaw deployed to EKS GPU node via agent-sandbox CRD (v3.0) — infrastructure functional, E2E chat deferred to v3.1
+- Kubernetes manifest set: dedicated RBAC, SKILL.md ConfigMap, MCP sidecar wiring, init-container-generated openclaw.json, git-sync blueprint catalog (v3.0)
+- WEKA App Store home page with 3-card category filter row (AIDP, WARP, Partner) above the catalog grid, URL hash deep-link support, full keyboard accessibility, mobile responsive (v4.0)
 
-**Source PRD:** `.planning/PRD-gui-app-categories.md`
+## Recent Milestones
 
-**Structural constraints (locked by PRD):**
-- Single-file change: `app-store-gui/webapp/templates/index.html`
-- React 18 UMD + MUI 5.15 via CDN — no build step, no new dependencies
-- Preserve existing `ThemeProvider`, design tokens, and `tags[]` metadata
+**v4.0 App Categories on Home Screen — Shipped 2026-04-21**
+Single-file frontend feature: 3-card category filter (AIDP=1 app, WARP=4, Partner=0) above the App Catalog grid, URL hash deep-links, keyboard a11y, mobile responsive. Delivered in 1 phase / 3 plans / ~1h40min in `app-store-gui/webapp/templates/index.html`. All 14 requirements (CAT/FIL/VIS/URL/A11Y) verified. No new dependencies, no build step.
 
-## Previous Milestone: v3.0 Live EKS Deployment (Shipped 2026-04-21, rescoped)
+**v3.0 Live EKS Deployment — Shipped 2026-04-21 (rescoped from "...and Agent Testing")**
+Infrastructure delivered: HTTP transport, EKS deployment via agent-sandbox CRD, K8s manifests, sidecar wiring, RBAC, SKILL.md ConfigMap, init container openclaw.json, git-sync blueprint catalog. Direct MCP tool invocation verified functional. E2E chat validation + 4 prerequisite fixes (inspect-tool config loader, init container config gap, model reliability, OpenClaw upgrade) deferred to v3.1 — see `.planning/v3.0-KNOWN-ISSUES.md`.
 
-**Shipped:** Infrastructure delivered — HTTP transport, EKS deployment via agent-sandbox CRD, K8s manifests, sidecar wiring, RBAC, SKILL.md ConfigMap, init container openclaw.json, git-sync blueprint catalog. Direct MCP tool invocation verified functional.
-
-**Descoped to v3.1:** E2E chat validation (E2E-01..04) + four prerequisite fixes. See `.planning/v3.0-KNOWN-ISSUES.md`.
-
-## Current State (after v3.0)
-
-The MCP server is complete and container-ready. 8 tools are registered and tested (103 tests). SKILL.md defines the agent workflow. Deprecated v1.0 backend-brain code has been removed.
-
-**What's shipped:**
-- 8-tool MCP server (`mcp-server/`) with flat agent-friendly JSON responses
-- SKILL.md with 12-step workflow, validate-retry loop, re-inspect-before-apply
-- Mock agent harness with description-based tool selection (3 scenarios)
-- Dockerfile, GitHub Actions CI/CD to `wekachrisjen/weka-app-store-mcp`
-- OpenClaw registration config (`openclaw.json`) with drift detection
-- README with full registration docs for OpenClaw and NemoClaw (placeholder)
+**v2.0 OpenClaw MCP Tool Integration — Shipped 2026-03-22**
+8-tool MCP server, SKILL.md, mock agent harness, deprecated v1.0 backend-brain code removed.
 
 ## Requirements
 
@@ -66,10 +51,11 @@ The MCP server is complete and container-ready. 8 tools are registered and teste
 - ✓ MCP server supports Streamable HTTP transport (port 8080, stateless, `/health` endpoint) — v3.0 (XPORT-01..04)
 - ✓ OpenClaw/NemoClaw deployed to EKS GPU node via experimental agent-sandbox CRD — v3.0 (NCLAW-01, NCLAW-03)
 - ✓ Kubernetes manifest set with dedicated RBAC, SKILL.md ConfigMap, MCP sidecar wiring, init-container-generated openclaw.json, git-sync blueprint catalog — v3.0 (K8S-01..05, NCLAW-02, NCLAW-04)
+- ✓ Three top-level app categories (AIDP, WARP, Partner) as selectable filter cards on the home screen with URL hash deep-links, keyboard a11y, mobile responsive — v4.0 (CAT-01..03, FIL-01..03, VIS-01..02, URL-01..03, A11Y-01..03)
 
 ### Active
 
-(No active milestone — ready to start next. See `.planning/v3.0-KNOWN-ISSUES.md` for deferred v3.1 scope and `PRD-gui-app-categories.md` for candidate next milestone.)
+(No active milestone — ready to start next. Two tracked directions: v3.1 E2E chat validation work — see `.planning/v3.0-KNOWN-ISSUES.md` — or a new product milestone. Run `/gsd:new-milestone` to start.)
 
 ### Out of Scope
 
@@ -110,6 +96,9 @@ OpenClaw connects via WebSocket Gateway, uses OpenAI-compatible model API, and r
 | Description-based tool selection in harness | Proves tool descriptions are sufficient for agent routing without hardcoded names | ✓ Good — keyword matching works |
 | Container image on wekachrisjen Docker Hub | Chris's corporate Docker Hub account for all WEKA images | ✓ Good — CI/CD wired |
 | Deploy NemoClaw/OpenClaw via agent-sandbox CRD on EKS | Experimental CRD provides sandbox isolation, GPU scheduling, and volume management out of the box; avoids hand-rolling Deployment + RBAC + PV scaffolding. Gateway must use --bind=loopback (not lan) since non-loopback requires controlUi.allowedOrigins config; loopback is correct for sidecar deployment | Validated in Phase 12 — pod Running with NVIDIA A10G on EKS in wekaappstore namespace |
+| Single React root (PRD Option A) for v4.0 Categories feature | Lifting `ThemeProvider` out of `Catalog` into a new `AppShell` keeps both category cards and catalog grid under one theme provider, shares `selectedCategory` state via plain `useState` (no context needed for 2 consumers), preserves single-file CDN-React constraint | ✓ Good — shipped v4.0 in 1h40min; zero new deps; all 5 critical pitfalls mitigated via grep-level verification |
+| No count Chip on category cards in v4.0 | Deferred to v4.1 polish milestone to keep v4.0 scope tight and ship in one session | ✓ Good — cleanly deferred; worth reconsidering if catalog grows beyond 5 items |
+| Acronym-first category labels ("AIDP" not "NeuralMesh AIDP") | Shorter horizontal footprint on the 3-card row; description beneath carries the full name for accessibility | — Pending — revisit after user feedback on whether "AIDP" alone is recognizable |
 
 ---
-*Last updated: 2026-04-21 after v3.0 rescope (infrastructure shipped; E2E chat validation deferred to v3.1 — see v3.0-KNOWN-ISSUES.md)*
+*Last updated: 2026-04-21 after v4.0 milestone shipped*
