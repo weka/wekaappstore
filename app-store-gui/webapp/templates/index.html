@@ -266,6 +266,14 @@
               category: 'aidp'
             },
             {
+              title: 'AIDP - Semantic Search',
+              desc: 'An add-on to NeuralMesh AIDP to deploy a semantic search via Open WebUI.',
+              href: '/blueprint/aidp-semantic-search',
+              tags: ['Open Source'],
+              category: 'aidp',
+              addon: true
+            },
+            {
               title: 'Glocomp - Aurora',
               desc: 'Flood intelligence Platform that delivers realtime analysis to operators leveraging WEKA\'s NeuralMesh AIDP.',
               href: '/blueprint/glocomp-aurora',
@@ -412,6 +420,25 @@
               ? items
               : items.filter(i => i.category === selectedCategory);
 
+            // Split addons from primary tiles. Only applies in category views — the All
+            // view stays flat so the "Add-Ons" subsection doesn't disrupt the top-level grid.
+            const primaryItems = filteredItems.filter(i => !i.addon);
+            const addonItems = filteredItems.filter(i => i.addon);
+            const showAddonsSection = selectedCategory !== 'all' && addonItems.length > 0;
+
+            let body;
+            if (filteredItems.length === 0) {
+              body = h(EmptyState, null);
+            } else if (showAddonsSection) {
+              body = h(Box, { sx: { display: 'flex', flexDirection: 'column', gap: 3 } },
+                primaryItems.length > 0 ? h(Catalog, { items: primaryItems }) : null,
+                h(Typography, { variant: 'h6', component: 'h2', sx: { mt: 1, fontWeight: 600 } }, 'Add-Ons'),
+                h(Catalog, { items: addonItems })
+              );
+            } else {
+              body = h(Catalog, { items: filteredItems });
+            }
+
             return h(ThemeProvider, { theme },
               h(CssBaseline, null),
               h(Box, { sx: { display: 'flex', flexDirection: 'column', gap: 4 } },
@@ -420,9 +447,7 @@
                   selected: selectedCategory,
                   onSelect: setSelectedCategory
                 }),
-                filteredItems.length === 0
-                  ? h(EmptyState, null)
-                  : h(Catalog, { items: filteredItems })
+                body
               )
             );
           }
