@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: App Categories on Home Screen
 status: planning
-stopped_at: Phase 15 context gathered
-last_updated: "2026-04-21T06:57:46.814Z"
+stopped_at: Completed 15-01-PLAN.md
+last_updated: "2026-04-21T07:25:31.906Z"
 last_activity: 2026-04-21 — v4.0 roadmap created; Phase 15 has 3 plans; research complete
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 9
-  completed_plans: 8
+  total_plans: 12
+  completed_plans: 9
   percent: 0
 ---
 
@@ -47,6 +47,7 @@ Progress: [░░░░░░░░░░] 0% (v4.0)
 | - | - | - | - |
 
 *Updated after each plan completion*
+| Phase 15 P15-01 | 8 | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -59,6 +60,7 @@ Progress: [░░░░░░░░░░] 0% (v4.0)
 - [v4.0 research]: `history.replaceState` must not fire on mount — initialization reads hash only
 - [v4.0 research]: Hash parser uses `startsWith('#category=')` to avoid collision with `#catalog` / `#planning-studio`
 - [v4.0 research]: `ThemeProvider` lifts from `Catalog` to `AppShell` — one provider wraps both siblings
+- [Phase 15]: Blueprint → category mapping locked: AI Agent for Enterprise Research=aidp; OSS RAG/NVIDIA RAG/NVIDIA VSS/OpenFold=warp; partner=0 items on launch
 
 ### Pending Todos
 
@@ -70,6 +72,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T06:57:46.805Z
-Stopped at: Phase 15 context gathered
-Resume file: .planning/phases/15-app-categories-feature/15-CONTEXT.md
+Last session: 2026-04-21T07:25:31.903Z
+Stopped at: Completed 15-01-PLAN.md
+Resume file: None

@@ -25,7 +25,7 @@ Result: AIDP=1 app, WARP=4 apps, Partner=0 apps (empty state intentional).
 
 ### Category Data (CAT)
 
-- [ ] **CAT-01**: Each blueprint `item` in `index.html` has a single `category` field with value in `{aidp, warp, partner}`
+- [x] **CAT-01**: Each blueprint `item` in `index.html` has a single `category` field with value in `{aidp, warp, partner}`
 - [ ] **CAT-02**: User sees three category cards — labeled "AIDP", "WARP", "Partner" — rendered in that left-to-right order between Planning Studio and App Catalog
 - [ ] **CAT-03**: User sees each category card styled consistently with existing catalog cards (same glassmorphism, border radius, fonts, dark theme)
 
