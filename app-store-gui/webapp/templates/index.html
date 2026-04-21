@@ -303,10 +303,107 @@
             );
           }
 
+          function Categories({ categories, selected, onSelect }) {
+            return h(Box, { sx: { flexGrow: 1 } },
+              h(Typography, {
+                variant: 'h5',
+                component: 'h2',
+                sx: { mb: 0.5, fontWeight: 600 }
+              }, 'Browse by category'),
+              h(Typography, {
+                variant: 'body2',
+                sx: { color: 'text.secondary', mb: 3 }
+              }, 'Pick a family to narrow the catalog below.'),
+              h(Grid, { container: true, spacing: 2.5, alignItems: 'stretch' },
+                categories.map((cat) => {
+                  const isSelected = selected === cat.key;
+                  const anySelected = selected !== 'all';
+                  return h(Grid, { item: true, xs: 12, md: 4, key: cat.key },
+                    h(Card, {
+                      elevation: 0,
+                      sx: {
+                        position: 'relative',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        height: '100%',
+                        opacity: anySelected && !isSelected ? 0.7 : 1,
+                        borderColor: isSelected ? 'primary.main' : undefined,
+                        boxShadow: isSelected ? '0 10px 20px rgba(107,47,179,0.25)' : undefined,
+                        transition: 'transform .2s ease, border-color .2s ease, box-shadow .2s ease, opacity .2s ease',
+                        ':hover': {
+                          transform: 'translateY(-2px)',
+                          borderColor: 'primary.main',
+                          boxShadow: '0 10px 20px rgba(0,0,0,0.25)'
+                        }
+                      }
+                    },
+                      h(CardActionArea, {
+                        onClick: () => onSelect(isSelected ? 'all' : cat.key),
+                        'aria-pressed': isSelected,
+                        focusVisibleClassName: 'Mui-focusVisible',
+                        sx: { flexGrow: 1, alignItems: 'stretch', height: '100%' }
+                        // Omitting `component` prop: CardActionArea defaults to native <button>
+                      },
+                        h(CardContent, { sx: { display: 'flex', flexDirection: 'column', flexGrow: 1, gap: 1 } },
+                          h(Typography, { variant: 'h6', component: 'h3' }, cat.label),
+                          h(Typography, { variant: 'body2', sx: { color: 'text.secondary' } }, cat.description)
+                        )
+                      )
+                    )
+                  );
+                })
+              )
+            );
+          }
+
+          function EmptyState() {
+            return h(Box, { sx: { textAlign: 'center', py: 8 } },
+              h(Typography, { variant: 'body1', sx: { color: 'text.secondary' } },
+                'No apps in this category yet.')
+            );
+          }
+
           function AppShell(){
+            const VALID_KEYS = CATEGORIES.map(c => c.key);   // ['aidp', 'warp', 'partner']
+
+            const [selectedCategory, setSelectedCategory] = useState(() => {
+              // Lazy initializer — synchronous, read-only hash parse on mount.
+              // Strict prefix check guards against collision with #catalog / #planning-studio.
+              const raw = window.location.hash;
+              if (!raw.startsWith('#category=')) return 'all';
+              const key = raw.slice('#category='.length);
+              return VALID_KEYS.indexOf(key) >= 0 ? key : 'all';
+            });
+
+            useEffect(() => {
+              // Sync URL hash when selectedCategory changes.
+              // replaceState keeps the back stack at 1 entry regardless of toggle count.
+              // Guard: skip write if the current URL already matches the target (mount case).
+              const target = selectedCategory === 'all'
+                ? window.location.pathname
+                : window.location.pathname + '#category=' + selectedCategory;
+              const current = window.location.pathname + window.location.hash;
+              if (current !== target) {
+                history.replaceState(null, '', target);
+              }
+            }, [selectedCategory]);
+
+            const filteredItems = selectedCategory === 'all'
+              ? items
+              : items.filter(i => i.category === selectedCategory);
+
             return h(ThemeProvider, { theme },
               h(CssBaseline, null),
-              h(Catalog, { items: items })
+              h(Box, { sx: { display: 'flex', flexDirection: 'column', gap: 4 } },
+                h(Categories, {
+                  categories: CATEGORIES,
+                  selected: selectedCategory,
+                  onSelect: setSelectedCategory
+                }),
+                filteredItems.length === 0
+                  ? h(EmptyState, null)
+                  : h(Catalog, { items: filteredItems })
+              )
             );
           }
 
