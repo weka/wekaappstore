@@ -143,6 +143,10 @@ rbac:
       - apiGroups: ["nfd.k8s-sigs.io"]
         resources: ["nodefeatures"]
         verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      # NVIDIA NIM Operator CRDs: nimcaches, nimservices (created by NVIDIA RAG blueprint)
+      - apiGroups: ["apps.nvidia.com"]
+        resources: ["nimcaches", "nimservices", "nimcaches/status", "nimservices/status", "*"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
       # Allow creating namespaced Roles/RoleBindings that grant higher privileges
       - apiGroups: ["rbac.authorization.k8s.io"]
         resources: ["roles", "rolebindings"]
