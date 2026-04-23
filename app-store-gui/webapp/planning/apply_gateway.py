@@ -35,7 +35,13 @@ CLUSTER_SCOPED_KINDS = {
 
 
 def _load_kube_config() -> None:
-    config.load_kube_config()
+    # Match main.py's auto behavior: try in-cluster first, fall back to kubeconfig.
+    # Without this, running inside a pod raises "Invalid kube-config file.
+    # No configuration found." because no ~/.kube/config exists.
+    try:
+        config.load_incluster_config()
+    except Exception:
+        config.load_kube_config()
 
 
 def _ensure_namespace_exists(namespace: Optional[str]) -> None:
