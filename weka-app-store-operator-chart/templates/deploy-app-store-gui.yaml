@@ -35,7 +35,7 @@ spec:
               - { name: manifests, mountPath: /manifests }
       containers:
         - name: wekaappstoregui
-          image: wekachrisjen/weka-app-store-gui:v0.38
+          image: wekachrisjen/weka-app-store-gui:v0.39
           volumeMounts:
             - name: manifests
               mountPath: /app/manifests

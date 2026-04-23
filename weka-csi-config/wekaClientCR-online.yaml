@@ -4,7 +4,7 @@ metadata:
   name: warp-cluster-clients
 spec:
   image: quay.io/weka.io/weka-in-container:5.1.0.605
-  imagePullSecret: quay-io-robot-secret
+  imagePullSecret: quay-io-secret
   driversDistService: "https://drivers.weka.io"
   rawTolerations:
     - key: "nvidia.com/gpu"

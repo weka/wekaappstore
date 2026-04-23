@@ -2,6 +2,8 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: storageclass-wekafs-dir-api
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
 provisioner: csi.weka.io
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
@@ -9,7 +11,7 @@ allowVolumeExpansion: true
 parameters:
 
   volumeType: dir/v1
-  filesystemName: default
+  filesystemName: csi-dir
   capacityEnforcement: HARD
 
   # Optional: set ownership / permissions on the root of each volume

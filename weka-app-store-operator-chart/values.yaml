@@ -51,7 +51,7 @@ rbac:
         verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
       - apiGroups: [""]
         resources: ["persistentvolumes"]
-        verbs: ["get", "list", "watch"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
       - apiGroups: ["apps"]
         resources: ["deployments", "daemonsets", "statefulsets", "replicasets"]
         verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
