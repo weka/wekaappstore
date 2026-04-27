@@ -187,6 +187,35 @@ try:
 except Exception:
     LOGO_B64 = None
 
+# Load Glocomp partner logo (used on home-page chip + blueprint detail page)
+GLOCOMP_LOGO_B64 = None
+try:
+    glocomp_logo_path = os.path.join(TEMPLATES_DIR, "glocomp_logo.png")
+    if os.path.exists(glocomp_logo_path):
+        with open(glocomp_logo_path, 'rb') as _gf:
+            GLOCOMP_LOGO_B64 = base64.b64encode(_gf.read()).decode('ascii')
+except Exception:
+    GLOCOMP_LOGO_B64 = None
+
+# Load TokenVisor partner logo + architecture diagram
+TOKENVISOR_LOGO_B64 = None
+try:
+    tv_logo_path = os.path.join(TEMPLATES_DIR, "tokenvisor_logo.png")
+    if os.path.exists(tv_logo_path):
+        with open(tv_logo_path, 'rb') as _tf:
+            TOKENVISOR_LOGO_B64 = base64.b64encode(_tf.read()).decode('ascii')
+except Exception:
+    TOKENVISOR_LOGO_B64 = None
+
+TOKENVISOR_ARCH_B64 = None
+try:
+    tv_arch_path = os.path.join(TEMPLATES_DIR, "tokenvisor_architecture.png")
+    if os.path.exists(tv_arch_path):
+        with open(tv_arch_path, 'rb') as _tf:
+            TOKENVISOR_ARCH_B64 = base64.b64encode(_tf.read()).decode('ascii')
+except Exception:
+    TOKENVISOR_ARCH_B64 = None
+
 # Helper: load kube config
 _config_loaded = False
 
@@ -473,6 +502,8 @@ async def index(request: Request):
             "status": status,
             "auth": auth,
             "logo_b64": LOGO_B64,
+            "glocomp_logo_b64": GLOCOMP_LOGO_B64,
+            "tokenvisor_logo_b64": TOKENVISOR_LOGO_B64,
         },
     )
 
@@ -847,6 +878,9 @@ async def blueprint_detail(request: Request, name: str):
             "oss_img_b64": oss_img_b64,
             "aidp_img_b64": aidp_img_b64,
             "logo_b64": LOGO_B64,
+            "glocomp_logo_b64": GLOCOMP_LOGO_B64,
+            "tokenvisor_logo_b64": TOKENVISOR_LOGO_B64,
+            "tokenvisor_arch_b64": TOKENVISOR_ARCH_B64,
         },
     )
 

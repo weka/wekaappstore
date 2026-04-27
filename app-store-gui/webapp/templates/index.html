@@ -274,12 +274,24 @@
               addon: true
             },
             {
-              title: 'Glocomp - Aurora',
+              title: 'Aurora',
               desc: 'Flood intelligence Platform that delivers realtime analysis to operators leveraging WEKA\'s NeuralMesh AIDP.',
               href: '/blueprint/glocomp-aurora',
               tags: ['Partner'],
               category: 'partner',
-              comingSoon: true
+              {% if glocomp_logo_b64 %}logo: 'data:image/png;base64,{{ glocomp_logo_b64 }}',{% endif %}
+              logoAlt: 'Glocomp / Keppel',
+              inlineLogo: true
+            },
+            {
+              title: 'TokenVisor Enterprise',
+              desc: 'Provide self-service access to approved AI while enforcing routing, budgets, rate limits, and guardrails across external models and self-hosted inference managed by TokenVisor.',
+              href: '/blueprint/tokenvisor-enterprise',
+              tags: ['Partner'],
+              category: 'partner',
+              {% if tokenvisor_logo_b64 %}logo: 'data:image/png;base64,{{ tokenvisor_logo_b64 }}',{% endif %}
+              logoAlt: 'TokenVisor',
+              stackedLogo: true
             }
           ];
 
@@ -310,7 +322,20 @@
                         h(Stack, { direction: 'row', spacing: 1, sx: { mb: 1 } },
                           ...(it.tags || []).map((t, i) => h(Chip, { key: i, size: 'small', label: t }))
                         ),
-                        h(Typography, { variant: 'h6', component: 'h3', sx: { mt: 0.5 } }, it.title),
+                        it.logo && it.inlineLogo
+                          ? h(Box, { sx: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5, mt: 0.5, width: '100%' } },
+                              h(Typography, { variant: 'h4', component: 'h3', sx: { m: 0, fontWeight: 700 } }, it.title),
+                              h('img', { src: it.logo, alt: it.logoAlt || it.title, style: { height: 40, maxWidth: '55%', objectFit: 'contain' } })
+                            )
+                          : null,
+                        it.logo && it.stackedLogo && h(Box, { sx: { display: 'flex', justifyContent: 'flex-end', mt: 0.5, width: '100%' } },
+                          h('img', { src: it.logo, alt: it.logoAlt || it.title, style: { height: 56, maxWidth: '70%', objectFit: 'contain' } })
+                        ),
+                        it.logo && it.stackedLogo && h(Typography, { variant: 'h4', component: 'h3', sx: { mt: 1, textAlign: 'left', fontWeight: 700 } }, it.title),
+                        it.logo && !it.inlineLogo && !it.stackedLogo && h(Box, { sx: { display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 1, mb: 0.5, height: 48 } },
+                          h('img', { src: it.logo, alt: it.logoAlt || it.title, style: { maxHeight: '100%', maxWidth: '85%', objectFit: 'contain' } })
+                        ),
+                        !(it.logo && (it.inlineLogo || it.stackedLogo)) && h(Typography, { variant: 'h6', component: 'h3', sx: { mt: 0.5 } }, it.title),
                         h(Typography, { variant: 'body2', sx: { color: 'text.secondary', mt: 1 } }, it.desc)
                       )
                     ),
