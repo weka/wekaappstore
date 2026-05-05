@@ -1,201 +1,185 @@
-# Project Research Summary — v4.0 App Categories
+# Research Summary: v5.0 AppStack Variable Substitution
 
-**Project:** WEKA App Store — v4.0 App Categories on Home Screen
-**Domain:** Brownfield single-file CDN-React feature addition
-**Researched:** 2026-04-21
-**Overall confidence:** HIGH
+**Project:** WEKA App Store Operator — OpenClaw MCP Tools
+**Milestone:** v5.0 AppStack Variable Substitution
+**Domain:** Brownfield Kubernetes operator — additive feature to Kopf-based Python operator
+**Researched:** 2026-05-06
+**Confidence:** HIGH
+
+---
 
 ## Executive Summary
 
-The v4.0 App Categories feature is a focused brownfield addition to a single Jinja template (`app-store-gui/webapp/templates/index.html`). The existing page already loads React 18, MUI 5.15, and Emotion via CDN with no build step. Every component the feature requires — `Card`, `CardActionArea`, `CardContent`, `Chip`, `Typography`, `Grid`, `Box` — is already destructured and in use. The implementation is purely additive inside the existing inline `<script>` block. No new files, no new CDN dependencies, no Python changes, no build pipeline changes.
+The v5.0 milestone adds `spec.appStack.variables` to the `WekaAppStore` CRD and a `render()` helper using Python's stdlib `string.Template` to substitute `${VAR}` tokens into `kubernetesManifest` strings and into `valuesFiles` content (loaded from ConfigMaps/Secrets) before they reach `kubectl apply` or Helm. The change is confined to three files — `operator_module/main.py`, `weka-app-store-operator-chart/templates/crd.yaml`, and `mcp-server/tools/validate_yaml.py` — with no new runtime dependencies. The AIDP blueprint is the primary motivating case: 17 hardcoded `namespace: rag` literals and multiple DNS names in ConfigMap values cannot be portably overridden today without an external search-and-replace.
 
-The recommended pattern is PRD Option A: a single React root wrapping a new `AppShell` component that lifts `ThemeProvider` out of `Catalog`, owns `selectedCategory` state via `useState`, and renders `Categories` and `Catalog` as siblings. The four structural moves are: (1) add `category: '<key>'` to each of the 5 `items` entries, (2) define a `CATEGORIES` constant, (3) write `AppShell`, `Categories`, and `EmptyState` components using the existing `h()` createElement convention, and (4) replace `root.render(h(Catalog))` with `root.render(h(AppShell))`. The entire changeset is confined to one file.
+The recommended implementation uses `Template.substitute()` (strict mode) rather than `safe_substitute()`, making undefined variable references hard errors (`kopf.PermanentError`) surfaced at apply time with the offending variable name and component in the message. `string.Template` was confirmed correct via live Python 3.10 execution — it is the only option in the candidate set that is JSON-safe (leaves `{"auths": {}}` untouched) while requiring zero new dependencies. All 10 table-stakes features expected by engineers familiar with Flux, Kustomize, and ArgoCD substitution are covered by the PRD.
 
-The top risks are all implementation-detail risks, not design or dependency risks. Writing JSX in a no-build codebase will crash the page. Calling `history.replaceState` on mount corrupts the back stack. Copying `component: 'a'` from the existing catalog `CardActionArea` onto category cards produces `<a>` elements instead of `<button>` elements, breaking toggle semantics and `aria-pressed`. Each is a one-line fix once caught, but all three are invisible until QA.
+The most significant implementation risk is a backward-compatibility flaw in the PRD's own guard logic: the `${namespace}` auto-default makes the variables dict always non-empty, so the `if not variables` guard in `render()` is never True, which causes `Template.substitute()` to run on every existing `kubernetesManifest` string — including the shell scripts already in `cluster_init/app-store-cluster-init.yaml` (which contain bare `$CRDS`, `$CRD`, `$MISSING`, `$GATEWAY_API_URL`). This triggers `KeyError` on first reconcile after upgrade. The fix is a single pre-scan guard: `if not re.search(r'\$\{[^}]+\}', text): return text`. This makes the feature truly opt-in — only `${VAR}` tokens with braces trigger substitution — and simultaneously mitigates the NGC `$oauthtoken` bare-identifier risk. This guard is the foundation of the implementation and must be the first thing written.
 
-## PRD Reconciliation
+---
 
-Research confirms the PRD without material disagreement. No daylight between them.
+## Key Findings
 
-| PRD Element | Research Verdict |
-|---|---|
-| Option A (single root, lifted ThemeProvider) | CONFIRMED — ARCHITECTURE.md independently reaches the same conclusion |
-| No new CDN deps | CONFIRMED — STACK.md verified all required APIs are in the existing bundle |
-| Hash fragment over query string | CONFIRMED — hash is correct for client-side-only Jinja template |
-| `history.replaceState` not `pushState` | CONFIRMED — three research files converge |
-| `aria-pressed` on `CardActionArea` | CONFIRMED — ButtonBase forwards `aria-*` props to native `<button>` |
-| Single `category` value (not array) | CONFIRMED — array is v4.1+ |
-| Default state = All | CONFIRMED — universal convention |
-| Category order: NeuralMesh AIDP → WARP → Partner | CONFIRMED — first-party core → first-party extended → third-party |
-| Single-file scope | CONFIRMED — all research files treat this as inviolable |
+### Recommended Stack
 
-## PRD Open Questions — Resolved by Research
+The operator runtime is locked (Python/Kopf). No new technology is being introduced. `string.Template` (stdlib) is the only option satisfying all constraints simultaneously: JSON-safe (leaves `{"auths": {}}` untouched), zero new runtime dependency, `$$` escape, strict `KeyError` on undefined. `str.format()` crashes immediately on any `{`-containing string. Jinja2 has `{{ }}` collision with Kubernetes JSON content and adds a runtime dependency. `re.sub` custom regex has no documented escape mechanism. Verified by local Python 3.10.9 execution against real AIDP manifests.
 
-| # | Question | Research Answer | Confidence |
-|---|---|---|---|
-| 1 | Blueprint → category mapping | **Requires confirmation from Chris.** PRD's proposed defaults are internally consistent and can be shipped pending confirmation. | N/A — owner decision |
-| 2 | "NeuralMesh AIDP" vs spelled-out label | Acronym-first title; one-line description provides spelled-out form; `aria-label` with full name is v4.1 polish. | HIGH |
-| 3 | Partner empty state copy | "No apps in this category yet." is correct for launch. CTA is a PMM decision; defer. | HIGH |
-| 4 | Default landing state | All. Field-team demo deep links to `/#category=neuralmesh-aidp` handle that use case without changing the default. | HIGH |
-| 5 | Category order | NeuralMesh AIDP → WARP → Partner is correct. | MEDIUM |
-| 6 | Single value vs array | Single value for v4.0. | HIGH |
+**Core technologies:**
+- `string.Template` (stdlib, Python 3.10): `${VAR}` substitution — JSON-safe, zero new dep, `$$` escape, strict `KeyError` on undefined. Verified by local execution.
+- `kopf.PermanentError` (already imported): Non-retriable failure on undefined variable reference — correct kopf idiom already used elsewhere.
+- `PyYAML` (already in use): No change — substitution runs on raw string *before* `yaml.safe_load`.
 
-**Open Question 1 is the only unresolved item.** It does not block planning or architecture work — only Step 1 (data preparation) needs owner confirmation before being marked done.
+**Dev/test only:**
+- `pytest-subprocess` 1.5.4: Mock `subprocess.run` calls to `kubectl`/`helm` in `operator_module/tests/`.
+- `operator_module/requirements-dev.txt`: New file; keep test deps out of runtime `requirements.txt`.
 
-## Stack
+**CRD schema:** `additionalProperties: { type: string }` confirmed safe — identical pattern already in production at `crd.yaml:184` for `matchLabels`. Do NOT add `x-kubernetes-preserve-unknown-fields: true`.
 
-The stack is locked. The only change to destructure blocks:
+### Expected Features
 
-```javascript
-// Line 166 — add useState and useEffect:
-const { createElement: h, useMemo, useState, useEffect } = React;
-```
+**Must have (table stakes) — all covered by PRD:**
+- `${VAR}` syntax resolves in `kubernetesManifest` strings and `valuesFiles` content
+- Undefined variable raises `kopf.PermanentError` naming the variable AND component at apply time
+- `$$` escapes a literal dollar sign (stdlib behavior, free)
+- CRD schema declares `variables` with `additionalProperties: { type: string }`
+- Existing CRs without `variables:` continue to work identically (non-negotiable constraint)
+- Validator accepts `variables:` block without spurious error
+- README docs: syntax, escape, auto-default, strict-failure
+- Substitution in both `kubernetesManifest` AND `valuesFiles` content (including Secret-backed — Q1 resolved YES)
+- `${namespace}` auto-defaults to CR's `metadata.namespace`
 
-No new MUI component names. No new `<script>` tags. No Python changes.
+**Should have (differentiators):**
+- Variables inline in CR — single-file portability, no external ConfigMap/Secret required
+- Strict-fail from day one (Flux took years and a feature gate)
+- JSON-safe by design — zero breakage on Docker registry auth payloads
+- `PermanentError` with named variable + component — no log diving
+- Validator soft-warning on hardcoded `.svc.cluster.local` DNS names and `namespace:` literals
 
-**In use:**
-- React 18.3.1 UMD — `useState` (lazy initializer for hash init), `useEffect` (hash write after state change), `createElement` aliased as `h`
-- MUI 5.15.14 UMD — `Card`, `CardActionArea`, `CardContent`, `Chip`, `Typography`, `Grid`, `Box`, `ThemeProvider`, `CssBaseline`
-- `history.replaceState` + `window.location.hash` — browser built-ins
-- Emotion 11.11 — already loaded as MUI peer dep
+**Defer to v5.1+:**
+- `targetNamespace: ${namespace}` (Q2 resolved: DEFER — dropping `targetNamespace` achieves the same result; document the cliff)
+- `status.conditions[type=VariablesResolved]` (Q3 resolved: NO resolved-values map in status — sensitive; optional condition boolean is v5.1)
+- Default-value syntax, inline `values:` recursion, external variable sources
 
-## Features
+### Architecture Approach
 
-**Must have (v4.0 P1):**
-- `category` field on all 5 `items[]` entries — atomic prerequisite
-- 3-card `Categories` row above `#catalog`, inside the same `ThemeProvider`
-- Single-select toggle (click active = return to All)
-- Visual selected state: purple border + glow; unselected at `opacity: 0.7`
-- Client-side filter: `items.filter(i => selected === 'all' || i.category === selected)`
-- URL hash sync: `replaceState` on change; lazy `useState` initializer on mount
-- Empty state: "No apps in this category yet."
-- `aria-pressed` on `CardActionArea`; keyboard Enter/Space via native `<button>`
-- Mobile-responsive: `xs={12} md={4}`
-- Live "N apps" count `Chip` per card (PRD "Should pass" — treat as P1)
+The feature threads a stateless `render()` helper through exactly two execution paths inside `handle_appstack_deployment`. No new processes, controllers, or external services. Variables dict built once at stack scope (before the component loop at `main.py:~555`), passed by reference into both paths. Kopf decorators do not wrap handler functions, so `render()` and `load_values_from_reference()` are directly callable in pytest.
 
-**Should have (v4.1):**
-- "Show all" explicit affordance when a category is active
-- 150ms opacity fade on grid during switch
-- CTA copy for Partner empty state (PMM)
-- `aria-label` with spelled-out "NeuralMesh AI Data Platform"
+**Major components:**
+1. `render(text, variables)` — new pure function; pre-scan guard is the backward-compat foundation; catches both `KeyError` (undefined) and `ValueError` (malformed placeholder `${}`)
+2. `load_values_from_reference` signature extension — new `variables=None` default; render call between raw-string fetch and `yaml.safe_load`; `handle_helm_deployment` single-chart path at `main.py:~885` uses `variables=None` default — do NOT touch that call site
+3. `handle_appstack_deployment` wiring — variables dict construction at `~line 555`; render call in manifest branch at line 727; call-site update at `~line 675`
+4. CRD schema addition — `variables:` sibling of `components:`; optional, no `required:`
+5. Validator soft-warning — non-blocking; `valid` stays `True`; also validates key names (identifier pattern) and value types
+6. `operator_module/tests/` — new directory (does not currently exist); `__init__.py` + `test_render.py` + `test_appstack.py`
 
-**Defer (v5+):**
-- Sort controls, search input, multi-select, per-category icons, analytics
+### Critical Pitfalls
 
-## Architecture
+1. **PRD backward-compat guard is broken (CRITICAL)** — `${namespace}` auto-default makes `variables` always non-empty; `if not variables` guard never triggers; `cluster_init/app-store-cluster-init.yaml` has shell scripts with `$CRDS`, `$CRD`, `$MISSING`, `$GATEWAY_API_URL` in `kubernetesManifest:` blocks that will raise `KeyError` on first reconcile after upgrade. Fix: `if not re.search(r'\$\{[^}]+\}', text): return text` as the FIRST thing in `render()`. Not optional.
 
-PRD Option A is authoritative. Component tree:
+2. **`$oauthtoken` in NGC credentials (CRITICAL — mitigated by fix for Pitfall 1)** — NGC Docker credential format uses `$oauthtoken` as username in JSON. `Template.substitute()` raises `KeyError('oauthtoken')` on bare `$identifier`. The Pitfall 1 pre-scan guard prevents this (no braces = no match = Template never called). Defense-in-depth: store NGC secrets in `data:` (base64) not `stringData:`.
 
-```
-AppShell                  — owns selectedCategory state, ThemeProvider, hash sync
-  ThemeProvider
-    CssBaseline
-    Box (flex column)
-      Categories          — pure; receives categories, selected, counts, onSelect
-      EmptyState          — pure; rendered by AppShell when filteredItems.length === 0
-      Catalog             — pure; receives pre-filtered items prop
-```
+3. **Variable values are NOT recursively resolved (PRD example is wrong)** — The PRD's `milvusHost: milvus.${namespace}.svc.cluster.local` example does NOT work. `Template.substitute()` is single-pass. `${milvusHost}` resolves to the literal string `milvus.${namespace}.svc.cluster.local` — the inner `${namespace}` is never further substituted. AIDP migration must use fully-resolved variable values. README must NOT ship the PRD's cross-referencing variable pattern as a documented example.
 
-**State design:**
-- `selectedCategory` in `AppShell` via `useState` with lazy initializer reading hash synchronously
-- `filteredItems` and `counts` derived inline in render — no `useMemo` needed at 5 items
-- Hash write: `useEffect([selectedCategory])` → `history.replaceState`
-- `onSelect` passed to `Categories` is `setSelectedCategory` directly
+4. **Both `KeyError` AND `ValueError` must be caught** — `Template.substitute()` raises `ValueError` for malformed placeholders (`${}`, `${123}`), not `KeyError`. PRD only catches `KeyError`. A `ValueError` with no component name in scope produces a confusing generic error message. Both must be caught at every call site.
 
-**DOM changes:**
-- `<div id="catalog-root">` → `id="app-root"` (or keep id, rename variable)
-- `createRoot(el).render(h(AppShell))` replaces `render(h(Catalog))`
-- No new HTML elements in the Jinja template
+5. **Variable key names must be valid Python identifiers** — CRD permits arbitrary map keys; `string.Template` requires `[_a-zA-Z][_a-zA-Z0-9]*`. Key `my-host` produces `ValueError`. Add key-name validation when building the variables dict. Validator should also flag this.
 
-## Critical Pitfalls (BLOCKERS)
+6. **`on.update` reconcile storm (pre-existing, amplified)** — Bare `@kopf.on.update` fires on operator's own status patches. Add `field='spec'` filter to the decorator. Include in Phase 3.
 
-1. **JSX syntax** — One `<Box>` blanks the entire page. Every element must use `h(Component, props, children)`. Grep defense: `<[A-Z]` → zero matches required.
-2. **`replaceState` on mount** — Overwrites the original browser history entry; breaks "one back press leaves the site." Initialization is read-only.
-3. **`component: 'a'` on category `CardActionArea`** — Toggles, not links. Must default to `<button>`. DOM must show `<button aria-pressed="...">`, not `<a>`.
-4. **Hash collision with `#catalog` / `#planning-studio`** — Parser must use `startsWith('#category=')` plus key validation against `['neuralmesh-aidp', 'warp', 'partner']`.
-5. **`ThemeProvider` not lifted out of `Catalog`** — PRD success criterion 9 requires one `ThemeProvider` wrapping both components.
+7. **`handle_helm_deployment` single-chart path must NOT receive variables wiring** — `variables=None` default protects this call site. Lock it with a unit test.
 
-## Cross-Cutting Constraints (Apply to Every Task)
+---
 
-| Constraint | Implication |
-|---|---|
-| No JSX — `h()` only | Every component in `h(Component, props, children)` form |
-| No new dependencies | Zero new `<script>` tags; zero new CDN loads |
-| Single-file scope | All changes inside `index.html` inline `<script>` |
-| `component: 'a'` forbidden on category `CardActionArea` | Toggle buttons, not links |
-| `ThemeProvider` in `AppShell`, not `Catalog` | One provider wraps both |
-| `replaceState` never called on mount | Initialization is read-only |
+## Implications for Roadmap
 
-## Watch Out For (Top 5)
+Recommended 5-phase split (Phase 4 parallel-shippable with Phases 2–3; Phase 5 separate repo):
 
-1. **JSX syntax** — blank page, silent failure. Grep is the defense.
-2. **`component: 'a'` copy-paste** — DevTools check: DOM shows `<button>`, not `<a>`.
-3. **`replaceState` in init code** — Back button test: `/#category=warp` → Back → leave the site.
-4. **`ThemeProvider` left inside `Catalog`** — Category cards render in default MUI light theme.
-5. **Hash collision** — Selecting category + clicking "Explore Blueprints" → category state must not reset.
+### Phase 1: `render()` Helper + Test Scaffolding
 
-## Phase 15 Build Order (authoritative)
+**Rationale:** The pre-scan guard is the foundation of all backward-compat correctness. Write and test `render()` before wiring it into live handler paths. `operator_module/tests/` does not exist yet — create it here.
 
-### Step 1: Data Preparation (no behavior change)
+**Delivers:** `render()` with `_SUBST_RE` pre-scan guard; `operator_module/tests/__init__.py` + `test_render.py`; `operator_module/requirements-dev.txt`
 
-**Delivers:** `category: '<key>'` on all 5 `items[]` entries; `CATEGORIES` constant inside the IIFE.
-**Verifiable:** Page renders identically; new fields unused until Step 3.
-**Research flag:** Requires Chris to confirm blueprint mapping (Open Question 1) before sign-off.
+**Addresses:** Pitfalls 1, 2, 3, 4
 
-### Step 2: AppShell Extraction + Catalog Refactor (structural, zero new UI)
+---
 
-**Delivers:** `AppShell` owns `ThemeProvider` + `CssBaseline`. `Catalog` accepts `items` prop. `root.render(h(AppShell))`. No filter, no `Categories`, no `useState`.
-**Verifiable:** Pixel-identical output; no new behavior.
-**Avoids:** Pitfalls 4 and 5.
+### Phase 2: CRD Schema Update
 
-### Step 3: Categories Component, Filter State, Hash Sync
+**Rationale:** Additive and independently deployable. Must land before new CRs with `variables:` can pass Kubernetes admission validation. Zero operator risk.
 
-**Delivers:**
-- `Categories` component (3 cards, `aria-pressed`, count `Chip`, visual states)
-- `EmptyState` component
-- `useState` lazy initializer for `selectedCategory`
-- `filteredItems` and `counts` as derived values
-- `useEffect([selectedCategory])` writing hash via `replaceState`
-- React destructure extended with `useState` and `useEffect`
+**Delivers:** `variables:` field under `spec.properties.appStack.properties` in `crd.yaml`; description documents syntax, auto-default, `$$` escape, and identifier requirement
 
-**Avoids:** All five critical pitfalls.
+---
 
-**Research flags per step:** None require `/gsd:research-phase`. All patterns fully specified.
+### Phase 3: Operator Wiring
+
+**Rationale:** With `render()` tested (Phase 1) and CRD schema deployed (Phase 2), wiring is safe. Three discrete edits to `main.py`. This is the phase that delivers the user-visible feature.
+
+**Delivers:** Variables dict construction with key-name validation; `load_values_from_reference` signature extension + render call; manifest branch render call; both call sites wired; `test_appstack.py`; README user-facing doc; `field='spec'` filter on `@kopf.on.update`; fetch-error upgrade to `TemporaryError`
+
+**PRD open questions resolved:** Q1=YES (Secret valuesFiles), Q2=DEFER (targetNamespace to v5.1), Q3=NO resolved-values map (sensitive); optional condition deferred to v5.1
+
+---
+
+### Phase 4: Validator Soft-Warning + New Fixture (parallel-shippable)
+
+**Rationale:** No dependency on operator code. Standalone PR. Can merge any time after Phase 1 establishes what a valid `variables` block looks like.
+
+**Delivers:** `validate_yaml.py` soft-warning for hardcoded DNS + `namespace:` literals; variable key/type validation raising `errors`; `test_validate_yaml.py` extensions; `ai-research-portable.yaml` fixture
+
+---
+
+### Phase 5: AIDP Migration (Separate Repo — after Phases 1–3 deployed)
+
+**Rationale:** End-to-end smoke test. Separate PR against `aidp` repo. Only start after Phases 1–3 are deployed and cluster-verified.
+
+**Delivers:** `weka-aidp-appstack.yaml` migrated with fully-resolved variable values; 17 `namespace: rag` literals → `${namespace}`; `aidp-site-config.yaml` DNS literals → variable references; NGC secrets in `data:` (base64) not `stringData:`
+
+---
+
+### Phase Ordering Rationale
+
+- Phase 1 before Phase 3: `render()` must exist and be tested before live handler wiring
+- Phase 2 before Phase 5: CRD schema must be in cluster before new CRs with `variables:` pass admission; in single-PR atomic deployment, Phase 2 and 3 ship together
+- Phase 4 is parallel to 2 and 3: validator has no operator code dependency
+- Phase 5 is a separate-repo follow-up: requires cluster deployment of Phases 1–3
+
+The pre-scan guard in `render()` (Phase 1) is not optional polish — it is the architectural decision that determines whether the feature is backward-compatible. Every subsequent phase's correctness depends on it.
+
+### Research Flags
+
+No phases require `/gsd-research-phase` during planning. All unknowns were resolved during this research cycle with HIGH confidence from direct source inspection and local code execution.
+
+---
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
-|---|---|---|
-| Stack | HIGH | All claims verified against live `index.html` source and official MUI/React docs |
-| Features | HIGH | Table-stakes verified against MD3 spec, WCAG 2.2, comparable platforms; PRD open questions 2–6 resolved |
-| Architecture | HIGH | Based on direct code inspection of lines 150–310 of `index.html` |
-| Pitfalls | HIGH | All 10 pitfalls verified against actual source |
+|------|------------|-------|
+| Stack | HIGH | `string.Template` verified by local Python 3.10.9 execution; all alternatives disqualified by concrete test results |
+| Features | HIGH | 10 table-stakes features verified against Flux/Kustomize/ArgoCD; all 3 PRD open questions resolved with rationale |
+| Architecture | HIGH | All integration points at file:line precision from direct source inspection; data flow confirmed |
+| Pitfalls | HIGH | All 13 pitfalls verified by executing code paths against real operator source; Pitfall 1 flaw confirmed by running Template against real `cluster_init/` manifests |
 
-**Gaps to address:**
+**Overall confidence: HIGH**
 
-- **Open Question 1 (blueprint mapping):** OSS RAG and NVIDIA VSS placement requires Chris's confirmation. Blocks only Step 1 sign-off.
-- **`focusVisibleClassName` on `CardActionArea`:** PITFALLS.md recommends `focusVisibleClassName: 'Mui-focusVisible'` to prevent focus ring loss after re-render. Implement proactively.
-- **Opacity cascade on count Chip:** At `opacity: 0.7`, Chip inherits dimming. WCAG AA contrast maintained (~8.5:1 effective ratio). Acceptable; visual QA should verify.
+### Gaps to Address
 
-## Sources
-
-**Primary (HIGH):**
-- `app-store-gui/webapp/templates/index.html` lines 1–330 — ground truth
-- MUI 5.15.14 UMD bundle header
-- `mui.com/material-ui/api/card-action-area/`
-- `developer.mozilla.org/en-US/docs/Web/API/History/replaceState`
-- `react.dev/reference/react/useState`
-- `react.dev/learn/sharing-state-between-components`
-- `w3.org/2001/tag/doc/hash-in-url`
-- WCAG 2.2 / `aria-pressed` spec
-
-**Secondary (MEDIUM):**
-- Material Design 3 chips guidelines
-- Remy Sharp "How tabs should work"
-- LogRocket filtering UX best practices
-- Pencil & Paper enterprise filtering analysis
-- GitHub Marketplace, Hugging Face Models, VS Code Marketplace — comparative analysis
+- **PRD `milvusHost` example must be corrected in README:** The PRD's cross-referencing variable syntax does not work (single-pass). README must show fully-resolved values only.
+- **Fetch-error handling in `load_values_from_reference`:** Upgrade transient fetch errors to `kopf.TemporaryError` (not silent `{}` return) to resolve Pitfall 5 asymmetry.
+- **`@kopf.on.update` `field='spec'` filter is pre-existing debt:** Phase 3 should include this fix regardless of the variables feature.
+- **Single-helm path behavior must be locked by test:** `handle_helm_deployment` at `main.py:~885` must NOT receive `variables` wiring. A unit test must lock this explicit non-behavior.
 
 ---
 
-**Ready for Requirements.** The research is complete and internally consistent. Phase 15 can be planned with the 3-step build order as the authoritative task sequence. The only prerequisite before locking Step 1 is Chris's confirmation on Open Question 1.
+## Sources
+
+**Primary (HIGH confidence):** Direct codebase inspection at `operator_module/main.py` (lines 352–803, 885, 1015–1027), `crd.yaml` (all 259 lines, specifically line 184), `mcp-server/tools/validate_yaml.py`, `cluster_init/app-store-cluster-init.yaml` (lines 143–158); Python 3.10.9 local execution confirming all Template behaviors; Python stdlib docs for `string.Template`; `pytest-subprocess` 1.5.4 PyPI metadata.
+
+**Secondary (MEDIUM confidence):** Flux postBuildSubstitutions docs; kopf testing docs (KopfRunner is integration-only); Kubernetes issue #104137 (`additionalProperties` bug, pre-dates current cluster versions); ArgoCD, Kustomize docs for feature comparison.
+
+---
+
+*Research completed: 2026-05-06*
+*Ready for roadmap: yes*
