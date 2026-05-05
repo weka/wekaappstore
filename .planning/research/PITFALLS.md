@@ -1,324 +1,274 @@
-# Pitfalls Research
+# Pitfalls Research: AppStack Variable Substitution
 
-**Domain:** CDN-React category filter + URL-hash sync on existing Flask/Jinja + MUI 5.15 + Tailwind single-file template
-**Researched:** 2026-04-21
-**Confidence:** HIGH (all findings verified against the actual `index.html` source)
+**Domain:** Adding `${VAR}` substitution to a Kopf-based Kubernetes operator
+**Researched:** 2026-05-06
+**Confidence:** HIGH — all pitfalls verified by executing the actual code paths against the real operator source
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: Hash Parsing Collision With Existing Scroll Anchors
+### Pitfall 1: Auto-Default Destroys Backward Compatibility
 
-**Severity:** BLOCKER
+**What goes wrong:** The PRD claims substitution is opt-in and "existing CRs without `variables:` produce byte-identical output." This claim is false as implemented. The proposed code builds `variables = {'namespace': namespace, **(app_stack.get('variables') or {})}` and then calls `render(text, variables)`. Because `variables` is always non-empty (it always contains at least `{'namespace': cr_namespace}`), the guard `if not variables` in `render()` is never True. `Template(text).substitute(variables)` runs on every `kubernetesManifest` string and every `valuesFiles` content — regardless of whether the CR uses `${...}` at all.
 
-**What goes wrong:**
-The page already has `href="#catalog"` (line 82) and `href="#planning-studio"` (line 83) as native browser scroll anchors. If the category filter reads `window.location.hash` with a simple equality check (`=== '#category=warp'`) it will work, but the reciprocal risk is real: if the mount-time hash reader interprets any hash that doesn't start with `#category=` as a signal to reset to All, it introduces no bug today but breaks silently the moment a future anchor is added whose name accidentally matches a prefix. More concretely: a naive reader that does `if (hash.includes('category'))` would fire on `#my-category-list` or similar future anchors.
+**Root cause:** The PRD conflates "user did not set `variables:`" with "variables dict is empty." The auto-default injection (`${namespace}` to CR namespace) is correct behavior, but it invalidates the backward-compat guard.
 
-The correct parse is a **strict prefix-match with key extraction**:
+**Concrete break already in the repo:** `cluster_init/app-store-cluster-init.yaml` has shell scripts in multiple `kubernetesManifest:` blocks (lines 143-158) containing `$CRDS`, `$CRD`, `$MISSING`, `$GATEWAY_API_URL`. These are shell environment variables — not substitution references. `string.Template.substitute()` raises `KeyError('CRDS')` on the first one. This CR will fail to deploy the instant the operator upgrade is applied, with no user action required to trigger the break.
 
-```javascript
-function parseCategoryHash() {
-  const raw = window.location.hash; // e.g. "#category=warp"
-  if (!raw.startsWith('#category=')) return 'all';
-  const key = raw.slice('#category='.length); // 'warp', 'neuralmesh-aidp', 'partner'
-  const valid = ['neuralmesh-aidp', 'warp', 'partner'];
-  return valid.includes(key) ? key : 'all';
-}
+**Prevention:** Replace `if not variables` with a pre-scan for `${...}` patterns using `re.search(r'\$\{[^}]+\}', text)`. This makes render a pure no-op on texts that contain no `${...}` patterns, regardless of what is in the variables dict.
+
+```python
+_SUBST_RE = re.compile(r'\$\{[^}]+\}')
+
+def render(text: str, variables: dict) -> str:
+    if not text or not _SUBST_RE.search(text):
+        return text  # fast path: no ${...} patterns present
+    return Template(text).substitute(variables)
 ```
 
-The exact condition to check is: `raw.startsWith('#category=')`. Any hash that does not start with exactly `#category=` must be ignored by the category system and left for the browser to handle as a scroll anchor.
+Shell scripts, PromQL, regex, env references all pass through untouched unless they contain `${...}` brace syntax. Note: bare `$IDENTIFIER` (without braces) is NOT a substitution pattern in this design — only `${IDENTIFIER}` is.
 
-**Why it happens:**
-Developers treat `window.location.hash` as a clean namespace. In this page it is not — the hero CTA buttons hard-code `#catalog` and `#planning-studio` as href values, so those fragments are already in regular user flows. A category click that does `window.location.hash = '#category=warp'` will not interfere with those anchors, but any mount-time code that doesn't parse `#catalog` correctly will incorrectly suppress the All-state default.
+**Warning signs:** `KeyError` on an ALL-CAPS name in `kopf.PermanentError` message (shell env vars are uppercase by convention). Any component that embeds bash, PromQL series queries, or annotation values containing `$`.
 
-**How to avoid:**
-Always parse with `startsWith('#category=')` first. Validate the extracted key against the enum `['neuralmesh-aidp', 'warp', 'partner']` and fall back to `'all'` for anything unrecognized, including `''` (no hash) and `'#catalog'`.
-
-**Warning signs:**
-- Category cards re-render on first load even when the URL has `#catalog` or `#planning-studio`
-- Clicking "Explore Blueprints" (href `#catalog`) somehow triggers a category filter change
-
-**Phase to address:**
-Phase 15 — Task: URL hash sync implementation. Must be in the first task that touches `window.location.hash`.
+**Phase to address:** Operator core — before any code is written. The guard logic is the foundation of backward compat.
 
 ---
 
-### Pitfall 2: History Pollution From `replaceState` Called With the Same Hash
+### Pitfall 2: `$oauthtoken` in NVIDIA NGC Credentials Breaks the "JSON is Safe" Claim
 
-**Severity:** BLOCKER (for "should pass" criterion: back button leaves the page in one press)
+**What goes wrong:** The PRD states "`string.Template` only matches `$identifier` and `${identifier}`. It leaves `{...}` alone." This is incomplete. The full truth is that `string.Template` leaves bare `{...}` alone but DOES match bare `$identifier` patterns — and `$oauthtoken` is a valid Python identifier. NVIDIA NGC's Docker credential format uses the literal string `$oauthtoken` as the username: `{"auths":{"nvcr.io":{"username":"$oauthtoken","password":"TOKEN"}}}`. If this JSON is stored in a `kubernetesManifest:` using `stringData:` (plaintext), `Template.substitute()` raises `KeyError('oauthtoken')`.
 
-**What goes wrong:**
-The PRD requires that `history.replaceState` be used so clicking categories does not fill the back stack. `replaceState` does overwrite the current entry, so repeated clicks on different categories produce only one history entry — correct. However, there is a footgun at mount time: if the component reads the hash on mount AND calls `replaceState` during initialization (e.g. to normalize the URL), it replaces the entry the browser created when navigating to the page. The user then cannot press Back to leave the site because the `replaceState` has overwritten the original entry.
+**Confirmed by experiment:** `Template('{"auths":{"nvcr.io":{"username":"$oauthtoken"}}}').substitute({'namespace': 'foo'})` raises `KeyError: 'oauthtoken'`.
 
-Additionally, `replaceState` is not a no-op when called with the same URL — unlike `window.location.hash = '#same-value'` (which browsers silently skip if the hash is identical), `replaceState` always executes and in some browsers marks the entry as programmatically replaced, which can affect the `popstate` event listener behavior.
+**Root cause:** The PRD's "JSON-safe" reasoning only accounts for curly-brace interference, not for `$identifier` patterns embedded in JSON string values.
 
-The correct pattern:
+**Prevention (two layers):**
+1. If the fast-path guard from Pitfall 1 is implemented (only run Template when `${...}` is present), this issue is fully mitigated — `$oauthtoken` without braces is a bare `$identifier` pattern which the `_SUBST_RE` fast-path does not match, so Template is never called on such content.
+2. As a defense-in-depth migration strategy: store the `.dockerconfigjson` value as base64 in the Secret's `data:` field rather than plaintext in `stringData:`. Base64 character set (A-Za-z0-9+/=) contains no `$`, so there is zero collision regardless of engine choice.
 
-```javascript
-function setCategory(key) {
-  const next = key === 'all' ? window.location.pathname : `${window.location.pathname}#category=${key}`;
-  // Only call replaceState if the URL is actually changing
-  if (window.location.href !== (window.location.origin + next)) {
-    history.replaceState(null, '', next);
-  }
-  setSelected(key); // React state setter
-}
-```
+**Warning signs:** A `kubernetesManifest` component creating a `kubernetes.io/dockerconfigjson` Secret using `stringData:` and NGC registry URL. Add a unit test: render the full AIDP `aidp-bootstrap-secrets` manifest with `variables = {'namespace': 'foo'}` and assert no exception and byte-identical output.
 
-On mount, **do not call `replaceState` at all** — only read the current hash with `parseCategoryHash()` and call `setSelected(key)` with no history side effect.
-
-**Why it happens:**
-Developers conflate "sync the hash on mount" with "write the hash on mount." Initialization is a read operation, not a write. Writing on mount creates an entry or modifies the landing entry, corrupting the back stack.
-
-**How to avoid:**
-- Mount: read hash, call `setSelected`, do NOT call `history.replaceState`.
-- User click: call `history.replaceState` only when `key !== currentSelected` (to avoid redundant calls on double-click of the same card) and update React state.
-- Toggle off: call `history.replaceState(null, '', window.location.pathname)` (no hash) and set state to `'all'`.
-
-**Warning signs:**
-- Browser back button from the home page takes the user back to the home page (in All state) instead of leaving the site
-- Two back presses are required to leave the page after landing on `/#category=warp`
-
-**Phase to address:**
-Phase 15 — Task: URL hash sync implementation. Verifier checklist: open `/#category=warp` directly, press Back exactly once, confirm you leave the site.
+**Phase to address:** Operator core (fast-path guard covers this) + AIDP migration (prefer `data:` not `stringData:` for NGC secrets as defense-in-depth).
 
 ---
 
-### Pitfall 3: JSX Written in a Codebase That Uses Raw `React.createElement`
+### Pitfall 3: Variable VALUES Containing `${namespace}` Are Not Recursively Resolved
 
-**Severity:** BLOCKER (will throw a syntax error at runtime; page goes blank)
+**What goes wrong:** The PRD Product Outcome shows `variables: {milvusHost: "milvus.${namespace}.svc.cluster.local"}` as a recommended pattern. Users reading this assume `milvusHost` resolves to `milvus.rag.svc.cluster.local`. It does not. The operator builds the variables dict once — `{'namespace': 'rag', 'milvusHost': 'milvus.${namespace}.svc.cluster.local'}` — and substitutes into the TEXT. When `${milvusHost}` in the text is replaced, it becomes the literal string `milvus.${namespace}.svc.cluster.local`. The `${namespace}` inside the value is never resolved because `Template.substitute` is single-pass.
 
-**What goes wrong:**
-**Verified from code inspection:** `index.html` line 166 reads `const { createElement: h, useMemo } = React;`. The entire existing component — `Catalog`, all `Grid`, `Card`, `CardActionArea`, `Chip` calls — uses the `h(Component, props, ...children)` pattern throughout. There is no Babel-standalone script tag, no htm import, and no JSX anywhere in the file. CDN-loaded scripts are evaluated directly by the browser JS engine, which does not understand `<JSX />` syntax.
+**Confirmed by experiment:** `Template('url: ${milvusHost}').substitute({'namespace': 'rag', 'milvusHost': 'milvus.${namespace}.svc.cluster.local'})` returns `'url: milvus.${namespace}.svc.cluster.local'` — the inner `${namespace}` is not resolved.
 
-If any new code for the `Categories` component is written in JSX (even one line like `return <Box>...</Box>`), the browser will throw a `SyntaxError: Unexpected token '<'` and the entire inline script block will fail to execute. The catalog will also disappear because both components share the same IIFE.
+**Root cause:** `string.Template.substitute` is single-pass, not recursive. The PRD's usage example implies cross-variable resolution that the implementation does not provide.
 
-**How to avoid:**
-Every element in the `Categories` component must use `h()` calls matching the existing pattern:
+**Prevention:** Either (a) implement a pre-resolution pass on the variables dict itself before substituting into text, or (b) remove the cross-referencing example from the PRD and README and require fully-resolved values: `milvusHost: milvus.rag.svc.cluster.local`. Option (b) is correct for v1. Cross-variable resolution is a v2 feature. Add a unit test asserting single-pass behavior so the limitation is intentional and documented.
 
-```javascript
-// WRONG — will crash at runtime
-function Categories() {
-  return <Box sx={{ mb: 4 }}><Typography>Browse by category</Typography></Box>;
-}
+**Warning signs:** A user reports their DNS names contain literal `${namespace}` after deployment. The AIDP migration must use fully-resolved variable values or use `${namespace}` directly in the text, not inside another variable's value.
 
-// CORRECT — matches existing codebase convention
-function Categories({ selected, onSelect }) {
-  return h(Box, { sx: { mb: 4 } },
-    h(Typography, { variant: 'h6' }, 'Browse by category')
-  );
-}
-```
-
-**Warning signs:**
-- Blank page or missing catalog after adding the `Categories` component
-- Browser console shows `SyntaxError: Unexpected token '<'` pointing to the inline script
-
-**Phase to address:**
-Phase 15 — Every task that writes new React component code. Must be enforced as a code-review gate: grep the new component code for `<[A-Z]` (capital letter after `<`) — any match means JSX was accidentally used.
+**Phase to address:** Operator core + docs. README example must show fully-resolved variable values.
 
 ---
 
-### Pitfall 4: MUI `CardActionArea` `aria-pressed` Prop — Pass-Through Is Safe But Not Guaranteed to Render on the DOM Element
+### Pitfall 4: Bare `$identifier` Patterns Raise `ValueError` (Not `KeyError`) — Catch Both
 
-**Severity:** WARNING
+**What goes wrong:** When a manifest contains a malformed placeholder like `${}` or `${123}` (digit-start), `Template.substitute()` raises `ValueError: Invalid placeholder`, not `KeyError`. The proposed error handler only catches `KeyError` and re-raises as `kopf.PermanentError`. A `ValueError` propagates as a bare `Exception`, gets caught by the outer `except Exception as e` in the component loop (line 762), and produces `comp_status['message'] = "Error deploying component: Invalid placeholder in string: line X, col Y"` — no component name, no guidance on what to fix.
 
-**What goes wrong:**
-MUI `CardActionArea` extends `ButtonBase`, which in turn renders a native `<button>` element by default. MUI's ButtonBase forwards unrecognized props to the underlying DOM element via React's standard prop spreading. `aria-pressed` is a valid HTML attribute on `<button>`, so passing `{ 'aria-pressed': isSelected }` to `CardActionArea` will reach the DOM in MUI 5.15 — **but only when `component` is not overridden**. In the existing catalog, `CardActionArea` is used with `component: 'a'` (line 277), which renders an `<a>` element. `aria-pressed` on `<a>` is technically valid but less semantically natural than on `<button>`.
+Also affects: `$[regex]` patterns in PromQL queries embedded in ConfigMaps (e.g., the Prometheus adapter config in `cluster_init/`) — `$[A-Z]+` raises `ValueError` not `KeyError`. However, the Pitfall 1 fast-path guard prevents this if the ConfigMap content contains no `${...}` patterns.
 
-For category cards, `component` must NOT be set to `'a'` — the card is a toggle button, not a link. Leave `component` at its default (renders `<button>`), and pass `aria-pressed` directly:
+**Confirmed by experiment:** `Template('pattern: $[A-Z]+').substitute({'namespace': 'foo'})` raises `ValueError: Invalid placeholder in string: line 1, col 10`.
 
-```javascript
-h(CardActionArea, {
-  onClick: () => onSelect(cat.key),
-  'aria-pressed': selected === cat.key,
-  // Do NOT set component: 'a' — these are buttons not links
-}, /* children */)
+**Root cause:** `string.Template` has two failure modes (`KeyError` for undefined vars, `ValueError` for syntactically invalid placeholders), and the PRD's error handler only accounts for one.
+
+**Prevention:** Catch both at the call sites where component name is in scope:
+
+```python
+try:
+    manifest_yaml = render(component['kubernetesManifest'], variables)
+except KeyError as e:
+    raise kopf.PermanentError(
+        f"Undefined ${{{e.args[0]}}} in component {comp_name}.kubernetesManifest")
+except ValueError as e:
+    raise kopf.PermanentError(
+        f"Invalid placeholder syntax in component {comp_name}.kubernetesManifest: {e}")
 ```
 
-MUI 5.15 confirmed to forward `aria-*` props through ButtonBase's prop spreading to the native element. No `sx` override or wrapper is needed.
+**Warning signs:** `PermanentError` whose message contains "Invalid placeholder" without a variable name. Unit test: `render('$[A-Z]+', {'namespace': 'foo'})` where text contains `${foo}` (so fast-path activates) should raise a catchable error, not silently return.
 
-The secondary risk: if `aria-pressed` is passed as a boolean `true`/`false`, React will render it as the string `"true"` / `"false"` on the DOM — which is exactly what the `aria-pressed` attribute specification requires. Do not convert to string manually.
-
-**Why it happens:**
-Developers copy the existing catalog's `CardActionArea` usage (which has `component: 'a'`) as a template for the new category cards, then wonder why the semantic role is wrong or why clicking doesn't behave like a button.
-
-**How to avoid:**
-- Category cards: omit `component` prop from `CardActionArea` (defaults to `<button>`)
-- Pass `aria-pressed` as a boolean: `'aria-pressed': selected === cat.key`
-- Verify in DevTools that the rendered DOM shows `<button aria-pressed="true">` (not `<a>`)
-
-**Warning signs:**
-- Category cards render as `<a>` elements (inspect DOM)
-- Keyboard focus shows the element has `role="link"` not `role="button"` (screen reader announces "link" not "button")
-- `aria-pressed` attribute missing from DOM
-
-**Phase to address:**
-Phase 15 — Task: `Categories` component initial implementation. Verifier: inspect DOM for `<button aria-pressed="true/false">` after clicking a category.
+**Phase to address:** Operator core.
 
 ---
 
-### Pitfall 5: Tailwind Preflight Active — MUI Baseline Styles Partially Overridden
+### Pitfall 5: `load_values_from_reference` Silently Swallows Fetch Errors While Render Errors Are Permanent — Asymmetry
 
-**Severity:** WARNING
+**What goes wrong:** Currently `load_values_from_reference` catches all exceptions and returns `{}`. After this change, a `KeyError` from `render()` inside `load_values_from_reference` is re-raised as `kopf.PermanentError`. But a transient Kubernetes API error (ConfigMap temporarily unavailable, network blip, Secret not yet created) is still caught and returns `{}` silently — it does not raise. This creates an asymmetry: a typo in a variable name causes the CR to enter permanent Failed state with no retries, while a missing ConfigMap silently no-ops and produces a Helm install with empty values. The Helm install may succeed with wrong configuration.
 
-**What goes wrong:**
-**Verified from code inspection:** Line 15 of `index.html` loads `https://cdn.tailwindcss.com` with no configuration object disabling preflight. Tailwind's Play CDN injects preflight (a Normalize.css-derived reset) by default. There is no `tailwind.config` object in the HTML that sets `corePlugins: { preflight: false }`.
+**Root cause:** The existing error handling in `load_values_from_reference` prioritizes leniency over correctness. Adding strict substitution on top of lenient fetch creates a confusing failure mode.
 
-This means preflight IS active. Preflight resets: `button` element styles (removes border, background, padding), `a` element color/decoration, and heading font sizes. MUI components use Emotion's CSS-in-JS, which injects styles with higher specificity than the Tailwind preflight reset — so MUI components are largely unaffected for their own visual styling. However, two real collision points exist:
+**Prevention:** Distinguish fetch errors from render errors:
 
-1. **Button focus outline:** Tailwind preflight sets `outline: none` on buttons via `*, ::before, ::after { box-sizing: border-box; border-width: 0; ... }`. MUI's `CardActionArea` (a `<button>`) applies its own focus-visible ring via `::after` pseudo-element overlay, which survives the reset. This is fine in practice.
+```python
+# In load_values_from_reference, after the fetch:
+try:
+    values_yaml = render(values_yaml, variables)
+except KeyError as e:
+    raise kopf.PermanentError(
+        f"Undefined ${{{e.args[0]}}} in {kind}/{name} key={key}")
+except Exception as fetch_e:
+    logging.error(f"Error loading {kind}/{name}: {fetch_e}")
+    raise kopf.TemporaryError(
+        f"Could not fetch {kind}/{name}: {fetch_e}", delay=30)
+```
 
-2. **Card wrapper `<Box>` with Tailwind classes:** Using Tailwind utility classes like `className="mx-auto max-w-6xl"` on a `Box` wrapping MUI components is safe — Tailwind utilities have low specificity and MUI's `sx` prop styles use Emotion's class injection which wins. The PRD recommends this pattern and it is used throughout the existing template (e.g., `class="max-w-6xl mx-auto px-4"`).
+`TemporaryError` causes kopf to retry with backoff — appropriate for transient Kubernetes API issues.
 
-The real failure mode: adding a Tailwind class that resets something MUI relies on at the same DOM level. For example, adding `className="flex"` to a `Card` component itself (not a wrapper) will conflict with MUI's `display` styles set through Emotion. Always apply Tailwind classes to wrapper `<div>` or `Box` elements, never directly to MUI component roots.
+**Warning signs:** Operator log showing `Error loading values from ConfigMap/X: ...` followed by a successful but wrong Helm install. Unit test: mock `kr8s.NotFound` exception and assert `TemporaryError` is raised, not silent `{}` return.
 
-**How to avoid:**
-- Apply Tailwind classes only to outer wrapper `<Box>` or plain `<div>` elements, never as `className` on `Card`, `CardActionArea`, `CardContent`, `Chip`, `Grid`, or `Typography` components.
-- The existing pattern is correct: `h(Box, { className: 'max-w-6xl mx-auto px-4', sx: { py: 4 } }, /* MUI children */)`.
-- Do not add a `tailwind.config` block to disable preflight — it would change existing page behavior.
-
-**Warning signs:**
-- Category cards lose border-radius or shadow despite `sx` specifying them (Tailwind class applied to MUI root)
-- Chip inside card loses background color (Tailwind `bg-*` class on the Chip itself)
-
-**Phase to address:**
-Phase 15 — Task: Categories section layout and styling. Verifier checklist: confirm no Tailwind utility class is set as `className` directly on an MUI component root.
+**Phase to address:** Operator core.
 
 ---
 
 ## Moderate Pitfalls
 
-### Pitfall 6: `useMemo` for Filter — Premature at Current Scale, Required at Moderate Growth
+### Pitfall 6: Variable Key Names With Hyphens or Leading Digits Produce `ValueError`
 
-**Severity:** INFO (now), WARNING (when catalog exceeds ~50 items)
+**What goes wrong:** CRD `additionalProperties: { type: string }` constrains values to strings but imposes no restriction on key names. A user who names a variable `my-host` (hyphen) and writes `${my-host}` in a manifest gets `ValueError: Invalid placeholder` from `string.Template`, not `KeyError`. The variable is declared but unreachable by the template engine. Python `string.Template` identifiers must match `[_a-zA-Z][_a-zA-Z0-9]*`.
 
-**What goes wrong:**
-With 5 items, `items.filter(i => selected === 'all' || i.category === selected)` runs in microseconds and `useMemo` adds no measurable benefit. The existing catalog already imports `useMemo` from React (line 166: `const { createElement: h, useMemo } = React`) but does not use it. If the filter is placed inside the render function without `useMemo`, it will re-run on every parent state change (including the `selected` toggle itself — which is always the trigger). This is correct behavior: the filter should re-run when `selected` changes.
+**Root cause:** CRD schema permits arbitrary YAML map keys; `string.Template` is restricted to Python-valid identifiers.
 
-The real risk is a future developer wrapping the entire `items` array definition inside `useMemo` with an empty dependency array `[]` to "optimize" it, creating a stale closure over a snapshot of `items` that never updates if `items` is ever made dynamic.
+**Prevention:** Add key-name validation in the operator when building the variables dict:
 
-The threshold where `useMemo` on the filter computation matters: approximately 200+ items with a complex filter predicate. At 5-50 items, the overhead of `useMemo` itself (dependency comparison) exceeds the savings.
-
-**How to avoid:**
-- Do not use `useMemo` on the filter at launch. Keep it as an inline expression in the render path.
-- `useMemo` is appropriate if and when `items` is loaded asynchronously or contains 100+ entries.
-- The correct future pattern (when needed): `const filtered = useMemo(() => items.filter(i => ...), [selected, items])`.
-
-**Warning signs:**
-- Stale filter results (shows wrong items after state change) — diagnostic: `useMemo` with missing or empty deps array.
-
-**Phase to address:**
-Phase 15 — Note in code comments that `useMemo` is deferred intentionally until catalog exceeds ~50 items.
-
----
-
-### Pitfall 7: Opacity Cascade — Unselected Card at `opacity: 0.7` Dims the Count Chip
-
-**Severity:** WARNING
-
-**What goes wrong:**
-The PRD specifies unselected category cards drop to `opacity: 0.7`. CSS `opacity` is inherited by all descendants — the count `Chip` inside the unselected card will render at 70% opacity. In this codebase, the Chip has `background: rgba(255,255,255,0.06)` and `color: #e5e7eb` (set in the MUI theme override at lines 211-213). At 70% opacity, the effective alpha of the Chip background drops to ~0.042 and the text drops to roughly `rgba(229, 231, 235, 0.7)`.
-
-The count text `#e5e7eb` at 70% on `#0b0c10` background: luminance calculation gives a contrast ratio of approximately 8.5:1 even at 70% opacity (the original text is very light on very dark). This does clear WCAG AA (4.5:1 minimum). The chip is still readable.
-
-However, the chip may visually appear "washed out" compared to baseline. The question is aesthetic, not accessibility-blocking. If the design intent is that the count chip remains crisp even on a dimmed card, apply `opacity: 0.7` to the card's background and border layers using a separate overlay approach (wrapping the non-chip content in an inner `Box` with opacity) rather than on the card root. This is more complex and likely not worth it for the initial implementation.
-
-**How to avoid:**
-Apply `opacity: 0.7` via `sx={{ opacity: selected === 'all' || selected === cat.key ? 1 : 0.7 }}` on the `Card` root. Accept that the Chip inherits this. Do not add per-element opacity overrides unless QA feedback specifically flags chip readability.
-
-**Phase to address:**
-Phase 15 — Task: selected/unselected visual states. Verifier: visually inspect the dimmed card at 0.7 opacity and confirm the chip count text is still legible.
-
----
-
-### Pitfall 8: Keyboard Toggle Reliability — Enter Twice Does Cycle Correctly, But Focus Ring May Disappear
-
-**Severity:** WARNING
-
-**What goes wrong:**
-`CardActionArea` renders as `<button>`, which fires `onClick` on both Enter and Space by default (native browser behavior, no MUI intervention needed). Pressing Enter twice on the same category card will correctly cycle: first press → `onClick` fires → `setSelected('warp')` → state updates → React re-renders → card shows `aria-pressed="true"`; second press → `onClick` fires → `setSelected('all')` (toggle off) → `aria-pressed="false"`. MUI does not eat keypresses on native `<button>` elements.
-
-The real issue: after the second press (toggle off), the `Card` component re-renders with new `sx` props (removing the selected border/glow). MUI's Emotion CSS-in-JS injects new class names on re-render. In some browser/MUI combinations, the focus-visible ring (`:focus-visible` pseudo-class) is briefly lost during the re-render because the element receives new className strings. This is a documented MUI behavior on state-driven style changes to `ButtonBase`.
-
-MUI 5.15 mitigates this with the `focusVisibleClassName` prop on `ButtonBase`. `CardActionArea` exposes `focusVisibleClassName` as a passthrough prop.
-
-**How to avoid:**
-- Do not add custom `onKeyDown` handlers — native `<button>` Enter/Space handling is correct.
-- Add `focusVisibleClassName: 'Mui-focusVisible'` to each `CardActionArea` to pin the focus ring class name and prevent it from disappearing during re-render.
-- Test keyboard navigation: Tab to first card, Enter, Tab to second card, Enter, Shift+Tab, Enter again — confirm focus ring is visible throughout.
-
-**Warning signs:**
-- Focus ring disappears after state change
-- Screen reader does not announce `aria-pressed` value change (means the button identity changed in the DOM)
-
-**Phase to address:**
-Phase 15 — Task: accessibility pass. Must be tested with keyboard-only navigation before marking the task done.
-
----
-
-### Pitfall 9: MUI Theme Token Drift — `primary.main` vs CSS Variable
-
-**Severity:** INFO
-
-**What goes wrong:**
-The MUI theme at line 187 reads `--weka-purple` at theme creation time: `primary: { main: getComputedStyle(document.documentElement).getPropertyValue('--weka-purple').trim() || '#6b2fb3' }`. This is a one-time read. If the CSS variable `--weka-purple` is later changed (e.g., a future inline `<style>` update changes it from `#6b2fb3` to a new brand color), the MUI theme will not update — it was created once at script evaluation and baked in as a hex string. The category cards using `borderColor: 'primary.main'` in their `sx` prop will keep the old purple.
-
-This is not a bug introduced by v4.0 — it exists today for the existing catalog cards too. But the new category cards will add another `primary.main` reference, increasing the surface area of the drift.
-
-The correct resilient pattern is to reference the CSS variable directly in `sx` via the MUI theme's CSS variable syntax, but MUI 5.15 UMD does not fully support the CSS theme variables API (that arrived with MUI 6). In MUI 5.15 on CDN, the only option is to re-read the CSS variable if needed:
-
-```javascript
-// Resilient: reads the live CSS variable at render time (not at theme creation)
-sx={{ borderColor: `var(--weka-purple)` }}
-// vs current pattern (baked at theme creation, drifts if CSS var changes):
-sx={{ borderColor: 'primary.main' }}
+```python
+_VALID_VAR_NAME = re.compile(r'^[_a-zA-Z][_a-zA-Z0-9]*$')
+for k in (app_stack.get('variables') or {}):
+    if not _VALID_VAR_NAME.match(k):
+        raise kopf.PermanentError(
+            f"Variable name '{k}' is not a valid identifier "
+            f"(must match [_a-zA-Z][_a-zA-Z0-9]*)")
 ```
 
-**How to avoid:**
-For the selected border glow, use `borderColor: 'var(--weka-purple)'` in the `sx` prop directly instead of `borderColor: 'primary.main'`. This reads the live CSS variable at paint time. Both work identically today but the CSS var reference is more resilient to future token changes and matches the existing `btn-purple` pattern used in the Tailwind section of the page.
+**Warning signs:** User reports `ValueError: Invalid placeholder` on a manifest that has no obvious bad placeholders. Unit test: variables dict with key `my-host` triggers PermanentError before any substitution.
 
-**Phase to address:**
-Phase 15 — Task: selected/unselected visual states. Low priority; acceptable to defer to a follow-up style pass if initial implementation uses `primary.main`.
+**Phase to address:** Operator core + docs. Mention valid identifier requirement prominently in README.
 
 ---
 
-### Pitfall 10: Mobile Viewport — 3-Card Row Requires Explicit `xs: 12` on Grid Items
+### Pitfall 7: `$$` Escape Semantics Are Counter-Intuitive — Doc Strategy
 
-**Severity:** WARNING
+**What goes wrong:** `string.Template` treats `$$` as an escape for a single literal `$`. So a YAML value `p$$w0rd` renders to `p$w0rd`. Users with a real password containing `$$` must write `p$$$$w0rd` to get `p$$w0rd`. Users who have a password `p$w0rd` and don't know about escaping will write it literally — `$w0rd` matches as a `$identifier` pattern, raising `KeyError('w0rd')`. The behavior is correct per the stdlib spec but non-obvious.
 
-**What goes wrong:**
-The PRD requires 3-across on `md+` and stacked (full-width) on mobile. The existing catalog uses `h(Grid, { item: true, xs: 12, md: 4, key: idx }, ...)`. If the Categories row uses a similar `Grid` with `xs: 12, md: 4`, cards will stack correctly on mobile. The pitfall is the `Chip` inside the category card — `Chip` has a default `maxWidth` and may overflow horizontally on narrow viewports if the chip label is long (e.g., "NeuralMesh AIDP · 3 apps").
+**Confirmed by experiment:** `Template('password: p$$word').substitute({'namespace': 'foo'})` returns `'password: p$word'`.
 
-A `Chip` with a long label on a 320px wide card will not truncate by default — it wraps or causes horizontal scroll on the chip's parent container if the parent has `overflow: hidden`. MUI Chip does not apply `text-overflow: ellipsis` without explicit `sx` styling.
+**Root cause:** The `$$` escape is standard Python `string.Template` behavior but is not widely known among Kubernetes operators.
 
-Specific risk: on an iPhone SE (375px viewport), a category card that is `xs: 12` (full width minus padding) at ~343px wide will fit a single Chip of ~120px. The label "3 apps" is short enough to fit. However, if the Chip is placed inline with the title in a `Stack` that doesn't wrap, it can force the card to expand horizontally.
+**Prevention:** The README must include an explicit escape table:
 
-**How to avoid:**
-- Use `Grid item xs={12} md={4}` (same as existing catalog cards) — confirmed safe.
-- Place the count Chip on its own line inside the card (below the description), not inline with the title.
-- If Chip and title are in the same `Stack`, set `flexWrap: 'wrap'` on the Stack's `sx`.
-- Test at 375px viewport width (iPhone SE breakpoint) before marking done.
+| In YAML source | Rendered value |
+|----------------|----------------|
+| `p$$word` | `p$word` (one dollar — the intended result for most passwords) |
+| `p$$$$word` | `p$$word` (two dollars) |
+| `p$word` | `KeyError('word')` — must escape the `$` |
 
-**Warning signs:**
-- Horizontal scrollbar appears on mobile at `overflow-x: auto` on `<main>` or `<body>`
-- Category cards overflow their column at 375px viewport width
+Recommend that `valuesFiles:` Secret content with literal `$` characters use the Secret's `data:` field (base64-encoded), which has no `$` and requires no escaping.
 
-**Phase to address:**
-Phase 15 — Task: responsive layout. Verifier checklist: open in browser DevTools responsive mode at 375px, confirm no horizontal scroll.
+Unit tests needed: `render('p$$w0rd', {'namespace': 'x'}) == 'p$w0rd'` and `render('p$$$$w0rd', {'namespace': 'x'}) == 'p$$w0rd'`.
+
+**Phase to address:** Docs + tests. No code change required — behavior is correct, only documentation and test coverage needed.
 
 ---
 
-## Technical Debt Patterns
+### Pitfall 8: Validator Soft-Warning on `*.svc.cluster.local` Triggers on Legitimate External Hostnames
 
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| Hard-code `items` array with `category` field in `index.html` | No backend change needed; single-file scope | Category assignment requires a code deploy; doesn't scale to dynamic catalog | Acceptable for v4.0 (PRD explicitly descopes externalization) |
-| Read `--weka-purple` once at theme creation time | Simple; matches current codebase pattern | Theme drifts if CSS variable changes | Acceptable until next brand refresh |
-| Skip `useMemo` on filter | Simpler code | Performance degrades at ~100+ items | Acceptable at current 5-item catalog |
-| Mount both `Categories` and `Catalog` under a single React root | Avoids cross-component event bus | Requires refactoring the existing `Catalog` IIFE into a shared scope | Preferred by PRD; should be done this way |
-| Use `replaceState` for all category clicks | Prevents back-stack pollution | If user wants to "undo" category selection they lose the ability | Acceptable — PRD explicitly specifies this behavior |
+**What goes wrong:** The PRD proposes a soft-warning when a CR contains hardcoded `*.svc.cluster.local` strings, suggesting `${namespace}` as a replacement. A customer whose cluster domain is not `cluster.local` (e.g., `cluster.internal`, common in GKE) or who has an intentional literal hostname will receive a spurious warning on a correctly-authored CR.
+
+**Root cause:** The pattern `*.svc.cluster.local` is a reliable heuristic for in-cluster DNS but not universal.
+
+**Prevention:** Tighten the warning message to be clearly advisory:
+
+> "Informational: detected what appears to be an in-cluster service DNS name (`milvus.rag.svc.cluster.local`). If this namespace portion should vary per deployment, consider replacing it with `${namespace}`. Safe to ignore if intentional or if your cluster DNS domain differs from `cluster.local`."
+
+Keep this strictly in the `warnings` list, never `errors`. Never block `valid=True` on this heuristic.
+
+**Phase to address:** Validator.
+
+---
+
+### Pitfall 9: Variables Map Change Between Reconciles Orphans Resources in the Prior Namespace
+
+**What goes wrong:** When a user changes `variables: {namespace: rag}` to `variables: {namespace: rag-prod}`, kopf fires `on.update` which calls `handle_appstack_deployment` with the new variables. The operator re-applies manifest components with namespace `rag-prod`. Resources previously created in `rag` remain — the operator has no record of prior deployment namespace and does not clean up. For `helmChart` components, Helm releases are scoped per-namespace; changing the namespace effectively creates a new release in the new namespace while the old release persists.
+
+**Root cause:** The operator re-renders on every reconcile but has no "previous state" for cleanup. This is a pre-existing behavior amplified by a namespace variable.
+
+**Prevention (scoped to this PRD):** Add a clear warning to the README: "Changing `variables.namespace` after initial deployment does not migrate or clean up resources in the prior namespace. Manual cleanup is required." Optionally record `status.appStackVariablesSnapshot` on each successful reconcile so users can see what the last applied values were. Full migration support is out of scope for v5.0.
+
+**Phase to address:** Docs (immediate). Status snapshot field is optional enhancement.
+
+---
+
+### Pitfall 10: Bare `@kopf.on.update` Fires on Status Patches — Reconcile Storm Risk
+
+**What goes wrong:** `@kopf.on.update` (line 1015) fires on any update to the CR, including status subresource patches made by the operator itself. When `handle_appstack_deployment` writes to `patch.status`, kopf issues a status patch, which fires `on.update`, which calls `handle_appstack_deployment` again. With a fast-path guard and idempotent `helm upgrade`, this may be tolerable, but it wastes resources and creates confusing log noise. Adding a `status.appStackVariablesSnapshot` field (from Pitfall 9) worsens this if not addressed.
+
+**Root cause:** Kopf distinguishes `spec` updates from `status` updates only when the handler is filtered with `field=`. The current bare `@kopf.on.update` does not filter.
+
+**Prevention:** Add `field='spec'` to the update decorator:
+
+```python
+@kopf.on.update('warp.io', 'v1alpha1', 'wekaappstores', field='spec')
+def update_warrpappstore_function(body, spec, name, namespace, status, patch, **kwargs):
+```
+
+This is a pre-existing issue but the variables feature adds new status writes that amplify it.
+
+**Warning signs:** Operator logs showing rapid successive reconcile cycles for the same CR after a deploy completes. Unit/integration test: perform a `kubectl patch --subresource status` and assert the update handler is NOT triggered.
+
+**Phase to address:** Operator core. Worthwhile to fix regardless of the variables feature.
+
+---
+
+## Minor Pitfalls
+
+### Pitfall 11: Validator Does Not Inspect `variables:` Keys or Values — False Negatives Before Apply
+
+**What goes wrong:** `_validate_yaml_impl` in `validate_yaml.py` has no awareness of `spec.appStack.variables`. A CR with `variables: {my-host: foo}` (invalid identifier key), `variables: {namespace: null}` (null value), or `variables: [list]` (wrong type) passes `validate_yaml` with `valid: True`. The user receives no feedback until the operator fails at runtime.
+
+**Prevention:** Add to `_validate_yaml_impl`:
+
+```python
+variables = (app_stack or {}).get('variables') or {}
+if not isinstance(variables, dict):
+    errors.append({'code': 'invalid_variables_type', 'path': '...variables',
+                   'message': 'spec.appStack.variables must be a map'})
+else:
+    for k, v in variables.items():
+        if not re.match(r'^[_a-zA-Z][_a-zA-Z0-9]*$', k):
+            errors.append({'code': 'invalid_variable_name', 'path': f'...variables.{k}',
+                           'message': f"Variable name '{k}' must match [_a-zA-Z][_a-zA-Z0-9]*"})
+        if not isinstance(v, str):
+            errors.append({'code': 'invalid_variable_value_type', 'path': f'...variables.{k}',
+                           'message': f"Variable value for '{k}' must be a string"})
+```
+
+**Phase to address:** Validator.
+
+---
+
+### Pitfall 12: Tempfile Contains Rendered Secret Values — Verify Call Order
+
+**What goes wrong:** The manifest component branch writes `component['kubernetesManifest']` to a tempfile. After this change, the RENDERED manifest (with substituted values) is written. If a future refactor writes to the tempfile BEFORE calling `render()` (e.g., to avoid re-rendering on retry), unrendered content with `${...}` placeholders persists on disk without cleanup if `render()` then raises.
+
+**Prevention:** As proposed, call `render()` first, then write to tempfile, with tempfile creation inside the `try` block. Add a code comment: "render() must precede tempfile creation — prevents plaintext secret values persisting on render failure." Add a unit test that induces a `KeyError` in `render()` and asserts no tempfile exists after the exception.
+
+**Phase to address:** Operator core — code review checkpoint.
+
+---
+
+### Pitfall 13: Single-Helm Path (`handle_helm_deployment`) Not Patched for Substitution
+
+**What goes wrong:** `handle_helm_deployment` (line 833+) calls `load_values_from_reference` for top-level `spec.valuesFiles` (the non-AppStack, single-chart path). The variables dict is built only inside `handle_appstack_deployment`. If a user applies `${...}` in a non-AppStack `valuesFiles:` ConfigMap, no substitution occurs and the unresolved placeholder string is passed to Helm as-is — no error, silent wrong configuration.
+
+**Prevention:** Either (a) thread `variables` through to `handle_helm_deployment` as well (extend the scope of v5.0), or (b) explicitly document and test that `${VAR}` substitution in `valuesFiles:` is only supported inside `appStack:` components. Add a unit test that locks whichever behavior is chosen.
+
+**Phase to address:** Operator core. Scope decision should be explicit in the plan.
 
 ---
 
@@ -326,60 +276,35 @@ Phase 15 — Task: responsive layout. Verifier checklist: open in browser DevToo
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| MUI 5.15 UMD + Tailwind CDN | Applying Tailwind classes as `className` on MUI component roots | Apply Tailwind only to wrapper `<div>` or `<Box>` elements; let MUI's `sx` control MUI component internals |
-| `window.location.hash` + MUI component mount | Calling `replaceState` during mount to "initialize" the hash | Read the hash on mount (state-only); never write to history during initialization |
-| MUI `CardActionArea` as a toggle button | Copying the existing catalog's `component: 'a'` pattern | Omit `component` prop for toggle buttons; let it default to `<button>` |
-| React UMD `createElement` alias | Writing JSX in a file loaded as a plain `<script>` | Use `h()` convention matching the existing codebase; never write `<JSX />` syntax |
-| MUI `Chip` inside opacity-dimmed card | Expecting the Chip to remain at full opacity | Accept inherited opacity; verify contrast is still WCAG AA (it is at 0.7 on this dark background) |
+| `kubectl apply` + `kubernetesManifest` | Rendering after tempfile write creates a race where rendered secrets could persist | Call `render()` to get a string, then write the rendered string to tempfile, then `kubectl apply` |
+| Helm + `valuesFiles` | Assuming Helm does `{{ }}` expansion on values content | Helm does NOT expand values; our `${VAR}` render happens before `yaml.safe_load`, Helm receives a resolved dict — zero collision |
+| Kubernetes API + CRD validation | `variables: {port: 5432}` — integer passes CRD `type: string` if schema is malformed | Use `additionalProperties: {type: string}` correctly; add operator-side `isinstance(v, str)` check as defense |
+| Kopf status patches + `on.update` | Status updates trigger re-deployment loop | Add `field='spec'` filter on `@kopf.on.update` |
+| NGC Docker secrets | `$oauthtoken` in `stringData:` is a bare `$identifier` pattern | Fast-path guard prevents this; defense-in-depth: store in `data:` as base64 |
 
 ---
 
-## Performance Traps
+## Security Mistakes
 
-| Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| Filter recomputes on every render without `useMemo` | Imperceptible at 5 items | Acceptable now; add `useMemo` when items exceed ~50 | Never a real problem below 100 items in a CDN-React context |
-| `replaceState` called on every render cycle (not just on user click) | Back button broken; browser warns about excessive history manipulation | Call `replaceState` only inside the `onClick` handler, not inside `useEffect` with `selected` as dep | Immediately — any call outside user-gesture context is a bug |
-| `getComputedStyle` called on every render to read `--weka-purple` | Minor CSSOM thrash on every card render | Read it once at theme creation (current pattern); or use `var(--weka-purple)` directly in `sx` | Not a real-world concern at this scale |
-
----
-
-## UX Pitfalls
-
-| Pitfall | User Impact | Better Approach |
-|---------|-------------|-----------------|
-| Partner category ships empty with no explanation | Users think the filter is broken | Empty state copy is explicit: "No apps in this category yet." — PRD explicitly handles this |
-| No visual feedback between click and re-render | On slow connections, user may double-click | MUI `CardActionArea` ripple provides immediate visual feedback; no additional loading state needed at this scale |
-| Unselected cards at `opacity: 0.7` look disabled, not just unfocused | Users may not understand they can still click unselected cards | Maintain `cursor: pointer` on all cards regardless of opacity; hover lift (`translateY(-2px)`) should apply to all states |
-| Back button doesn't leave the page | User frustration if `pushState` accidentally used | Use `replaceState` only; verify with one-back-press exit test |
-| Category cards too tall on mobile due to long descriptions | Layout breaks on 375px viewport | Keep card descriptions under ~80 characters; verify mobile layout in DevTools before shipping |
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| `KeyError.args[0]` leaks variable name in error message | Variable NAME leaks (e.g., `postgresPassword`) — not the value. Acceptable. | Verified: `Template.substitute` raises `KeyError(key_name)`, not `KeyError(value)`. The error message `f"Undefined ${{{e.args[0]}}} in component X"` is safe. |
+| Rendered Secret content in `comp_status['message']` | If `ValueError` from bad placeholder propagates to the generic handler, `str(e)` contains only positional info (line/col), never variable values | Verified safe — `ValueError.__str__()` is positional only |
+| Rendered manifest written to `/tmp` | Rendered Secret `stringData` values on disk during `kubectl apply` | Python `tempfile.NamedTemporaryFile` creates mode 0600 on Linux; the `finally` block deletes the file. Acceptable risk. In-memory pipe to `kubectl apply --stdin` is a future hardening option. |
+| Logging `str(e)` for exception from `render()` | If exception carries a value reference (not possible with Template), it could log secrets | `KeyError.__str__()` returns the key name quoted. `ValueError.__str__()` returns position text. Neither contains variable values. Safe. |
 
 ---
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **Hash sync on direct load:** Verify `/#category=warp` lands in WARP-filtered state — not just that clicking a card updates the hash.
-- [ ] **Toggle-off clears hash:** Verify clicking the active card removes `#category=warp` from the URL entirely (back to bare path).
-- [ ] **One back press exits:** Open `/#category=warp`, press Back once — confirm you leave the site (not land on All-state home page).
-- [ ] **Keyboard toggle cycle:** Tab to a card, press Enter twice, confirm toggle on → off without losing focus ring.
-- [ ] **aria-pressed on DOM:** Open DevTools, inspect a category card — verify `<button aria-pressed="true">` when selected, `aria-pressed="false"` when not.
-- [ ] **No JSX syntax:** Search the new component code for `<[A-Z]` — any match is an accidentally-written JSX element that will crash at runtime.
-- [ ] **Mobile layout:** DevTools responsive view at 375px — confirm no horizontal scroll bar appears.
-- [ ] **Partner empty state rendered:** Select Partner category — confirm "No apps in this category yet." message appears (not a blank grid).
-- [ ] **ThemeProvider still wraps both components:** DevTools `React DevTools` tree shows `ThemeProvider` as an ancestor of both `Categories` and `Catalog` components.
-- [ ] **Existing anchors still scroll:** Click "Explore Blueprints" (href `#catalog`) — confirm page scrolls to catalog section; click does NOT trigger a category filter change.
-
----
-
-## Recovery Strategies
-
-| Pitfall | Recovery Cost | Recovery Steps |
-|---------|---------------|----------------|
-| JSX accidentally used (page blank) | LOW | Find the `<` character in new component code, convert each element to `h()` call; no other file changes needed |
-| Hash parsing collision | LOW | Replace the hash reader with the `startsWith('#category=')` pattern; 2-line fix |
-| History pollution (back button broken) | LOW | Audit all `replaceState` / `pushState` calls; remove any inside `useEffect` or mount code; move to `onClick` handler only |
-| Wrong `CardActionArea` component prop | LOW | Remove `component: 'a'` from category card; verify in DOM it renders as `<button>` |
-| Tailwind class on MUI root breaking styles | MEDIUM | Wrap MUI component in a plain `<div>` or `<Box>`, move Tailwind class to the wrapper |
+- [ ] **Backward compat gate:** Run `render(manifest, {'namespace': 'kube-system'})` on each of the 8 `kubernetesManifest` blocks in `cluster_init/app-store-cluster-init.yaml` and assert byte-identical output
+- [ ] **NGC secret:** Render the full `aidp-bootstrap-secrets` manifest with `variables={'namespace': 'rag'}` — assert no exception and byte-identical output (covers `$oauthtoken` in any `stringData:` form)
+- [ ] **Shell script passthrough:** Unit test `render('for X in $LIST; do echo $X; done', {'namespace': 'foo'})` returns the input unchanged (fast-path guard because no `${...}`)
+- [ ] **`$$` escape:** Unit test `render('p$$w0rd', {'namespace': 'x'}) == 'p$w0rd'`
+- [ ] **Nested variable values:** Unit test that `${milvusHost}` where `milvusHost='milvus.${namespace}.svc'` produces `'milvus.${namespace}.svc'` in output (inner `${namespace}` unresolved — single-pass documented)
+- [ ] **TypeError guard:** Unit test `variables = {'namespace': 'x', 'port': 5432}` (int value) does not crash; Template str()-coerces it
+- [ ] **Kopf update handler scope:** Verify status patch to the CR does NOT trigger re-deployment (requires `field='spec'` filter)
+- [ ] **Single-helm path decision:** Unit test or explicit doc locks whether `handle_helm_deployment` also substitutes or explicitly does not
 
 ---
 
@@ -387,30 +312,31 @@ Phase 15 — Task: responsive layout. Verifier checklist: open in browser DevToo
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| Hash collision with `#catalog`, `#planning-studio` | Phase 15 — URL hash sync task | Direct navigation to `/#catalog` does not trigger category filter logic |
-| History pollution (back button) | Phase 15 — URL hash sync task | Press Back once from `/#category=warp` — site is left, not reset to All |
-| JSX without build step (runtime crash) | Phase 15 — every component task | `grep` new code for `<[A-Z]`; zero matches required |
-| `CardActionArea` component prop (renders as `<a>` not `<button>`) | Phase 15 — initial Categories component | DOM inspection: category cards are `<button>` elements |
-| Tailwind preflight + MUI style collision | Phase 15 — layout/styling task | No Tailwind class directly on MUI component root |
-| `replaceState` called on mount (corrupts back stack) | Phase 15 — URL hash sync task | One-back-press exit test from direct URL |
-| Mobile layout overflow | Phase 15 — responsive layout task | No horizontal scrollbar at 375px viewport |
-| Chip readability at 0.7 opacity | Phase 15 — visual states task | Visual QA: chip count text legible on dimmed card |
-| `aria-pressed` missing from DOM | Phase 15 — accessibility task | DevTools attribute inspection after click |
-| Keyboard toggle focus ring loss | Phase 15 — accessibility task | Keyboard-only navigation test through all three cards |
+| 1. Auto-default breaks backward compat (shell scripts, env vars) | Operator core | Unit test: 8 existing manifests from `cluster_init/` return unchanged |
+| 2. `$oauthtoken` in NGC stringData | Operator core (fast-path guard covers) + AIDP migration | Unit test: AIDP bootstrap secret manifest renders unchanged |
+| 3. Variable values not recursively resolved | Docs + tests | Unit test: single-pass behavior asserted; README shows fully-resolved examples |
+| 4. `ValueError` on invalid placeholders not caught | Operator core | Unit test: `render()` call site catches `ValueError` and converts to `PermanentError` with component name |
+| 5. Fetch vs. render error asymmetry | Operator core | Unit test: mock `kr8s.NotFound` raises `TemporaryError`, not silent `{}` |
+| 6. Hyphen/digit variable key names | Operator core + docs | Unit test: `{'my-host': 'x'}` raises `PermanentError` before substitution |
+| 7. `$$` escape semantics | Docs + tests | README escape table; unit tests for `p$$w0rd` and `p$$$$w0rd` |
+| 8. Validator false-positives on svc.cluster.local | Validator | Warning message copy review; test external hostname does not produce error |
+| 9. Orphan resources on namespace change | Docs | README warning section; optional status snapshot field |
+| 10. `on.update` storm from status patches | Operator core | Add `field='spec'` filter; test that status patch does not trigger handler |
+| 11. Validator blind to `variables:` field | Validator | Unit test: `variables: {my-host: foo}` produces `errors` not just `warnings` |
+| 12. Tempfile call order | Operator core | Code review; unit test render failure leaves no tempfile |
+| 13. Single-helm path not patched | Operator core or docs | Decision explicit in plan; unit test locks chosen behavior |
 
 ---
 
 ## Sources
 
-- Direct inspection of `app-store-gui/webapp/templates/index.html` (lines 15, 82-84, 164-310) — HIGH confidence
-- [MUI CardActionArea API](https://mui.com/material-ui/api/card-action-area/) — props inherit from ButtonBase; aria-* forwarding confirmed by ButtonBase's "Props of the native component are also available" clause — MEDIUM confidence
-- [Tailwind Preflight documentation](https://tailwindcss.com/docs/preflight) — preflight enabled by default with CDN — HIGH confidence
-- [Tailwind Play CDN preflight disable discussion](https://github.com/tailwindlabs/tailwindcss/discussions/15967) — confirmed no `tailwind.config` in `index.html` means preflight is active — HIGH confidence
-- [MDN: History.replaceState()](https://developer.mozilla.org/en-US/docs/Web/API/History/replaceState) — replaceState is not a no-op on same-URL calls — HIGH confidence
-- [React useMemo documentation](https://react.dev/reference/react/useMemo) — threshold guidance for when memoization is worthwhile — HIGH confidence
-- [MUI Chip dark theme contrast issues](https://github.com/mui/material-ui/issues/9407) — Chip contrast on dark backgrounds; opacity cascade behavior — MEDIUM confidence
-- PRD risk table (`.planning/PRD-gui-app-categories.md` — Risks section) — directly maps to pitfalls 1, 3, 4, 5 above — HIGH confidence
+- Direct code inspection: `operator_module/main.py` lines 340-370, 551-803, 1015-1027 — HIGH confidence
+- Direct code inspection: `cluster_init/app-store-cluster-init.yaml` lines 107-161 (shell scripts in `kubernetesManifest`) — HIGH confidence
+- Direct code inspection: `mcp-server/tools/validate_yaml.py` full file — HIGH confidence
+- Executed experiments: Python 3.10 `string.Template` behavior verification (all pitfalls tested against actual CPython source) — HIGH confidence
+- PRD: `.planning/PRD-appstack-variable-substitution.md` (risk table cross-referenced and extended) — HIGH confidence
+- Python stdlib: `string.Template` identifier pattern confirmed via `Template.pattern.pattern` inspection: `[_a-z][_a-z0-9]*` (case-insensitive) — HIGH confidence
 
 ---
-*Pitfalls research for: CDN-React + MUI 5.15 category filter + URL hash sync on Flask/Jinja single-file template*
-*Researched: 2026-04-21*
+*Pitfalls research for: AppStack Variable Substitution (`${VAR}`) in Kopf-based Kubernetes operator*
+*Researched: 2026-05-06*

@@ -1,252 +1,215 @@
 # Stack Research
 
-**Domain:** Brownfield React/MUI CDN single-file feature addition — v4.0 App Categories filter
-**Researched:** 2026-04-21
-**Confidence:** HIGH (all claims verified against live CDN bundle or official docs)
+**Domain:** Kubernetes operator — variable substitution feature addition (brownfield Python/Kopf)
+**Researched:** 2026-05-06
+**Confidence:** HIGH
 
 ---
 
 ## Context: What This Research Is NOT
 
-This is not a new-project stack selection. The PRD hard-locks the runtime to what is already in `index.html`. This document maps **which specific APIs within that locked runtime** the Categories feature needs, distinguishes what is already present vs newly introduced, and confirms no new CDN dependencies are required.
+This is not a new-project stack selection. The operator runtime is locked. This document answers five specific questions about the v5.0 AppStack Variable Substitution milestone: whether `string.Template` is the right choice, whether the operator community has a different standard, how to test Kopf handler functions, whether any new runtime dependency is needed, and whether the CRD `additionalProperties: { type: string }` schema has any gotcha.
 
 ---
 
-## Ground Truth: Existing CDN Loads (lines 17–21 of index.html)
+## Decision 1: `string.Template` (stdlib) — CONFIRMED
 
-```html
-<script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-<script src="https://unpkg.com/@emotion/react@11.11.4/dist/emotion-react.umd.min.js" crossorigin></script>
-<script src="https://unpkg.com/@emotion/styled@11.11.0/dist/emotion-styled.umd.min.js" crossorigin></script>
-<script src="https://unpkg.com/@mui/material@5.15.14/umd/material-ui.development.js" crossorigin></script>
-```
+**The PRD's choice is correct. No override.**
 
-Globals exposed after these loads:
+`string.Template.substitute()` is the right tool for this feature. Rationale confirmed by local execution on Python 3.10.9 (the operator's runtime):
 
-| Global | Source | Version |
-|--------|--------|---------|
-| `window.React` | react.development.js | 18.3.1 (confirmed from bundle header) |
-| `window.ReactDOM` | react-dom.development.js | 18.x |
-| `window.MaterialUI` | material-ui.development.js | 5.15.14 |
-| `window.emotionReact` | emotion-react.umd.min.js | 11.11.4 |
-| `window.emotionStyled` | emotion-styled.umd.min.js | 11.11.0 |
+| Test | `string.Template` | `str.format()` |
+|------|------------------|----------------|
+| AIDP dockerconfigjson (`{"auths": {"nvcr.io": {"auth": "abc"}}}`) passed as-is | PASSES — `{...}` ignored entirely | FAILS — `KeyError: '"auths"'` before any substitution |
+| `${namespace}` → `"rag"` substitution | PASSES | PASSES (different syntax) |
+| Undefined `${unset}` raises `KeyError` | PASSES — `KeyError: 'unset'` | N/A |
+| `$$` escape produces literal `$` | PASSES — `passw0rd$$abc` → `passw0rd$abc` | N/A |
+| `safe_substitute` leaves unknown tokens | PASSES — `${unknown}` stays literal | N/A |
 
----
+The JSON-safety property is not theoretical: AIDP's `aidp-bootstrap-secrets` component contains a real Docker registry auth JSON blob. `str.format()` crashes on it. `string.Template` does not touch it.
 
-## Question 1: MUI UMD Component Access
+`Template.substitute()` (strict) is the correct variant — not `safe_substitute()`. `safe_substitute()` silently passes undefined tokens through, so `${typo}` would reach `kubectl apply` as the literal string `${typo}`, producing a cryptic Kubernetes API error rather than a clear operator failure. Strict mode + `kopf.PermanentError` gives users actionable error messages at apply time.
 
-### UMD Global Name Confirmation
-
-**Confirmed:** The MUI 5.15.14 UMD bundle header explicitly sets:
-```javascript
-global.MaterialUI = {}
-```
-All exported components are properties of `window.MaterialUI`. The destructuring pattern `const { Card, CardActionArea, ... } = MaterialUI;` is correct and proven by the existing code at lines 169–182 of `index.html`.
-
-### Components Already Destructured in index.html (lines 169–182)
-
-```javascript
-const {
-  createTheme,       // theme factory
-  ThemeProvider,     // context provider
-  CssBaseline,       // CSS reset
-  Card,              // card container
-  CardContent,       // card body padding wrapper
-  CardActions,       // card footer action row
-  CardActionArea,    // clickable button overlay on card
-  Typography,        // text with variant system
-  Button,            // action button
-  Grid,              // 12-col responsive layout
-  Box,               // generic styled div
-  Chip,              // pill label
-  Stack              // flex row/column
-} = MaterialUI;
-```
-
-**All of these are already present in the existing destructuring.** No new MUI component names need to be added to the destructure list.
-
-### Components Needed by the Categories Feature
-
-| Component | UMD Access | Already in Destructure | Purpose |
-|-----------|-----------|----------------------|---------|
-| `Card` | `MaterialUI.Card` | YES | Outer card shell for each category |
-| `CardActionArea` | `MaterialUI.CardActionArea` | YES | Clickable button wrapper (provides keyboard focus, button semantics) |
-| `CardContent` | `MaterialUI.CardContent` | YES | Padded content area inside category card |
-| `Chip` | `MaterialUI.Chip` | YES | "N apps" count badge |
-| `Typography` | `MaterialUI.Typography` | YES | Category title (variant="h6") and description (variant="body2") |
-| `Grid` | `MaterialUI.Grid` | YES | 3-column responsive layout for the category row |
-| `Box` | `MaterialUI.Box` | YES | Empty-state container, layout wrappers |
-| `ThemeProvider` | `MaterialUI.ThemeProvider` | YES | Shared theme context — Categories and Catalog must share one root |
-
-**Verdict: Zero new MUI component names needed.** The existing destructure covers every component the Categories feature requires.
-
-### CardActionArea Specifics
-
-`CardActionArea` extends `ButtonBase`, which renders a native `<button>` element by default. Key properties:
-
-- **HTML element:** `<button>` (implicit `role="button"`)
-- **Keyboard behavior:** Enter and Space are handled natively by the `<button>` element — no custom key handler needed
-- **`aria-pressed` support:** Native `<button>` elements have an implicit `button` role, so `aria-pressed` can be passed as a prop directly in JSX. `CardActionArea` passes through arbitrary HTML attributes to its root element via ButtonBase inheritance. Use: `h(CardActionArea, { 'aria-pressed': selected === categoryKey, onClick: ... })`
-- **`component` prop:** Accepts a `component` prop through ButtonBase. For the categories feature, keep the default (`button`) — do NOT set `component: 'a'` (that is the pattern used on catalog cards that navigate; category cards toggle state in place and must NOT navigate)
-- **`focusHighlight`:** CardActionArea renders a `<span>` as a focus highlight overlay automatically — no extra markup needed for focus visibility
-
-**HIGH confidence** — verified against official MUI 5 API docs at mui.com/material-ui/api/card-action-area/ and mui.com/material-ui/react-card/.
+**No new runtime dependency.** `string.Template` is in Python's stdlib since 2.6. The operator's `requirements.txt` does not need to change.
 
 ---
 
-## Question 2: React 18 APIs
+## Decision 2: Operator Community Standards — No Override
 
-### APIs Needed for Categories Feature
+The Python Kubernetes operator ecosystem does not have a single standardized variable-substitution library. Common patterns observed:
 
-| API | Access via UMD Global | Already Used in index.html | Purpose |
-|-----|--------------------|--------------------------|---------|
-| `createElement` (aliased `h`) | `React.createElement` | YES (line 166) | All JSX-equivalent calls |
-| `useState` | `React.useState` | NO — needs to be added to destructure | Selected-category state (`'all' \| 'neuralmesh-aidp' \| 'warp' \| 'partner'`) |
-| `useMemo` | `React.useMemo` | YES (line 166) | Filtered items derivation |
-| `useEffect` | `React.useEffect` | NO — needs to be added to destructure | Hash sync on mount (read initial hash) |
-| `createRoot` | `ReactDOM.createRoot` | YES (line 167) | Already used to mount the existing Catalog |
+- **Jinja2** — used in tools like k8s-handle and Ansible-based K8s management, but only where conditionals and loops justify the dependency. Jinja2's default `{{ }}` delimiter conflicts with Kubernetes JSON content (requires escaping all `{` as `{{ '{' }}`). Not appropriate here.
+- **Kustomize** — a separate binary (`kustomize`), not a Python library. Requires a third subprocess call. Overkill for simple string interpolation.
+- **envsubst** — shell utility, not a Python library. Would add a subprocess and a shell dependency inside the operator container.
+- **Custom regex** — some operators roll their own `re.sub`. Has no documented escape mechanism, harder to document for users.
+- **sprig-like functions in Python** — no established Python equivalent exists; sprig is a Go template library.
 
-### Additions to the Destructure Block
-
-The existing line 166:
-```javascript
-const { createElement: h, useMemo } = React;
-```
-
-Must become:
-```javascript
-const { createElement: h, useMemo, useState, useEffect } = React;
-```
-
-That is the only change to the React destructure.
-
-### React 18 Mounting — `createRoot` vs `ReactDOM.render`
-
-**Critical:** The existing code already uses `createRoot` (line 167 and 305–307), which is the React 18 concurrent-mode API. `ReactDOM.render` is deprecated in React 18. The existing approach is correct.
-
-**Architecture for shared state:** The PRD specifies and this research confirms: mount **one** React root on a single `<div>`, render an `AppShell` (or `CatalogWithCategories`) component that contains both `Categories` and `Catalog` as children under a single `ThemeProvider`. This is simpler than a two-root event-bus approach and is the standard React pattern.
-
-Implementation shape:
-```javascript
-function App() {
-  const [selected, setSelected] = useState('all');
-
-  // Sync hash on mount
-  useEffect(() => {
-    const hash = window.location.hash;  // e.g. "#category=warp"
-    const match = hash.match(/^#category=(.+)$/);
-    if (match) setSelected(match[1]);
-  }, []);
-
-  const filtered = useMemo(
-    () => selected === 'all' ? items : items.filter(i => i.category === selected),
-    [selected]
-  );
-
-  return h(ThemeProvider, { theme },
-    h(CssBaseline, null),
-    h(Categories, { selected, onSelect: setSelected }),
-    h(Catalog, { items: filtered })
-  );
-}
-```
-
-The single `createRoot` call replaces the existing one on `#catalog-root`.
-
-**HIGH confidence** — React 18 UMD exports verified. `useState` and `useEffect` are stable React hooks present since React 16.8, fully in the React 18.3.1 bundle.
+None of these would improve on `string.Template` for this narrow scope (substitution only, no conditionals, JSON-safe content). The community has no standard that overrides the PRD choice.
 
 ---
 
-## Question 3: Browser APIs for URL Hash Sync
+## Decision 3: No New Runtime Dependency
 
-### APIs Needed
+The complete feature can be implemented with:
+- `from string import Template` — stdlib
+- `yaml.safe_load` — already in use (PyYAML, already in `operator_module/requirements.txt` transitively via kopf)
+- `kopf.PermanentError` — already imported
 
-| API | Access | Browser Support | Purpose |
-|-----|--------|-----------------|---------|
-| `window.location.hash` | `window.location.hash` | Universal | Read initial hash on mount |
-| `history.replaceState(state, '', url)` | `history.replaceState` | Baseline: widely available since July 2015 — all modern browsers | Update hash without adding a history entry |
-| `hashchange` event | `window.addEventListener('hashchange', fn)` | Universal | Optional: respond to browser Back/Forward when hash changes externally |
-
-### Implementation Pattern
-
-**On mount** (inside `useEffect(fn, [])`):
-```javascript
-const hash = window.location.hash;       // "#category=warp" or "" or "#catalog"
-const match = hash.match(/^#category=([a-z-]+)$/);
-if (match) setSelected(match[1]);
-```
-
-**On category selection** (inside click handler):
-```javascript
-if (newSelected === 'all') {
-  history.replaceState(null, '', window.location.pathname);  // clears hash
-} else {
-  history.replaceState(null, '', '#category=' + newSelected);
-}
-```
-
-**Why `replaceState` not `location.hash = ...`:**
-- `location.hash = '#category=warp'` triggers a `hashchange` event AND adds a new browser history entry, meaning Back walks through every category toggle. This violates PRD success criterion "Category selection does not pollute browser history."
-- `history.replaceState` modifies the current history entry in place — no new entry, no `hashchange` event fired, Back leaves the page in one press.
-
-**Hash conflict avoidance:** The regex `^#category=([a-z-]+)$` only matches hashes that start with `#category=`. The existing anchors `#catalog` and `#planning-studio` are not matched and are left untouched.
-
-**`hashchange` listener (optional but recommended):** Adding a `hashchange` listener inside the same `useEffect` handles the edge case where the user uses Back/Forward to a previously-set hash URL (which `replaceState` alone does not re-trigger). Pattern:
-```javascript
-useEffect(() => {
-  const sync = () => {
-    const match = window.location.hash.match(/^#category=([a-z-]+)$/);
-    setSelected(match ? match[1] : 'all');
-  };
-  sync();  // initial read
-  window.addEventListener('hashchange', sync);
-  return () => window.removeEventListener('hashchange', sync);
-}, []);
-```
-
-**HIGH confidence** — verified against MDN docs for `history.replaceState` and `aria-pressed`.
+`operator_module/requirements.txt` does not need to change.
 
 ---
 
-## Question 4: Are Any Needed APIs Missing from the Loaded CDN Bundle?
+## Recommended Stack
 
-**No. Zero gaps. The existing CDN bundle covers 100% of what the Categories feature requires.**
+### Core Technologies
 
-Verification checklist:
+| Technology | Version | Purpose | Why Recommended |
+|------------|---------|---------|-----------------|
+| `string.Template` (stdlib) | Python 3.10 stdlib (unchanged) | `${VAR}` substitution over manifest strings and ConfigMap/Secret content before YAML parse | JSON-safe (ignores `{...}`), zero new dep, `$$` escape, strict `KeyError` on undefined. Verified by local execution. |
+| `kopf.PermanentError` (already imported) | kopf >=1.38.0 (already pinned) | Non-retriable operator failure on undefined variable reference | Correct kopf idiom. Operator already uses it elsewhere. |
+| PyYAML (already in use) | already pinned | Parse ConfigMap/Secret content after substitution | Substitution runs on the raw string before `yaml.safe_load` — no YAML library change needed. |
 
-| Need | Status | Evidence |
-|------|--------|---------|
-| `MaterialUI.Card` | Present | Already destructured and used in existing Catalog |
-| `MaterialUI.CardActionArea` | Present | Already destructured at line 175 — used on catalog cards as `component: 'a'` |
-| `MaterialUI.CardContent` | Present | Already destructured at line 174 |
-| `MaterialUI.CardActions` | Present | Already destructured at line 173 |
-| `MaterialUI.Chip` | Present | Already destructured at line 179; used for tags |
-| `MaterialUI.Typography` | Present | Already destructured at line 176 |
-| `MaterialUI.Grid` | Present | Already destructured at line 178 |
-| `MaterialUI.Box` | Present | Already destructured at line 177 |
-| `MaterialUI.Stack` | Present | Already destructured at line 180 — used in Catalog |
-| `React.useState` | Present in React 18 UMD | Need to add to destructure — not currently destructured |
-| `React.useEffect` | Present in React 18 UMD | Need to add to destructure — not currently destructured |
-| `React.useMemo` | Present in React 18 UMD | Already destructured at line 166 |
-| `ReactDOM.createRoot` | Present | Already used at line 167 |
-| `history.replaceState` | Browser built-in | Baseline: all modern browsers since 2015 |
-| `window.location.hash` | Browser built-in | Universal |
-| `aria-pressed` on `<button>` | HTML attribute | Universal — native button role supports it |
+### Supporting Libraries (dev/test only — NOT runtime)
 
-**No new `<script>` tags. No new CDN dependencies. The only code changes are inside the existing inline `<script>` block in index.html.**
+| Library | Version | Purpose | When to Use |
+|---------|---------|---------|-------------|
+| `pytest-subprocess` | `1.5.4` (released 2026-03-21) | Mock `subprocess.run` calls to `kubectl` and `helm` in operator unit tests | Required for `operator_module/tests/` — both manifest-apply and Helm install branches shell out. Provides fixture-level subprocess registration with exact command matching, preventing subprocess shape regressions. Python ≥ 3.6 confirmed. |
+| `pytest` | existing project pin | Test runner | Already used project-wide. No version change. |
+| `unittest.mock` (stdlib) | stdlib | Mock `kr8s.objects.ConfigMap.get` and `Secret.get` | No new dependency. `unittest.mock.patch` to inject fake ConfigMap/Secret with controlled `.data`. |
+
+### Development Tools
+
+| Tool | Purpose | Notes |
+|------|---------|-------|
+| pytest | Unit test runner | Create `operator_module/tests/__init__.py` + `test_render.py` + `test_appstack.py`. No conftest.py required unless sharing fixtures. |
+| pytest-subprocess | Subprocess faking | Add to a new `operator_module/requirements-dev.txt`. Do NOT add to `operator_module/requirements.txt` — this is a test-only dependency. |
+
+---
+
+## Installation
+
+```bash
+# No new runtime dependencies — stdlib-only feature
+
+# Create operator_module/requirements-dev.txt with:
+pytest>=7.0
+pytest-subprocess==1.5.4
+
+# Install for local test runs:
+pip install pytest pytest-subprocess==1.5.4
+```
+
+---
+
+## CRD / OpenAPI Schema: `additionalProperties: { type: string }` — SAFE
+
+The PRD's proposed CRD block:
+
+```yaml
+variables:
+  type: object
+  additionalProperties:
+    type: string
+```
+
+This is structurally correct and safe. Detailed findings:
+
+**This exact pattern already works in this CRD.** At `crd.yaml` line 184, `readinessCheck.matchLabels` uses:
+```yaml
+matchLabels:
+  type: object
+  additionalProperties:
+    type: string
+```
+This is in production use. The pattern is proven in this cluster.
+
+**`x-kubernetes-preserve-unknown-fields` is NOT needed.** That annotation is for schemas that intentionally allow arbitrary untyped data (e.g., `component.values` at CRD line 138, which uses it). `variables` has a fully-typed schema — `additionalProperties: {type: string}` tells the API server exactly what is valid. Do not add `x-kubernetes-preserve-unknown-fields: true` to `variables` — it would disable server-side validation of variable values, removing a useful safety net.
+
+**Historical bug (Kubernetes issue #104137, August 2021):** In Kubernetes 1.20, a validation bug caused `additionalProperties: {type: string}` maps to incorrectly reject entries with "forbidden property" errors. The project targets modern EKS (well past 1.25 where this was resolved). Not a concern.
+
+**`maxProperties` is optional.** Kubernetes recommends adding `maxProperties` on `additionalProperties` maps for CEL validation cost estimation. Variable maps are typically 2–20 entries — cost is negligible. Omitting `maxProperties` is fine. If CEL validation rules are added to the CRD in the future, add `maxProperties: 64` to the `variables` field at that time.
+
+---
+
+## Handler Unit Testing Pattern for `operator_module/tests/`
+
+Kopf's official docs cover `KopfRunner` (integration testing against a cluster or KMock server) and do not document unit-testing individual handler functions. The key insight: **Kopf decorators do not wrap the handler function**. `@kopf.on.create(...)` registers the function in kopf's internal registry but returns the original function unchanged. The decorated function is still a plain Python callable.
+
+**Correct pattern for this milestone's tests:**
+
+`render()` and `load_values_from_reference()` are not decorated handlers — call them directly:
+
+```python
+# operator_module/tests/test_render.py
+from operator_module.main import render
+import pytest
+
+def test_json_content_untouched():
+    json = '{"auths": {"nvcr.io": {"auth": "abc"}}}'
+    assert render(json, {}) == json  # ${...} not present, JSON braces untouched
+
+def test_undefined_raises_key_error():
+    with pytest.raises(KeyError, match="unset"):
+        render("value: ${unset}", {"namespace": "foo"})
+
+def test_dollar_escape():
+    assert render("passw0rd$$abc", {}) == "passw0rd$abc"
+
+def test_no_op_when_no_variables():
+    assert render("namespace: myns", None) == "namespace: myns"
+```
+
+`load_values_from_reference()` with mocked kr8s:
+
+```python
+# operator_module/tests/test_appstack.py
+from unittest.mock import patch, MagicMock
+from operator_module.main import load_values_from_reference
+
+def test_configmap_substitution():
+    fake_cm = MagicMock()
+    fake_cm.data = {"site.yaml": "url: http://${host}:9200"}
+    with patch("operator_module.main.kr8s.objects.ConfigMap.get", return_value=fake_cm):
+        result = load_values_from_reference(
+            "ConfigMap", "my-cm", "site.yaml", "ns",
+            variables={"host": "elastic.ns.svc.cluster.local"}
+        )
+    assert result["url"] == "http://elastic.ns.svc.cluster.local:9200"
+```
+
+`handle_appstack_deployment()` with subprocess mocking:
+
+```python
+# Using pytest-subprocess (fp fixture is auto-injected)
+def test_manifest_namespace_autodefault(fp):
+    fp.register(["kubectl", "apply", "-f", fp.any(), "-n", "target-ns"], returncode=0)
+    # Call the handler as a plain Python function:
+    handle_appstack_deployment(
+        body={...},
+        spec={"appStack": {"components": [{"name": "x", "kubernetesManifest": "kind: Pod\nmetadata:\n  namespace: ${namespace}"}]}},
+        name="test-cr",
+        namespace="target-ns",
+        status={},
+        patch=MagicMock()
+    )
+    # Assert fp received the expected kubectl call
+    assert fp.call_count(["kubectl", "apply"]) == 1
+```
+
+**Do NOT use KopfRunner for these unit tests.** KopfRunner is an integration test tool that connects to a real cluster. It is the wrong tool for testing `render()` correctness or namespace auto-default behavior.
 
 ---
 
 ## Alternatives Considered
 
-| Recommended | Alternative | Why Not |
-|-------------|-------------|---------|
-| Single React root with lifted state | Two roots + CustomEvent bus | More complex, harder to reason about, PRD explicitly recommends against it |
-| `history.replaceState` for hash update | `location.hash = ...` assignment | `location.hash =` adds a history entry on each click, breaking the back-button requirement |
-| `hashchange` listener for hash sync | Poll `location.hash` on interval | Event-driven is zero-cost; polling is wasteful and introduces lag |
-| `aria-pressed` on CardActionArea | Custom `role="button"` + `aria-pressed` on a `<div>` | CardActionArea already renders a `<button>` which has implicit button role — no need to re-declare role |
-| Lift state to a shared parent component | `useContext` with a context provider | Context adds indirection with no benefit when both components are siblings in the same tree |
+| Recommended | Alternative | When to Use Alternative |
+|-------------|-------------|-------------------------|
+| `string.Template` | Jinja2 | If the project ever adds conditionals, loops, or whitespace control to blueprint rendering. Requires escaping `{` in JSON content — only viable if JSON-bearing manifests are excluded from templating scope. Not now. |
+| `string.Template` | `str.format(**vars)` | Never for this use case. Crashes on any `{`-containing string. Confirmed by test. |
+| `string.Template` | `re.sub` custom regex | If `$identifier` syntax is unacceptable for some reason. Adds a bug surface with no escape mechanism. Not recommended. |
+| `Template.substitute()` (strict) | `Template.safe_substitute()` | Only if the feature requirement changes to "silently ignore undefined variables." Current PRD requirement is strict failure — strict mode is correct. |
+| `pytest-subprocess` | `unittest.mock.patch('subprocess.run', ...)` | If the team prefers zero new dev-deps. Plain `patch` works for simple returncode mocking but does not validate the exact command shape. Mark those tests with `# subprocess shape not validated` comments. Acceptable tradeoff if desired. |
+| `unittest.mock.patch` | `pytest-mock` (`mocker` fixture) | Either works. Prefer consistency with existing mcp-server tests. If the team adds `pytest-mock` project-wide for other reasons, use `mocker`. |
 
 ---
 
@@ -254,57 +217,36 @@ Verification checklist:
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| `ReactDOM.render(...)` | Deprecated in React 18 — triggers a warning and does not use the concurrent renderer | `ReactDOM.createRoot(el).render(...)` (already used) |
-| `location.hash = '#category=warp'` | Adds a browser history entry on every click, breaking the back-button behavior | `history.replaceState(null, '', '#category=warp')` |
-| `react-router` or any hash-router library | New dependency — violates PRD constraint | Native `window.location.hash` + `history.replaceState` + `hashchange` listener |
-| Mounting Categories and Catalog on separate React roots | Requires an event bus for state sharing; complex and fragile | Single root on `#catalog-root` (rename or keep) wrapping both components |
-| Adding `role="button"` to CardActionArea explicitly | Redundant — ButtonBase already renders a `<button>` element with implicit button role | Just pass `aria-pressed` as a prop directly |
+| Jinja2 for this feature | Conflicts with JSON `{...}` content; `{{...}}` or `raw` blocks required for all Docker registry auth payloads; adds a runtime dependency for no additional benefit given the substitution-only scope | `string.Template` |
+| `str.format()` or f-strings | Crashes immediately on `{`-containing content. Confirmed: `KeyError: '"auths"'` on AIDP dockerconfigjson | `string.Template` |
+| `Template.safe_substitute()` | Silently passes undefined `${var}` tokens through to `kubectl apply`, producing cryptic Kubernetes errors instead of a clear failure at apply time | `Template.substitute()` (strict) + `kopf.PermanentError` |
+| `x-kubernetes-preserve-unknown-fields: true` on `variables` | Disables API server validation of variable values, removing the type-safety the schema provides | Leave schema as `additionalProperties: { type: string }` — no preserve annotation |
+| KopfRunner for unit tests of render logic | Integration test tool requiring cluster connectivity; wrong layer for testing a pure Python string transformation | Call `render()` and helpers directly as Python functions in pytest |
+| Adding Kustomize, envsubst, or a third subprocess binary | Adds a new external binary dependency to the operator container for no benefit over stdlib string.Template | `string.Template` |
 
 ---
 
 ## Version Compatibility
 
-| Package | Version in Use | Compatibility Notes |
-|---------|---------------|---------------------|
-| `@mui/material` | 5.15.14 | `CardActionArea` present since MUI v4; `aria-pressed` pass-through confirmed via ButtonBase HTML attribute forwarding |
-| `react` | 18.3.1 (confirmed from UMD banner) | `useState`, `useEffect`, `useMemo` stable since React 16.8 |
-| `react-dom` | 18.x | `createRoot` is the v18 API — already in use |
-| `@emotion/react` | 11.11.4 | Required peer dep for MUI 5 `sx` prop resolution — already loaded |
-| `@emotion/styled` | 11.11.0 | Required peer dep for MUI 5 styled components — already loaded |
-
----
-
-## Implementation Checklist for Planner
-
-1. **Rename or extend the mount target.** The existing `<div id="catalog-root">` becomes the mount point for the unified `App` component. No new `<div>` needed unless the PRD section placement requires it (a new `<div id="app-root">` between Planning Studio and the catalog `<section>` may be cleaner).
-
-2. **Extend the React destructure** (line 166):
-   - Add `useState` and `useEffect` to `const { createElement: h, useMemo } = React;`
-
-3. **No new MUI destructure additions needed.** All required components are already in the existing destructure block.
-
-4. **Add `category` field to the 5 items** in the array at lines 217–251 per the PRD mapping table.
-
-5. **Write `Categories` component** using only: `Card`, `CardActionArea`, `CardContent`, `Typography`, `Chip`, `Grid`, `Box` — all already destructured.
-
-6. **Write `App` wrapper component** that owns `useState('all')`, `useEffect` hash sync, `useMemo` filter, and renders `ThemeProvider > Categories > Catalog`.
-
-7. **Replace existing `root.render(h(Catalog))` call** with `root.render(h(App))`.
-
-8. **No new `<script>` tags. No new CDN loads. No Python changes.**
+| Package | Version | Compatibility Notes |
+|---------|---------|---------------------|
+| `string.Template` (stdlib) | Python 3.10 (operator runtime) | Stable since Python 2.6. `${identifier}` form, `$$` escape, `substitute()`/`safe_substitute()` unchanged across all Python 3.x versions. |
+| `pytest-subprocess` | 1.5.4 | Python ≥ 3.6. Supports Python 3.10 — confirmed in package metadata. |
+| `kopf` | ≥1.38.0 (already pinned) | `kopf.PermanentError` is stable across all 1.x releases. No version change needed. |
+| `kr8s` | ≥0.17.0 (already pinned) | Used in `load_values_from_reference`. Mock via `unittest.mock.patch`. No version change. |
 
 ---
 
 ## Sources
 
-- `app-store-gui/webapp/templates/index.html` lines 17–21 (CDN script tags), 166–182 (existing destructure), 253–307 (existing Catalog + mount) — PRIMARY GROUND TRUTH
-- MUI 5 CDN UMD bundle header at `https://unpkg.com/@mui/material@5.15.14/umd/material-ui.development.js` — confirmed `global.MaterialUI = {}` export name — HIGH confidence
-- MUI API docs: https://mui.com/material-ui/api/card-action-area/ — ButtonBase inheritance, `component` prop, slot structure — HIGH confidence
-- MUI React Card docs: https://mui.com/material-ui/react-card/ — Card family component list — HIGH confidence
-- MDN: https://developer.mozilla.org/en-US/docs/Web/API/History/replaceState — `replaceState` parameters, browser compat (baseline: all modern browsers since 2015) — HIGH confidence
-- MDN: https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-pressed — `aria-pressed` valid on native button elements, no explicit role attribute needed — HIGH confidence
-- React docs: https://react.dev/reference/react/useState — `useState` exported from React package; accessible as `React.useState` in UMD — HIGH confidence
+- Local Python 3.10.9 execution — `string.Template` JSON-safety, `KeyError`, and `$$` escape behavior verified directly (HIGH confidence)
+- [Python stdlib docs: string.Template](https://docs.python.org/3/library/string.html) — `substitute()`, `safe_substitute()`, `$$` escape, `${identifier}` form (HIGH confidence)
+- [pytest-subprocess PyPI](https://pypi.org/project/pytest-subprocess/) — version 1.5.4, released 2026-03-21, Python ≥ 3.6 (HIGH confidence)
+- [Kopf testing docs](https://docs.kopf.dev/en/stable/testing/) — KopfRunner is integration-only; no unit-test-handler pattern documented; decorator-passthrough behavior inferred from kopf source behavior (MEDIUM confidence)
+- [Kubernetes issue #104137](https://github.com/kubernetes/kubernetes/issues/104137) — `additionalProperties: {type: string}` validation bug in k8s 1.20; triaged/accepted in 2021; not present on modern EKS (MEDIUM confidence — fix version not confirmed but pre-dates current cluster versions)
+- `weka-app-store-operator-chart/templates/crd.yaml` line 184 — `matchLabels.additionalProperties: {type: string}` already in production use in this project confirming the pattern works (HIGH confidence)
+- `operator_module/requirements.txt` — confirms kopf, kr8s, kubernetes packages pinned; PyYAML available transitively (HIGH confidence)
 
 ---
-*Stack research for: v4.0 App Categories — brownfield addition to WEKA App Store GUI*
-*Researched: 2026-04-21*
+*Stack research for: WEKA App Store Operator — v5.0 AppStack Variable Substitution*
+*Researched: 2026-05-06*

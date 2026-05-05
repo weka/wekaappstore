@@ -1,17 +1,9 @@
 # Feature Research
 
-**Domain:** Top-level category filter UI for an internal app-catalog / blueprint-library (WEKA App Store v4.0)
-**Researched:** 2026-04-21
-**Confidence:** HIGH (toggle semantics, URL convention, count chips, empty states, accessibility); MEDIUM (label convention); LOW (anti-feature prevalence)
-
----
-
-## Preamble: Research Scope
-
-This document covers only the _new_ feature surface for v4.0: a 3-card category-filter row above the existing flat blueprint grid.
-Existing features (flat grid, hero, Planning Studio, tags chips on cards) are out of scope and are treated as fixed context.
-
-The six PRD open questions are addressed in-line within each section.
+**Domain:** `${VAR}` substitution feature for a Kopf-based Kubernetes operator CR (WEKA App Store v5.0)
+**Researched:** 2026-05-06
+**Confidence:** HIGH (table stakes, anti-features, edge-case decisions, open questions Q1/Q2/Q3);
+MEDIUM (differentiator framing vs. Helm/Kustomize/ArgoCD)
 
 ---
 
@@ -19,197 +11,266 @@ The six PRD open questions are addressed in-line within each section.
 
 ### Table Stakes (Users Expect These)
 
-Features users assume exist in any mature catalog filter. Missing these makes the feature feel broken or unfinished.
+These are behaviors that any engineer familiar with Helm, Kustomize, Flux, or ArgoCD substitution
+will expect by default. Shipping without them creates friction and support tickets.
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Single-select toggle with visual active state | Every catalog UI with a tab-strip or chip row (GitHub Marketplace, Figma Community, VS Code Marketplace, Hugging Face Hub) shows the selected category as visually distinguished. Users expect exactly one category to be active or none (All). | LOW | `aria-pressed="true"` on the active card satisfies both visual and screen-reader needs. |
-| Clicking the active category returns to All | Material Design 3 `FilterChip` spec and the `ChoiceChip` / `ChipGroup(singleSelection=true)` behavior both allow deselection by re-tapping the active chip. The PRD correctly models this. Comparable: Apple Music genre tabs (tap selected genre → returns to "All"), Figma Community (tap active tab → shows all). | LOW | `history.replaceState` with `''` hash clears the URL on toggle-off. One-liner in the click handler. |
-| URL hash sync (`#category=<key>`) for deep links | Hugging Face Models uses `?pipeline_tag=` (query string); GitHub Marketplace uses `?category=` (query string). Both are server-rendered pages that need the server to read the parameter. The WEKA App Store filter is **client-side only**, served from a single Flask template with no per-category server route — this is the key distinction. For client-side-only state, hash fragments are the canonical convention: the server never sees the fragment, there are no spurious cache misses, and `hashchange` events drive state natively. `replaceState` (not `pushState`) is correct for filter toggles: it updates the address bar without adding a history entry per click, so one press of Back leaves the page entirely rather than walking through category history. | LOW | Parse on mount: `window.location.hash.startsWith('#category=')`. `history.replaceState(null,'','#category='+key)` on select; `history.replaceState(null,'','')` on deselect. No back-button pollution. |
-| Empty state when category has zero matches | LogRocket filtering best-practices and Pencil & Paper enterprise-filter analysis both flag empty results as a critical UX moment. The user must understand why the grid is empty. Static copy is correct for a _known, intentional_ empty category (Partner ships with zero items by design). The PRD's choice of "No apps in this category yet." is the right pattern — it is informational without implying a search error. | LOW | Render a centered `Typography` block inside the grid column. No CTA needed (there is nowhere to navigate TO for a catalog that has no matching items yet). |
-| Keyboard accessibility via `aria-pressed` | WCAG 2.2 (now the legal standard in ADA lawsuits as of 2024) requires toggle buttons to communicate state programmatically, not through color alone. `aria-pressed` is the correct attribute for a button that has two states (selected / not selected). Screen readers announce "NeuralMesh AIDP, button, pressed" / "not pressed" automatically when `aria-pressed` is updated. | LOW | MUI `CardActionArea` renders as `role="button"` and is keyboard-focusable; add `aria-pressed={selected === key}` explicitly. |
-| Mobile-responsive stacking (3-across on md+, single column on mobile) | The existing catalog grid already stacks on mobile. A horizontal row of 3 cards that does not stack on a 375px viewport would be a regression. Users expect the same responsive contract as the rest of the page. | LOW | Mirror the existing grid's `xs={12} sm={12} md={4}` breakpoints on the Categories MUI Grid. |
+| # | Feature | Why Expected | PRD Status | Complexity | Dependency |
+|---|---------|--------------|------------|------------|------------|
+| TS-1 | `${VAR}` syntax resolves variable values | Universal pattern from Bash envsubst, Flux postBuildSubstitutions, Kustomize. Engineers reach for this syntax automatically. | Covered | SMALL | operator-only |
+| TS-2 | Undefined variable raises a clear, named error | Flux `StrictPostBuildSubstitutions` exists _because_ silent empty-string substitution causes obscure downstream failures. Users who have been burned by silent empty strings (e.g., a namespace field becoming `""` and failing on server-side validation 10 minutes later) strongly prefer fail-fast. | Covered (strict `KeyError` → `kopf.PermanentError`) | SMALL | operator-only |
+| TS-3 | Error message names the specific variable and the component it came from | Without this, debugging a failed CR requires reading YAML manually to find the typo. Helm's `--debug` flag addresses this; Kustomize's replacements transformer names the source field. | Covered (PRD `f"Undefined ${{{e.args[0]}}} in component {comp_name}.kubernetesManifest"`) | SMALL | operator-only |
+| TS-4 | `$$` escapes a literal dollar sign | `string.Template` stdlib behavior. Any blueprint with a password, a Bash script, or a Docker registry URL that contains `$` will break without escape support. AIDP's `dockerconfigjson` Secret does not need this today but the pattern is expected. | Covered | SMALL | operator-only |
+| TS-5 | CRD schema declares the `variables` field with type constraints | Without a schema entry, Kubernetes API server may reject the CR or strip unknown fields depending on pruning settings. Also required for `kubectl explain` to surface the field. | Covered (CRD `additionalProperties: { type: string }`) | SMALL | CRD-only |
+| TS-6 | Existing CRs without `variables:` continue to work identically | Backward-compatibility is table stakes for any operator change. Silent regression = customer outage. | Covered (substitution is a no-op when `variables` is absent and no `${...}` patterns exist) | SMALL | operator-only |
+| TS-7 | Validator accepts `variables:` block without error | Today `validate_yaml` passes schema checks for `helmChart`/`appStack`/`image`. A CR with a new `variables:` field must not get a spurious validation error or the OpenClaw agent will loop on false failures. | Covered (validator change in PRD) | SMALL | operator-only |
+| TS-8 | User-facing doc covers syntax, escape, auto-default, and strict-failure | Without docs, blueprint authors write Jinja-style `{{ }}` or `$VAR` (no braces) and are confused when it silently does nothing. Flux and Kustomize both have explicit callouts for this. | Covered (README section) | SMALL | docs-only |
+| TS-9 | Substitution applies to both `kubernetesManifest` strings and `valuesFiles` content | Users mentally model "variables substitute everywhere data appears." If it works in manifests but not in ConfigMap-backed Helm values, authors will spend hours searching for why half the substitutions worked. | Covered (both substitution sites wired) | MEDIUM | operator-only |
+| TS-10 | `${namespace}` auto-defaults to CR namespace without explicit declaration | The single most common variable. Requiring users to set `variables: { namespace: rag }` manually defeats the goal. Flux does this implicitly for cluster-level variables. Kustomize does this via replacements source fields. | Covered (auto-default `namespace → CR metadata.namespace`) | SMALL | operator-only |
 
-**PRD Open Question 4 — Default landing state (All vs. NeuralMesh AIDP):** Table-stakes convention is "All" on first load. Every comparable catalog (GitHub Marketplace, Hugging Face, Figma Community, VS Code Marketplace) defaults to showing everything. Defaulting to a filtered state on first load would surprise users who arrived without a hash in the URL. Recommend: keep **All** as default. If the WEKA field team wants to deep-link to NeuralMesh AIDP for demos, the hash URL (`/#category=neuralmesh-aidp`) handles that without changing the default.
+**Table stakes not met (gap analysis):**
 
-**PRD Open Question 5 — Category order:** Left-to-right order should follow the user's expected hierarchy: WEKA first-party → WEKA second-party product → third-party. "NeuralMesh AIDP → WARP → Partner" is the correct order. This matches how GitHub Marketplace (Apps → Actions → Models) and VS Code Marketplace (Programming Languages → Snippets → Themes) order their category families: first-party core, then extended product lines, then community/partner.
-
----
-
-### Differentiators (Worth Considering)
-
-Features that distinguish the implementation beyond the baseline. None are required for launch; all are worth scoping with the PRD owner.
-
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| Live "N apps" count chip on each category card | The PRD already includes this in the card anatomy (the wireframe shows "3 apps / 2 apps / 0 apps"). LogRocket and Pencil & Paper both recommend count indicators as strong UX — they let users predict what the filter will return before clicking. For a 3-category list the count is computed at render time from the inline `items` array (no API call). Count is always current. | LOW | `items.filter(i => i.category === key).length`. Render as MUI `Chip` inside the card. PRD marks this as a "Should pass" criterion, so it is effectively expected — treat as P1 unless scope is cut. |
-| Spelled-out subtitle beneath acronym label | PRD Open Question 2 asks whether "NeuralMesh AIDP" should show the spelled-out form. The pattern on comparable platforms: Hugging Face uses task short names ("Text Classification", not "TC"); VS Code Marketplace uses full category names ("Programming Languages", not "PL"); GitHub Marketplace uses plain English names. For audience-internal acronyms (WEKA field engineers and power users know AIDP), the acronym as a title is acceptable. The differentiating option is: title = acronym ("NeuralMesh AIDP"), subtitle = spelled-out ("AI Data Platform blueprints") — this is exactly what the PRD wireframe already shows as the one-line description. The differentiator worth flagging: a `title` attribute or `aria-label` on the card that reads the full name improves accessibility for external audiences who encounter the page without context. | LOW | `aria-label="NeuralMesh AI Data Platform category"` on the `CardActionArea` provides screen-reader context without changing visible copy. |
-| "Show all" explicit affordance (text link) | GitHub Marketplace shows a "Clear filter" link when a category is active. For a 3-card row where All is reachable by re-clicking the active card, an explicit "Show all" link removes the discoverability burden: users do not have to discover that clicking a selected card deactivates it. The PRD mentions "a subtle 'Show all' affordance" as part of the All state description. | LOW | A small grey text link ("Show all") appearing below the category row only when a category is active. Disappears when All is the state. |
-| Transition animation on grid filter | When switching categories, the catalog grid re-renders. A 150ms opacity fade on the grid on category change reduces the perceived "flash" of cards appearing/disappearing. GitHub Marketplace and Figma Community both use subtle transitions. | LOW | CSS `transition: opacity 150ms ease` on the grid wrapper. Add a short state-driven class. No library needed. |
-
-**PRD Open Question 3 — Partner empty state copy:** "No apps in this category yet." is the minimal table-stakes copy. The differentiating option is a call-to-action line: "Partner blueprints coming soon — talk to us about contributing." This is worth discussing with PMM/marketing before lock. It converts a dead-end state into a soft CTA. Complexity is LOW (one string change). The recommendation: go with the CTA variant if there is a concrete partnership pipeline; go with the minimal copy if Partner is an internal grouping with no public-facing recruitment intent.
-
-**PRD Open Question 6 — Single `category` value vs. array:** Single value is correct for launch. Every comparable catalog (VS Code Marketplace, GitHub Marketplace, npm) assigns a primary category and optionally a secondary. For a 5-item catalog with 3 categories, the complexity of multi-category membership is not worth the model change. If a blueprint like "OSS RAG" genuinely straddles two families, resolve it by product decision (which family is its primary home?) rather than adding array complexity. Array support is a legitimate v4.1 follow-up once the catalog grows beyond ~15 items.
+None of the above are unmet by the PRD. The implementation covers the full expected set for this
+scoped feature.
 
 ---
 
-### Anti-Features (Explicitly Do Not Build)
+### Differentiators (vs. Comparable Tooling)
 
-Features that seem reasonable for a category filter but create concrete problems for a 3-category, ~5-item catalog.
+The goal is not competition — it is **intuitive feel** for operators of Helm/Kustomize/ArgoCD/Crossplane.
+Each item below names what users from those tools will notice.
 
-| Feature | Why Requested | Why Problematic | Alternative |
-|---------|---------------|-----------------|-------------|
-| Search input within the category filter | Larger catalogs (npm, Docker Hub) have search bars inside filtered views. Users familiar with those surfaces may ask for it. | A search bar over 5 items is absurd and clutters the page above the fold. Pencil & Paper explicitly warns: "Offering advanced filters for a 10-item list adds unnecessary complexity." The catalog grid is already fully visible in one scroll — there is nothing to search. | Add search only when the catalog exceeds ~20 items (a follow-up milestone trigger). |
-| Sort controls (A–Z, newest first, most popular) | Sort is table stakes in large-catalog marketplaces (Figma Community, npm). | With 5 items, sort order is meaningless. Sorting 3 cards in a filtered NeuralMesh AIDP view by alphabetical order provides zero navigational value. Sort controls would be a misleading affordance implying depth that does not exist. | Fixed manual ordering in the `items` array controlled by the PRD owner. Externalize `items` to a backend JSON file when the catalog grows. |
-| Tooltip descriptions on category cards that duplicate the card subtitle | Tooltips with expanded explanations are common in data-dense UIs (Grafana, Datadog). | The card already has a one-line description. A tooltip that repeats that same description is redundant UI noise. If the label needs explaining, fix the label — do not add a tooltip. Tooltip hover is also inaccessible on touch devices. | The one-line description on the card body IS the tooltip. Keep it visible at all times. |
-| "Recently viewed" or "Suggested for you" filter state | Personalization features appear on Apple App Store, Hugging Face. | These require server-side session state or `localStorage`. The PRD explicitly rules out `localStorage` persistence. There is no session model for the catalog page. Building fake personalization (always showing the same "recent" item) misleads users. | Let the URL hash handle "return to last context" — if a field engineer bookmarks `/#category=warp`, the bookmark IS their "recently viewed" workflow. |
-| Multi-select filtering (select NeuralMesh AIDP + Partner simultaneously) | Multi-select is powerful in large catalogs (Figma Community allows multiple category+tag combinations). | With 3 mutually exclusive product families, multi-select is semantically incoherent: a blueprint is either a WEKA AIDP app or a Partner app, not both. Multi-select would require union logic, checkbox UI, and a "0 apps match NeuralMesh AIDP AND Partner simultaneously" empty state. The PRD explicitly places this out of scope. | Single-select is the correct model for mutually exclusive product families. |
-| `pushState` per click (polluting browser history with each category toggle) | Seems natural for "deep link each state." | Each click generates a back-button entry. Three clicks → three Back presses to leave the page. Users who use Back to leave the catalog will be confused. LogRocket and the Remy Sharp "how tabs should work" article both identify this as a known UX pitfall with hash-based tab state. `replaceState` is the documented solution. | `history.replaceState` (not `pushState`) per the PRD spec and the MDN guidance. One Back press leaves the page. |
-| Category-level analytics events per hover | A/B testing infrastructure may want hover data. | Not part of this PRD scope. Adding `onMouseEnter` analytics hooks to individual category cards in an inline script block creates a maintenance burden with no current dashboard to consume the data. | Add analytics only when an analytics platform (Segment, Amplitude, GA4) is actually integrated. Track `click` events if and when that integration arrives. |
-| Animated icon or SVG per category card | Icon-based category cards look polished on Hugging Face and GitHub Marketplace. | The WEKA App Store uses text-only glassmorphism cards throughout. Adding per-category SVG icons breaks the visual language of existing catalog cards, requires asset management, and would not inherit from the CDN-based MUI theme. | Rely on the card title typography and the purple selected-state border glow to provide visual differentiation. Icons are a v5 concern when the design system is formalized. |
+| # | Feature | vs. Comparable Tool | Our Approach | User Impact | Complexity | Dependency |
+|---|---------|---------------------|--------------|-------------|------------|------------|
+| D-1 | Variables live inside the CR itself, no external resource required | Kustomize replacements require a `ConfigMapGenerator` or patch source; Flux requires a separate `ConfigMap`/`Secret` in `.substituteFrom`. ArgoCD parameter overrides require a separate Application resource edit. | `spec.appStack.variables:` is inline in the CR — one file, one apply, done. | Blueprint authors shipping a self-contained CR appreciate not having to coordinate a separate ConfigMap. Field engineers doing site-specific deploys don't need cluster pre-work. | SMALL | CRD-only |
+| D-2 | Default-value syntax intentionally NOT supported | Flux supports `${var:=default}`. Kustomize v2 had `$(VAR)` with defaults. | `string.Template` does not support `${var:=default}`. The operator provides `${namespace}` as the only auto-default; all other undefined variables are hard errors. | This is a "worse by design" differentiator but defensible: default values hide typos. The one legitimate use case (namespace) is covered by the auto-default. If this proves painful, add per-variable `default:` metadata to the CRD schema in v6.0 rather than adopting envsubst syntax. |  SMALL (intentional omission) | operator-only |
+| D-3 | JSON-safe by design | Helm's `{{ }}` template syntax collides with JSON in multiline values (a known and frequently-reported pain). Kustomize replacements operate on parsed YAML fields, not raw strings, so JSON is never a collision. Flux `envsubst` replaces `$VAR` not `${VAR}` with braces in JSON — but only works in string context. | `string.Template` only matches `$identifier` and `${identifier}`. Literal `{"auths": {}}` JSON is untouched. This is why `string.Template` was chosen over `str.format`. | Zero breakage on AIDP's `dockerconfigjson` Secret (the hardest real-world case). Blueprint authors with Docker config or Prometheus rule JSON don't need special escaping. | SMALL | operator-only |
+| D-4 | Strict failure surfaced as `kopf.PermanentError` with named variable + component | Kustomize replacement failures are often confusing; Flux strict mode (behind a feature gate) only recently became default; ArgoCD param override failures surface as sync errors without variable-level detail. | Error message format: `"Undefined ${unset} in component aidp-bootstrap-secrets.kubernetesManifest"`. Enters `Failed` phase immediately, no retry. | Blueprint authors see exactly which variable is undefined and in which component — no log diving required. | SMALL | operator-only |
+| D-5 | Substitution in Secret-backed `valuesFiles` content | Kustomize does not template Secret data (it replaces values in Kubernetes manifests, not raw content). Flux substitutes from Secrets as sources but not into Secret content. ArgoCD does not template Secret values at all. | We decode the Secret, apply `render()`, then parse YAML — identical pipeline to ConfigMap. | Lets blueprint authors store site-specific Helm values with secrets-class sensitivity (RBAC-gated) while still benefiting from variable substitution. | SMALL | operator-only |
+
+---
+
+### Anti-Features (Excluded by PRD — Defensibility Assessment)
+
+Each exclusion is evaluated: is the PRD rationale sound, or does excluding it materially harm UX?
+
+| # | Feature | PRD Rationale | Defensibility | UX Harm if Excluded | Phase |
+|---|---------|---------------|---------------|---------------------|-------|
+| AF-1 | Recursion into inline `component.values:` objects | Walking arbitrary YAML dicts adds non-trivial code; inline `values:` can be resolved at authoring time; workaround exists (`valuesFiles:` via ConfigMap). | **Defensible.** The workaround is low-friction for field engineers (one ConfigMap apply). Inline values are typically static (image tags, replica counts) not namespace-variable content. Only problematic if an author wants to substitute a namespace-derived DNS name into an inline Helm value — the AIDP case shows this is real but the workaround is acceptable. | LOW — workaround is one ConfigMap away. MEDIUM if this blocks migration of Helm-only blueprints that can't use valuesFiles. | Deferred to v6.0 if workaround proves insufficient. |
+| AF-2 | Conditionals, loops, Jinja, Go templates | Out-of-scope by design: "substitution only." Adding conditional logic would require a template engine dependency (Jinja2, Chevron, Go text/template) and full template rendering semantics. | **Strongly defensible.** The explicit niche of this feature is portability (namespace, DNS names). Operators who need conditionals have Helm chart templating available. Adding conditionals to operator CRs creates a "half a template engine" that satisfies nobody. | LOW — users who need loops/conditionals should be authoring a Helm chart, not a raw manifest CR. Document this clearly in README. |
+| AF-3 | Substitution into operator-control fields (`helmChart.*`, `releaseName`, `targetNamespace`, `readinessCheck.*`) | "These are operator-control fields; templating them invites surprising behavior." | **Defensible with nuance.** `targetNamespace: ${namespace}` in particular is a legitimate ask (see Q2 below). However, allowing `helmChart.version: ${appVersion}` creates a footgun where the chart cannot be looked up until runtime. The PRD correctly defers this per-field — if `targetNamespace` is the only ask, add it explicitly in v5.1, not generically now. | MEDIUM specifically for `targetNamespace`. LOW for all others. The Q2 analysis below recommends a targeted v5.1 addition. |
+| AF-4 | Cross-component variable references (output of one component as input to another) | Would require a two-pass reconciliation model where component A's output (e.g. a generated ServiceAccount name) populates a variable for component B. | **Strongly defensible.** This is Crossplane composition territory. Adding output-to-input wiring would require the operator to marshal `kubectl get` output into a variable store between components — significant architectural complexity. | LOW for v5.0. Users with cross-component references should use shared `variables:` (author the value directly), not dynamic references. |
+| AF-5 | External variable sources (Vault, env vars, AWS Secrets Manager) | Variables are static strings declared in the CR. External resolution would require sidecar/init-container patterns or external-secrets operator integration. | **Strongly defensible.** The operator has no Vault client, no AWS SDK. Adding external sources is an integration project, not a substitution feature. | LOW — users with external secrets management already have ExternalSecretOperator syncing into cluster Secrets, which can already be referenced via `valuesFiles: [{kind: Secret, ...}]`. |
+| AF-6 | Variables in `dependsOn` arrays | Hardcoded. Component names are structural identifiers, not environment-variable content. | **Strongly defensible.** A `dependsOn: ["${dbComponent}"]` pattern makes dependency graphs dynamic and breaks topological sort validation. No real-world use case requires this. | NEGLIGIBLE. |
+| AF-7 | Backward-incompatible changes | Any existing CR without `variables:` must behave identically. | **Non-negotiable.** The entire WEKA App Store catalog, MCP server fixture set, and existing customer deployments depend on this. | N/A — this is a constraint, not a feature exclusion. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-[URL hash sync]
-    └──requires──> [client-side category state (React useState)]
-                       └──requires──> [category field on each items[] entry]
+[TS-5: CRD schema update]
+    └──required-by──> [TS-1: ${VAR} syntax recognized by API server]
 
-[Count chip on category card]
-    └──requires──> [category field on each items[] entry]
+[TS-10: ${namespace} auto-default]
+    └──enables──> [TS-2: Strict failure on truly undefined vars]
+                  (auto-default means ${namespace} is never "undefined")
 
-[Empty state message]
-    └──requires──> [client-side category state]
-                       └──requires──> [category field on each items[] entry]
+[TS-9: Both substitution sites wired]
+    └──requires──> [TS-1: render() helper]
+    └──requires──> [D-5: Secret-backed valuesFiles support]
 
-[aria-pressed selected state]
-    └──enhances──> [visual selected border/glow state]
+[TS-7: Validator accepts variables block]
+    └──enables──> [TS-8: Docs credible — validator will not contradict them]
 
-["Show all" explicit affordance (differentiator)]
-    └──enhances──> [toggle-off / return to All behavior]
+[D-1: Inline CR variables]
+    └──enables──> [AIDP migration: single-file portability]
 
-[Grid transition animation (differentiator)]
-    └──enhances──> [client-side category state filter]
+[D-3: JSON-safe design]
+    └──enables──> [TS-6: Backward compat on existing dockerconfigjson secrets]
 ```
 
 ### Dependency Notes
 
-- **`category` field on `items[]` is the atomic prerequisite:** every other feature — filtering, counting, empty states — derives from this single data shape change. It must land first (or simultaneously) with the `Categories` component.
-- **URL hash sync requires React state, not the other way around:** The hash is written FROM state (not read into DOM imperatively). Mount reads the hash to initialize state; thereafter React drives the hash via `replaceState`.
-- **`aria-pressed` enhances but does not depend on visual state:** even if CSS were broken, a screen reader user would still know which category is selected via `aria-pressed`. The two mechanisms are parallel, not sequential.
+- CRD schema update (TS-5) must land in the same PR as the operator code changes (TS-1, TS-9) to avoid a window where the operator accepts `variables:` but the API server strips it.
+- Validator change (TS-7) can land after operator/CRD if needed, but should be in the same PR to keep the validate-retry loop in SKILL.md consistent.
+- AIDP migration is a follow-up PR (different repo), not a blocker for the operator PR.
 
 ---
 
-## MVP Definition
+## PRD Open Questions — Recommended Answers
 
-### Launch With (v4.0)
+### Q1: Should `${VAR}` substitute into Secret-backed `valuesFiles` content?
 
-The minimum feature set to validate the concept. All are P1 from the PRD's "Must pass" criteria.
+**PRD says:** "Initial design says yes... confirm during implementation."
 
-- [x] `category` field added to all 5 `items[]` entries per the PRD mapping table
-- [x] `Categories` React component rendering 3 cards above `#catalog`, inside the same `ThemeProvider`
-- [x] Single-select toggle: clicking a card sets selected category; clicking the active card returns to All
-- [x] Visual selected state (purple border + glow) and unselected dimming (opacity 0.7) matching existing card language
-- [x] Client-side grid filter: `items.filter(i => selected === 'all' || i.category === selected)`
-- [x] URL hash sync via `history.replaceState` (no `pushState`; one Back press leaves page)
-- [x] Empty state message: "No apps in this category yet." for Partner (0 apps)
-- [x] `aria-pressed` on `CardActionArea`; keyboard Enter/Space toggles selection
-- [x] Mobile-responsive (3-across md+, stacked mobile)
+**Recommendation: YES, confirm it.**
 
-### Add After Validation (v4.1)
+Rationale:
+- The code path is identical to ConfigMap: base64-decode → raw string → `render()` → `yaml.safe_load()`. No additional code required.
+- The security concern is log leakage of resolved secret _values_. The PRD already handles this correctly: the `KeyError` message in the `kopf.PermanentError` contains only the _variable name_, never the value. The rendered string (which may contain a resolved password) is passed directly to `yaml.safe_load()` and then into the Helm values tempfile — it is never logged.
+- The `load_values_from_reference()` function currently logs `f"Error loading values from {kind}/{name}: {str(e)}"` on exception — `str(e)` for a `kopf.PermanentError` (which we re-raise) will contain the variable name, not any values. That is safe.
+- One audit is needed before merge: confirm `logging.error(f"Error loading values from {kind}/{name}: {str(e)}")` at line 369 does not expose a resolved value. Since we re-raise `kopf.PermanentError` from inside `render()` (before `yaml.safe_load`), the only value that can appear in `str(e)` is the variable _name_ from `KeyError.args[0]`. Safe.
+- **Implementation note:** the `render()` call for Secret-backed content should happen before any logging of the raw content. Current code logs nothing on the happy path, so there is no risk as written.
 
-Add when catalog grows or business need is confirmed.
+**Complexity:** SMALL. **Dependency:** operator-only.
 
-- [ ] "Show all" explicit affordance — add when user testing shows toggle-to-deselect is not discoverable enough
-- [ ] Grid fade transition (150ms) — add after v4.0 ships if the rerender feels jarring
-- [ ] CTA copy for Partner empty state ("Partner blueprints coming soon...") — add when a partnership pipeline exists and PMM confirms the copy
-- [ ] `aria-label` spelled-out form on category cards — add if accessibility audit flags acronym labels for external audiences
+---
 
-### Future Consideration (v5+)
+### Q2: Should `${namespace}` be substitutable in `targetNamespace` for Helm components?
 
-Defer until catalog is significantly larger (20+ items) or a backend data source is introduced.
+**PRD says:** "Recommend deferring to v2" (v5.1 in our numbering).
 
-- [ ] Category-level sorting — only meaningful with 10+ items per category
-- [ ] Search input — only meaningful with 20+ catalog items
-- [ ] Multi-category membership (array `category` field) — only meaningful when blueprints genuinely straddle families
-- [ ] Per-category icons / SVG assets — requires formal design-system work
-- [ ] Analytics instrumentation — requires analytics platform integration
+**Recommendation: DEFER, but document the cliff.**
+
+Rationale:
+- The PRD correctly identifies this as adding substitution to "operator-control fields." The risk is different from manifest/valuesFiles substitution: if `targetNamespace` resolves incorrectly, the Helm release lands in the wrong namespace with no error — a silent namespace escape.
+- The current fallback chain (component.targetNamespace → component.namespace → namespaces map → defaultNamespace → CR namespace) already handles the most common case: dropping `targetNamespace` entirely causes the CR namespace to be used. That is functionally equivalent to `targetNamespace: ${namespace}` for the standard use case.
+- The only case where `targetNamespace: ${namespace}` would add value is when a blueprint author needs to document the intent _explicitly_ in the CR. That is a documentation/readability concern, not a deployment concern.
+- **Action for v5.0:** In the README section, explicitly note that `${namespace}` is NOT substituted into `targetNamespace` and explain that dropping `targetNamespace` achieves the same result. This prevents the "why doesn't this work?" question.
+- **v5.1 addition** (after v5.0 is stable): add targeted `targetNamespace` substitution if field engineers report friction. Do NOT add it generically across all operator-control fields.
+
+**Complexity:** SMALL to add in v5.1, NEGLIGIBLE to document in v5.0. **Dependency:** docs-only for v5.0.
+
+---
+
+### Q3: Should the operator publish `status.appStackVariables: {...}` with resolved values?
+
+**PRD says:** "Optional; useful for debugging but adds a status field."
+
+**Recommendation: NO for v5.0, with a specific reason.**
+
+Rationale:
+- Variables _values_ can be sensitive (DNS names, internal host addresses, and potentially — if a user miscategorizes something — credentials). Publishing them to `status` makes them readable by anyone with `kubectl get wekaappstore` RBAC access, which is a broader audience than the Secrets they came from.
+- The industry standard for this class of risk is to NOT echo resolved values into status. External Secrets Operator, for example, exposes `status.conditions` (state machine) but does not echo resolved secret values. Helm's `helm get values` is access-gated.
+- For debugging, the correct tool is `kubectl describe wekaappstore <name>` which surfaces the `conditions` and `componentStatus[].message` — both already written by the operator. A bad substitution (undefined var) surfaces as `Failed` with the variable name. That is sufficient for debugging without exposing values.
+- **What IS useful to publish:** `status.conditions[type=VariablesResolved]` as a condition (True/False/Unknown) with a `reason` field (e.g. `AllVariablesResolved` or `UndefinedVariable`). This gives observability without value exposure.
+- **v5.0 recommendation:** add `status.conditions[type=VariablesResolved]` only if the operator already writes structured conditions (it does — see line 569 in main.py, `'type': 'Ready'` condition pattern). If adding one condition is zero marginal complexity, do it. If it requires a new status subresource, defer to v5.1.
+
+**Complexity:** SMALL for a condition boolean. MEDIUM for a full resolved-variables map (and not recommended). **Dependency:** operator-only.
+
+---
+
+## Migration UX — Before/After for AIDP
+
+The single happy-path example from the PRD, to confirm the customer-facing diff is clean:
+
+**BEFORE (hardcoded, not portable):**
+```yaml
+# weka-aidp-appstack.yaml
+metadata:
+  name: weka-aidp
+  namespace: rag          # <-- customer must change this AND hunt every other occurrence
+spec:
+  appStack:
+    components:
+      - name: aidp-bootstrap-secrets
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: space-manager-secrets
+            namespace: rag   # <-- hardcoded (1 of 17)
+          stringData:
+            SM_POSTGRES_DSN: "postgresql+asyncpg://space_manager:Pass@space-manager-postgres.rag.svc.cluster.local:5432/space_manager"
+                                                                                                # ^^^^^^^^^^^^^^^^^^^^ hardcoded DNS
+
+# aidp-site-config.yaml (ConfigMap data)
+milvus_host: "milvus.rag.svc.cluster.local:19530"
+postgres_host: "space-manager-postgres.rag.svc.cluster.local:5432"
+```
+
+**AFTER (portable, single-field change to redeploy to any namespace):**
+```yaml
+# weka-aidp-appstack.yaml
+metadata:
+  name: weka-aidp
+  namespace: aidp-prod    # <-- customer changes only this
+spec:
+  appStack:
+    variables:
+      milvusHost: milvus.${namespace}.svc.cluster.local
+      postgresHost: space-manager-postgres.${namespace}.svc.cluster.local
+    components:
+      - name: aidp-bootstrap-secrets
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: space-manager-secrets
+            namespace: ${namespace}   # <-- resolves to aidp-prod
+          stringData:
+            SM_POSTGRES_DSN: "postgresql+asyncpg://space_manager:Pass@${postgresHost}:5432/space_manager"
+                                                                       # ^^^^^^^^^^^^^^^ resolves to space-manager-postgres.aidp-prod.svc.cluster.local
+
+# aidp-site-config.yaml (ConfigMap data — valuesFiles source)
+milvus_host: "${milvusHost}:19530"
+postgres_host: "${postgresHost}:5432"
+```
+
+Customer action to move from `rag` to `aidp-prod`: change `metadata.namespace: rag` to `metadata.namespace: aidp-prod`. Done.
 
 ---
 
 ## Feature Prioritization Matrix
 
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| Category field on items[] | HIGH | LOW | P1 |
-| 3-card Categories row + toggle | HIGH | LOW | P1 |
-| Visual selected state (border + glow) | HIGH | LOW | P1 |
-| Client-side grid filter | HIGH | LOW | P1 |
-| URL hash sync (replaceState) | HIGH | LOW | P1 |
-| Empty state message | HIGH | LOW | P1 |
-| aria-pressed + keyboard nav | HIGH | LOW | P1 |
-| Mobile responsive stacking | HIGH | LOW | P1 |
-| Count chip ("N apps") | MEDIUM | LOW | P1 (PRD "Should pass") |
-| Unselected opacity dimming | MEDIUM | LOW | P1 (PRD "Should pass") |
-| "Show all" explicit affordance | MEDIUM | LOW | P2 |
-| Grid fade transition | LOW | LOW | P2 |
-| CTA copy for Partner empty state | MEDIUM | LOW | P2 (PMM decision) |
-| aria-label with spelled-out name | LOW | LOW | P2 |
-| Sort controls | LOW | MEDIUM | P3 (do not build in v4) |
-| Search input | LOW | MEDIUM | P3 (do not build in v4) |
-| Category icons / SVGs | LOW | MEDIUM | P3 |
-| Multi-select | LOW | HIGH | P3 |
+| Feature | User Value | Implementation Cost | Phase | Priority |
+|---------|------------|---------------------|-------|----------|
+| TS-1 `${VAR}` render helper | HIGH | LOW | Phase 1 — Operator Core | P1 |
+| TS-5 CRD schema update | HIGH | LOW | Phase 1 — CRD Schema | P1 |
+| TS-10 `${namespace}` auto-default | HIGH | LOW | Phase 1 — Operator Core | P1 |
+| TS-2/TS-3 Strict failure + named error | HIGH | LOW | Phase 1 — Operator Core | P1 |
+| TS-4 `$$` escape | MEDIUM | LOW | Phase 1 — Operator Core | P1 (free with `string.Template`) |
+| TS-6 Backward compat | HIGH | LOW | Phase 1 — Operator Core | P1 (architectural constraint) |
+| TS-9 Both substitution sites | HIGH | LOW | Phase 1 — Operator Core | P1 |
+| D-5 Secret-backed valuesFiles (Q1 answer) | MEDIUM | LOW | Phase 1 — Operator Core | P1 (confirmed in Q1) |
+| TS-7 Validator accepts `variables:` | MEDIUM | LOW | Phase 2 — Validator | P1 |
+| TS-8 README docs | HIGH | LOW | Phase 3 — Docs | P1 |
+| Validator soft-warn on hardcoded DNS | LOW | LOW | Phase 2 — Validator | P2 |
+| `status.conditions[VariablesResolved]` (Q3) | LOW | LOW-MEDIUM | Phase 1 or defer | P2 |
+| AIDP migration follow-up | HIGH (smoke test) | LOW | Phase 4 — Migration | P1 (validation) |
+| `targetNamespace: ${namespace}` (Q2) | LOW-MEDIUM | LOW | v5.1 follow-up | P3 |
 
 ---
 
 ## Competitor Feature Analysis
 
-| Feature | GitHub Marketplace | Hugging Face Hub | VS Code Marketplace | Our Approach (v4.0) |
-|---------|--------------------|--------------------|---------------------|---------------------|
-| Category filter mechanism | Left-sidebar category links, `?type=apps&category=ai-assisted` (query string, server-rendered) | Left-sidebar task filter, `?pipeline_tag=summarization` (query string, server-rendered) | In-editor `@category:` search syntax; web uses `?category=` (query string, server-rendered) | Hash fragment `#category=<key>` (client-side only — correct for single-template Flask app with no per-category route) |
-| Deselect / return to All | "Clear filter" link appears when a category is active | Re-click task chip to deselect | Clear search query | Toggle: re-click active category card; optionally "Show all" affordance |
-| Count on filter labels | No count shown | No count shown on sidebar labels | No count shown | Count chip on card ("N apps") — differentiator that comparable platforms skip but that is easily computed and surfaces value |
-| Empty state | Filtered page is simply empty (no explicit message) | Shows "No results found" | No items shown | "No apps in this category yet." — intentional; Partner ships empty on day one by design |
-| URL / deep-link method | Query string (server reads it) | Query string (server reads it) | Query string (server reads it) | Hash fragment (browser reads it; server sees only `/`) |
-| Accessibility | `aria-current` on active sidebar item | `aria-selected` on active tab | N/A (in-editor UI) | `aria-pressed` on `CardActionArea` toggle buttons |
+This feature is not a competitive product — it is a parity/ergonomics feature. The comparison
+is against tooling the target users already operate.
 
-**Key insight from competitor analysis:** All three comparables use query strings because they are server-rendered pages. The WEKA App Store filter is purely client-side in a single Jinja template. Hash fragments are the correct convention for this architecture — not because the comparables use them, but because the comparables are not analogous in architecture. The correct analogs are client-side SPA tab systems (Gmail, Single-page dashboards with tabs), all of which use hash state.
+| Feature | Flux postBuildSubstitutions | Kustomize replacements | ArgoCD params | Our Approach |
+|---------|---------------------------|----------------------|---------------|--------------|
+| Syntax | `${var}` (envsubst) | source field → target field path | `--helm-set-string 'k=${ARGOCD_APP_NAME}'` | `${VAR}` (string.Template) |
+| Undefined vars default | empty string (opt-in strict) | N/A — fields must exist | N/A — per-param | strict `KeyError` always |
+| Default value syntax | `${var:=default}` | N/A | N/A | none (auto-default for `${namespace}` only) |
+| Escape syntax | `$${var}` → `${var}` | N/A | N/A | `$$` → `$` |
+| Variable source | inline + ConfigMap/Secret | ConfigMap generator | ApplicationSet params | inline CR only |
+| Applies to Secret-backed content | as source, not target | no | no | yes (decoded → render → parse) |
+| JSON safety | yes (string context) | yes (parsed YAML fields) | yes | yes (string.Template) |
+| Operator-control field substitution | all manifest fields | all YAML fields | Helm values only | manifest + valuesFiles only |
+| Strict-fail as default | no (behind feature gate) | no | no | yes |
 
----
-
-## PRD Open Questions — Research Input Summary
-
-| # | Question | Research Finding | Confidence |
-|---|----------|-----------------|------------|
-| 1 | Blueprint → category mapping (OSS RAG, NVIDIA VSS placement) | Not a UX research question — content ownership decision. No comparable-platform data applies. | N/A |
-| 2 | "NeuralMesh AIDP" vs spelled-out label | Short acronym as title + one-line spelled-out description matches VS Code Marketplace and Figma Community patterns. Add `aria-label` with full name on card action area for screen-reader audiences unfamiliar with the acronym. | HIGH |
-| 3 | Partner empty state copy | Minimal "No apps yet" is table stakes; CTA copy ("talk to us") is a differentiator worth adding when partnership pipeline is confirmed. | HIGH |
-| 4 | Default landing state | "All" is universal convention. Never filter on first load without a URL parameter. | HIGH |
-| 5 | Category order | First-party primary → first-party extended product → third-party. NeuralMesh AIDP → WARP → Partner is correct. | MEDIUM |
-| 6 | Single value vs array for `category` | Single value for v4.0. Array is a v4.1+ concern once the catalog grows. | HIGH |
+**Key insight:** Our strict-fail-as-default is the most opinionated design choice. Flux took years
+and a feature gate to get there because existing users relied on silent empty-string behavior.
+We start strict from day one because we have zero existing users of the substitution feature.
+This is the right call.
 
 ---
 
 ## Sources
 
-- [Material Design 3 — Chips guidelines](https://m3.material.io/components/chips/guidelines) — FilterChip / ChoiceChip single-select and deselect behavior
-- [MDN — History: replaceState() method](https://developer.mozilla.org/en-US/docs/Web/API/History/replaceState) — replaceState vs pushState back-button implications
-- [MDN — Working with the History API](https://developer.mozilla.org/en-US/docs/Web/API/History_API/Working_with_the_History_API) — SPA history management
-- [Remy Sharp — How tabs should work](https://remysharp.com/2016/12/11/how-tabs-should-work) — hash-based tab state, hashchange-driven architecture, back button for free
-- [DEV — Query Strings vs. Hash Fragments](https://dev.to/zahra_mirkazemi/query-strings-vs-hash-fragments-whats-the-real-difference-597n) — when hash is correct vs. query string; caching implications
-- [W3C TAG — Hash in URL usage patterns](https://www.w3.org/2001/tag/doc/hash-in-url) — authoritative W3C guidance on fragment vs. query string conventions
-- [LogRocket — Getting filters right: UX/UI design patterns and best practices](https://blog.logrocket.com/ux-design/filtering-ux-ui-design-patterns-best-practices/) — count badges strongly recommended; empty state guidance
-- [Pencil & Paper — UX pattern analysis: enterprise filtering](https://www.pencilandpaper.io/articles/ux-pattern-analysis-enterprise-filtering) — "don't add advanced filters to a 10-item list"; count indicators with "(N)" format
-- [GitHub Marketplace](https://github.com/marketplace?type=apps) — query string category filtering, no count badges, "Clear filter" affordance
-- [Hugging Face Models](https://huggingface.co/models) — `?pipeline_tag=` query string, server-rendered, no count badges on sidebar
-- [TestParty — Accessible Toggle Buttons](https://testparty.ai/blog/accessible-toggle-buttons-modern-web-apps-complete-guide) — aria-pressed, WCAG 2.2, screen reader state announcement
-- [Accessibility Developer Guide — aria-pressed](https://www.accessibility-developer-guide.com/examples/sensible-aria-usage/pressed/) — "button, pressed" / "not pressed" announcement pattern
-- [Smashing Magazine — UI Patterns for Mobile: Search, Sort, Filter](https://www.smashingmagazine.com/2012/04/ui-patterns-for-mobile-apps-search-sort-filter/) — anti-pattern: sort controls for small datasets
-- [VS Code Marketplace — category search tips](https://devblogs.microsoft.com/devops/tips-and-tricks-for-search-on-visual-studio-marketplace/) — category URL convention `?category=`
+- Flux Kustomization postBuildSubstitutions docs: https://fluxcd.io/flux/components/kustomize/kustomizations/
+- Flux issue: Option to error on missing postBuild substitution variable: https://github.com/fluxcd/flux2/issues/4694
+- Flux discussion: StrictPostBuildSubstitutions request (unanswered): https://github.com/fluxcd/flux2/discussions/4459
+- Kustomize variable substitution issues: https://github.com/kubernetes-sigs/kustomize/issues/2052
+- ArgoCD parameter overrides: https://argo-cd.readthedocs.io/en/stable/user-guide/parameters/
+- Python `string.Template` stdlib: implicit (training data, HIGH confidence, stdlib unchanged since Python 3.0)
+- kopf PermanentError behavior: https://kopf.readthedocs.io/en/latest/errors/
+- Kubernetes operator observability best practices: https://sdk.operatorframework.io/docs/best-practices/observability-best-practices/
+- CWE-209 sensitive data in error messages: https://cwe.mitre.org/data/definitions/209.html
+- PRD source: `.planning/PRD-appstack-variable-substitution.md`
+- Operator code inspected: `operator_module/main.py` (lines 352-369, 551-766)
+- Existing validator inspected: `mcp-server/tools/validate_yaml.py`
 
 ---
-
-*Feature research for: v4.0 App Categories on WEKA App Store Home Screen*
-*Researched: 2026-04-21*
+*Feature research for: WEKA App Store v5.0 AppStack Variable Substitution*
+*Researched: 2026-05-06*

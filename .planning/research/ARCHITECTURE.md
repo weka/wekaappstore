@@ -1,449 +1,373 @@
 # Architecture Research
 
-**Domain:** Single-file CDN-React shared filter state — v4.0 App Categories milestone
-**Researched:** 2026-04-21
-**Confidence:** HIGH (grounded in direct inspection of `app-store-gui/webapp/templates/index.html`)
-
----
-
-## Actual System State (from code inspection, not PRD assumptions)
-
-Confirmed by reading lines 150–310 of `index.html`:
-
-- **Single DOM mount point:** `<div id="catalog-root"></div>` at line 163, inside `<section id="catalog">`.
-- **One IIFE, one `createRoot` call.** The entire React tree lives in one `<script>` block (lines 164–310). No other React roots exist on the page.
-- **`ThemeProvider` owned by `Catalog`.** Lines 254–301 show `Catalog` calls `h(ThemeProvider, { theme }, ...)` internally. The theme is not lifted above the component — it is part of `Catalog`'s render tree.
-- **`items` array is module-scoped inside the IIFE,** defined at lines 217–251. Not a prop — currently closed over by `Catalog`.
-- **No `useState`, no `useEffect`, no `useContext`, no `createContext`** anywhere in the file. Confirmed by grep — zero hits.
-- **No `StrictMode` wrapper.** `root.render(h(Catalog))` at line 307 — bare render, no `React.StrictMode` wrapping.
-- **No `hashchange` listener.** No existing hash-reading or hash-writing logic anywhere in the file.
-- **No `useMemo` in current `Catalog`.** The destructure at line 166 pulls `useMemo` from React but it is never called; this is dead code from an earlier draft.
+**Domain:** Kubernetes Operator — AppStack variable substitution integration
+**Researched:** 2026-05-06
+**Confidence:** HIGH (all findings from direct source inspection)
 
 ---
 
 ## System Overview
 
-### Current architecture (before this milestone)
+The substitution feature threads a stateless `render()` helper through exactly two execution paths inside `handle_appstack_deployment`. No new processes, controllers, or external services are involved. The entire change is confined to three files with no new runtime dependencies.
 
 ```
-index.html
-  <section id="catalog">
-    <div id="catalog-root">          ← single React mount point
-      IIFE {
-        items = [...]                ← closed over, not a prop
-        function Catalog() {
-          ThemeProvider              ← owns theme
-            Box > Grid
-              items.map(card)        ← renders all items, no filter
-        }
-        createRoot(catalog-root)
-          .render(h(Catalog))
-      }
-    </div>
-  </section>
-```
-
-### Target architecture (Option A — single root)
-
-```
-index.html
-  <section id="app-shell-root">      ← rename or replace #catalog-root
-    <div id="app-root">
-      IIFE {
-        items = [...]                ← unchanged, still IIFE-scoped
-        CATEGORIES = [...]           ← new constant, IIFE-scoped
-
-        function AppShell() {
-          useState('all')            ← selectedCategory lives here
-          ThemeProvider              ← lifted from Catalog to AppShell
-            Box (column layout)
-              Categories(selectedCategory, onSelect)
-              Catalog(items=filtered, selectedCategory)
-              [EmptyState when filtered.length === 0]
-        }
-
-        createRoot(app-root)
-          .render(h(AppShell))
-      }
-    </div>
-  </section>
-```
-
----
-
-## Question-by-Question Decisions
-
-### 1. Option A (single root) vs Option B (sibling mounts + CustomEvent)
-
-**Decision: Option A is correct. The PRD's preference is verified by the code.**
-
-The current codebase has exactly one `createRoot` call, one IIFE, and one mount element. Option B would require creating a *second* mount point and a *second* `createRoot` call — adding net complexity. Option A extends what already exists.
-
-**What each option requires changing in `Catalog`:**
-
-| Change | Option A | Option B |
-|--------|----------|----------|
-| Remove `ThemeProvider` from `Catalog` | YES — must lift to `AppShell` | NO — each root keeps its own |
-| Accept `items` as prop | YES — filter happens above; Catalog receives pre-filtered list | MAYBE — Catalog must listen to `CustomEvent` and own its own filter state |
-| Add `selectedCategory` prop | YES — passed from `AppShell` (for `aria-pressed` or count display if needed) | NO — Catalog subscribes to event bus instead |
-| Add new DOM element for `Categories` mount | NO — both live in same root | YES — need `<div id="categories-root">` in the HTML |
-| Add `document.addEventListener('categorychange', ...)` | NO | YES — inside Catalog |
-| Add `document.dispatchEvent(new CustomEvent(...))` | NO | YES — inside Categories |
-
-**Invasiveness:** Option A requires lifting `ThemeProvider` out of `Catalog` and converting `items` from a closed-over variable to a prop. That is a small, mechanical change. Option B requires adding an event bus subscription inside `Catalog`, which introduces hidden coupling (component behavior depends on events fired from elsewhere) and makes Catalog harder to test in isolation.
-
-**Testability / future extraction:** Option A produces a `Catalog` component with an explicit prop surface (`items` array). Future extraction to a standalone file or a build-step project is straightforward — pass the right props. Option B's event bus coupling requires extracting the listener logic as well, and the test harness must simulate DOM events rather than simply passing props. Option A is strictly better for future extraction.
-
----
-
-### 2. State container shape for Option A — `useState` vs `createContext`
-
-**Decision: `useState` in `AppShell`, pass `selectedCategory` as a prop to `Categories`. Do NOT use `createContext`.**
-
-There are exactly 2 consumers of `selectedCategory`:
-- `Categories` — needs it to show selected/unselected visual state and `aria-pressed`
-- The filter expression that produces `filteredItems` — computed inline in `AppShell` before passing to `Catalog`
-
-`Catalog` itself does not need `selectedCategory` as a prop — it only needs the already-filtered `items` array. The count on each category card is computed in `AppShell` as well, using the full `items` array before filtering.
-
-Context is appropriate when a value must cross multiple intermediate components that do not use it (prop drilling). Here the tree is shallow: `AppShell` → `Categories` (1 hop). There is nothing being drilled through. `createContext` adds boilerplate (`createContext`, `Provider`, `useContext`) with zero benefit for a 2-level tree.
-
-**Recommended state shape:**
-
-```javascript
-function AppShell() {
-  const { useState } = React;
-  const [selectedCategory, setSelectedCategory] = useState('all');
-
-  const filteredItems = selectedCategory === 'all'
-    ? items
-    : items.filter(i => i.category === selectedCategory);
-
-  const counts = CATEGORIES.reduce((acc, cat) => {
-    acc[cat.key] = items.filter(i => i.category === cat.key).length;
-    return acc;
-  }, {});
-
-  return h(ThemeProvider, { theme },
-    h(CssBaseline, null),
-    h(Box, { sx: { display: 'flex', flexDirection: 'column', gap: 4 } },
-      h(Categories, { categories: CATEGORIES, selected: selectedCategory, counts, onSelect: setSelectedCategory }),
-      filteredItems.length === 0
-        ? h(EmptyState, null)
-        : h(Catalog, { items: filteredItems })
-    )
-  );
-}
-```
-
----
-
-### 3. Initial state from URL hash — where should hash-reading live?
-
-**Decision: Lazy `useState` initializer.**
-
-```javascript
-const [selectedCategory, setSelectedCategory] = useState(() => {
-  const hash = window.location.hash; // e.g. "#category=warp"
-  const match = hash.match(/^#category=([\w-]+)$/);
-  if (match) {
-    const key = match[1];
-    return CATEGORIES.some(c => c.key === key) ? key : 'all';
-  }
-  return 'all';
-});
-```
-
-**Why lazy initializer, not `useEffect`, not `useMemo`:**
-
-- `useEffect` runs after render — the component would flash "All" state for one render cycle before reading the hash. Visible to the user.
-- `useMemo` is not an initializer — it re-runs on every render if its deps are unstable, and `window.location.hash` is not a tracked dependency. It would compute correctly on mount but is the wrong semantic.
-- Lazy `useState` initializer runs exactly once at mount, synchronously, before the first render. The component starts in the correct state with zero flicker. This is the React-idiomatic pattern for computing initial state from an external source.
-
-**StrictMode concern:** No `StrictMode` wrapper is present in the current file (verified by grep). The lazy initializer is safe regardless — `window.location.hash` is idempotent to read; calling it twice produces the same value. Even if StrictMode double-invoked the initializer (which it does in dev mode for class components' constructors, not for functional lazy initializers in React 18), the result would be the same.
-
----
-
-### 4. Hash-writing logic — `useEffect`, `replaceState`, and the `hashchange` race
-
-**Decision: One-way sync with a single `useEffect`. No `hashchange` listener needed for this feature.**
-
-```javascript
-useEffect(() => {
-  if (selectedCategory === 'all') {
-    history.replaceState(null, '', window.location.pathname);
-  } else {
-    history.replaceState(null, '', '#category=' + selectedCategory);
-  }
-}, [selectedCategory]);
-```
-
-**Is bidirectional sync needed?**
-
-The PRD's success criteria require:
-1. Clicking a category updates the hash — satisfied by the `useEffect` above.
-2. Loading `/#category=warp` directly starts in the filtered view — satisfied by the lazy initializer in question 3.
-3. Back button leaves the page in one press — satisfied by `replaceState` (not `pushState`), which means category toggles never create history entries.
-
-The back-button case does NOT require a `hashchange` listener. The user loading `/#category=warp` is handled at initial mount by the lazy initializer. The user does not navigate between category hashes using the browser's back/forward buttons because `replaceState` is used — there is no history stack of category changes to navigate through.
-
-**Race condition analysis:** If a `hashchange` listener were added that called `setSelectedCategory`, it would fire whenever `history.replaceState` is called in the `useEffect`. In modern browsers, `replaceState` does NOT fire `hashchange` — only `pushState` and direct navigation do. So there is no race between `replaceState` and a `hashchange` listener. However, adding the listener is still unnecessary complexity for this feature scope.
-
-**Only add a `hashchange` listener if** the requirement changes to: "the user should be able to navigate between category views using the browser back button." That would require switching to `pushState`, adding the listener, and handling the sync loop carefully. That is explicitly out of scope per the PRD.
-
----
-
-### 5. Empty-state ownership — `Catalog` or `AppShell`?
-
-**Decision: `AppShell` owns the empty-state branch. `Catalog` should not render empty state.**
-
-```javascript
-// In AppShell render:
-filteredItems.length === 0
-  ? h(EmptyState, null)          // AppShell controls this branch
-  : h(Catalog, { items: filteredItems })  // Catalog always has items
-```
-
-**Rationale:**
-
-- If `Catalog` owns empty-state rendering, its API surface becomes: "receives 0..N items and conditionally renders either a grid or a message." That mixes two responsibilities and makes `Catalog`'s behavior conditional on an external filter state that it cannot see (it only sees the filtered result, not why it's empty).
-- If `AppShell` owns the branch, `Catalog`'s contract is simple and stable: "given a non-empty `items` array, render a grid." If the empty-state copy or design changes later (a different message, a CTA button, an illustration), only `AppShell`/`EmptyState` changes — `Catalog` is untouched.
-- `Catalog`'s testability improves: passing any non-empty array renders a grid, period. No conditional paths to exercise.
-
-`EmptyState` can be an inline function component — no need for a separate file given the no-build-step constraint:
-
-```javascript
-function EmptyState() {
-  return h(Box, { sx: { textAlign: 'center', py: 8 } },
-    h(Typography, { variant: 'body1', color: 'text.secondary' },
-      'No apps in this category yet.')
-  );
-}
-```
-
----
-
-### 6. Build order for implementation
-
-**Decision: Three discrete commits, not one atomic change.**
-
-The dependency order is strictly bottom-up: data shape must exist before filter logic, filter logic must exist before the UI components that consume it.
-
-**Step 1 — Data preparation (no behavior change, safe to ship independently)**
-
-Changes to `index.html`:
-- Add `category: '<key>'` field to each of the 5 objects in the `items` array (lines 217–251).
-- Define the `CATEGORIES` constant inside the IIFE, above `items`.
-- Verify the page still renders correctly — no functional change.
-
-This step is independently verifiable: existing catalog renders identically; the new `category` field is unused.
-
-**Step 2 — AppShell extraction + Catalog refactor (structural, zero new UI)**
-
-Changes to `index.html`:
-- Rename `<div id="catalog-root">` to `<div id="app-root">` (or keep the ID and rename the variable — either works; renaming the DOM id is cleaner).
-- Extract `ThemeProvider` + `CssBaseline` out of `Catalog` into a new `AppShell` function.
-- Convert `Catalog` to accept `items` as a prop instead of closing over the module-level `items` array.
-- Mount `AppShell` instead of `Catalog` on the root element.
-- `AppShell` initially passes all `items` to `Catalog` unchanged, no filter yet.
-
-This step is also independently verifiable: the rendered catalog is pixel-identical to before. No `useState`, no `selectedCategory` yet — just a structural refactor.
-
-**Step 3 — Add `Categories` component, wire filter state, add hash sync**
-
-Changes to `index.html`:
-- Add `Categories` function component.
-- Add `EmptyState` function component.
-- Add `useState` + lazy initializer for `selectedCategory` in `AppShell`.
-- Add filter expression `filteredItems` in `AppShell`.
-- Add hash-write `useEffect`.
-- Render `Categories` above the `Catalog`/`EmptyState` branch.
-- Insert the `<section>` HTML container between Planning Studio and `#catalog` in the Jinja template (or move the React mount above `#catalog` — see integration point below).
-
-This step is the only one that introduces new user-visible behavior.
-
----
-
-## Component Tree
-
-```
-AppShell
-  state: selectedCategory ('all' | 'neuralmesh-aidp' | 'warp' | 'partner')
-  derived: filteredItems = items.filter(...)
-  derived: counts = { [key]: number }
-  |
-  ThemeProvider (theme)            ← lifted here from Catalog
-    CssBaseline
-    Box (flex column)
-      |
-      Categories
-        props: categories, selected, counts, onSelect
-        renders: 3x Card/CardActionArea with aria-pressed
-      |
-      [conditional branch on filteredItems.length]
-        if 0  → EmptyState
-        if >0 → Catalog
-                  props: items (pre-filtered array)
-                  renders: Grid of app cards
-```
-
----
-
-## Component Responsibilities
-
-| Component | Responsibility | Props In | State |
-|-----------|----------------|----------|-------|
-| `AppShell` | Owns filter state, reads/writes hash, computes derived data, controls rendering branch | none | `selectedCategory` |
-| `Categories` | Renders 3 category cards with selected/unselected visual treatment | `categories`, `selected`, `counts`, `onSelect` | none (pure) |
-| `Catalog` | Renders a grid of app cards | `items` (pre-filtered) | none (pure) |
-| `EmptyState` | Renders zero-result message | none | none (pure) |
-
----
-
-## DOM Integration Points
-
-| Element | Before | After |
-|---------|--------|-------|
-| `<div id="catalog-root">` | Mount point for `Catalog` alone | Rename to `id="app-root"`, mount point for `AppShell` |
-| `<section id="catalog">` | Contains heading + `#catalog-root` | Still contains heading + `#app-root`; Categories renders inside the React tree, not as a separate HTML section |
-| `createRoot(...)` call | `createRoot(rootEl).render(h(Catalog))` | `createRoot(rootEl).render(h(AppShell))` |
-| `ThemeProvider` | Inside `Catalog` | Inside `AppShell` |
-| `items` array | Closed over by `Catalog` | IIFE-scoped constant; passed as prop to `Catalog` |
-
-**Note on HTML section structure:** The PRD UX spec shows a separate HTML section for Categories. Because both `Categories` and `Catalog` are now rendered inside the same React root (`AppShell`), the HTML outside React does not need a new `<section>` element for Categories. The layout division is handled by `Box` spacing inside `AppShell`. This keeps the Jinja template change to a single line: renaming the `id` attribute on one `<div>`.
-
----
-
-## Data Flow
-
-```
-window.location.hash (read once at mount)
+WekaAppStore CR
+  spec.appStack.variables: {namespace: "prod", milvusHost: "milvus.prod.svc.cluster.local"}
         |
         v
-useState lazy initializer → selectedCategory
-        |
-        +---> useEffect → history.replaceState (hash write on change)
-        |
-        +---> filteredItems = items.filter(i => selected === 'all' || i.category === selected)
-        |
-        +---> counts = CATEGORIES.reduce(...)
+kopf.on.create / kopf.on.update  (operator_module/main.py:807, 1015)
         |
         v
-AppShell render
-    |
-    +---> Categories(selected=selectedCategory, counts, onSelect=setSelectedCategory)
-    |         |
-    |         +---> user clicks card → onSelect(key) → setSelectedCategory → re-render
-    |
-    +---> [filteredItems.length === 0] ? EmptyState : Catalog(items=filteredItems)
+handle_appstack_deployment()  (main.py:551)
+        |
+        +-- BUILD variables dict once  (new -- line ~555)
+        |     {'namespace': <CR namespace>, **(appStack.get('variables') or {})}
+        |
+        +-- for each component (ordered by resolve_dependencies):
+        |
+        |   +-- Helm path (main.py:616-725) ------------------------------------+
+        |   |   load_values_from_reference(kind, name, key, ns,                |
+        |   |                              variables=variables)  <- NEW ARG     |
+        |   |     +-- render(raw_string, variables)  <- NEW CALL               |
+        |   |         +-- yaml.safe_load(rendered_string)                      |
+        |   |   deep_merge(inline_values, ref_values)                          |
+        |   |   helm install/upgrade (values written to tempfile)              |
+        |   +------------------------------------------------------------------+
+        |
+        |   +-- Manifest path (main.py:727-758) --------------------------------+
+        |   |   render(component['kubernetesManifest'], variables)  <- NEW     |
+        |   |   write rendered string to tempfile                              |
+        |   |   kubectl apply -f <tempfile> -n <targetNamespace>              |
+        |   +------------------------------------------------------------------+
+        |
+        v
+componentStatus[].phase / .message  (already exists in status CRD)
+
+mcp-server/tools/validate_yaml.py  (parallel -- no operator dependency)
+  +-- Accept spec.appStack.variables as valid field  (soft, not strict check)
+  +-- Emit soft-warning on *.svc.cluster.local / namespace: <literal>
 ```
 
 ---
 
-## Architectural Patterns
+## Integration Points at File:Line Precision
 
-### Pattern: Lift state to lowest common ancestor
+### New Component
 
-**What:** When two sibling components need to share state, move the state to their closest shared parent (the "lowest common ancestor"). Here, `Categories` and `Catalog` both need `selectedCategory` — their LCA is `AppShell`.
+**`operator_module/main.py` — `render()` helper (~line 13, after imports)**
 
-**When to use:** Any time two components need to read or write the same value. This is the standard React pattern before reaching for a state library or context.
+```python
+from string import Template
 
-**Trade-offs:** Requires the LCA to pass props down. Acceptable here because the tree is only 2 levels deep.
+def render(text: str, variables: dict) -> str:
+    """Substitute ${VAR} from variables dict. Raises KeyError on undefined keys."""
+    if not variables or not text:
+        return text
+    return Template(text).substitute(variables)
+```
 
-### Pattern: Derive, don't sync
+- New function, no side effects, fully pure.
+- `string.Template` is stdlib — no new dependency.
+- `Template.substitute` (strict) raises `KeyError` on any `${UNRESOLVED}` token.
+- `$$` in source text produces a literal `$` — documented Python behavior.
 
-**What:** Compute `filteredItems` and `counts` as derived values inside the render function rather than storing them in separate `useState` calls.
+### Modified Component 1: `load_values_from_reference` (main.py:352-370)
 
-**When to use:** When a value can be deterministically computed from existing state. Storing derived values in state creates synchronization bugs (state A and state B can drift).
+Add `variables: dict = None` parameter. Render the raw string (ConfigMap data value or base64-decoded Secret content) before passing to `yaml.safe_load`.
 
-**Trade-offs:** Re-computes on every render. For 5 items, the cost is unmeasurable. Even at 500 items, `Array.filter` is microseconds.
+Current call signature (line 352):
+```
+load_values_from_reference(kind, name, key, namespace) -> Dict
+```
 
-### Pattern: Lazy `useState` initializer for one-time external reads
+New call signature:
+```
+load_values_from_reference(kind, name, key, namespace, variables=None) -> Dict
+```
 
-**What:** `useState(() => readExternalSource())` runs the initializer once at mount, synchronously, avoiding a render-then-correct flicker cycle.
+Substitution site inside the function, between raw-string fetch and `yaml.safe_load`:
+```python
+values_yaml = render(values_yaml, variables)  # raises KeyError on undefined
+```
 
-**When to use:** When initial state must be read from `window.location`, `localStorage`, or another external source.
+Catch block re-raises as `kopf.PermanentError` naming `kind/name key=<key>`.
 
-**Trade-offs:** None for this use case. The initializer function is garbage-collected after mount.
+**Call site that must be updated:** main.py:672-677 — the `load_values_from_reference(...)` call inside the Helm-component `valuesFiles` loop. Add `variables=variables` argument.
+
+NOTE: The single-component Helm path at main.py:883-891 (`handle_helm_deployment`) also calls `load_values_from_reference` without `variables`. This path is NOT touched by this PRD (it has no `appStack.variables` concept). The defaulted `variables=None` parameter ensures `render()` is a no-op when `variables` is `None`, so the single-component path is unaffected.
+
+### Modified Component 2: manifest branch in `handle_appstack_deployment` (main.py:727-758)
+
+Current code at line 729:
+```python
+manifest_yaml = component['kubernetesManifest']
+```
+
+New code:
+```python
+try:
+    manifest_yaml = render(component['kubernetesManifest'], variables)
+except KeyError as e:
+    raise kopf.PermanentError(
+        f"Undefined ${{{e.args[0]}}} in component "
+        f"{component['name']}.kubernetesManifest")
+```
+
+No other changes to the manifest path. The rendered string is written to a tempfile at line 741 exactly as before.
+
+### Modified Component 3: variables dict construction in `handle_appstack_deployment` (main.py:555-556)
+
+After `components = app_stack.get('components', [])` (current line 556), add:
+```python
+variables = {'namespace': namespace, **(app_stack.get('variables') or {})}
+```
+
+This is the only construction site. It is stack-scoped, not per-component. Rationale confirmed below.
+
+### Modified Component 4: CRD schema (weka-app-store-operator-chart/templates/crd.yaml:88-192)
+
+Add `variables:` as a sibling of `components:` under `spec.properties.appStack.properties` (around line 89):
+
+```yaml
+variables:
+  type: object
+  description: |
+    Map of variable name to string value. Substituted as ${VAR} into:
+      - kubernetesManifest strings
+      - The raw content of ConfigMap/Secret referenced by valuesFiles
+    The variable ${namespace} auto-defaults to the CR metadata.namespace
+    if not explicitly set. Use $$ to escape a literal dollar sign.
+    Undefined references raise a permanent error at apply time.
+  additionalProperties:
+    type: string
+```
+
+No `required:` annotation — the field is optional. CRD schema is additive and backward-compatible.
+
+### Modified Component 5: `mcp-server/tools/validate_yaml.py`
+
+Two additions to `_validate_yaml_impl()`:
+
+1. No new error raised for `spec.appStack.variables` — it is already allowed because the validator only checks for known-bad fields (v1-only snake_case fields) and presence of a deployment method. `variables` will pass silently with the current logic. However, add it to a comment or `_KNOWN_APPSTACK_FIELDS` constant so future reviewers know it is intentional.
+
+2. Add soft-warning scan of `kubernetesManifest` strings. Walk `spec.appStack.components[].kubernetesManifest` and emit a `warnings` entry if any of:
+   - `.svc.cluster.local` appears as a literal substring
+   - `namespace:` followed by a non-`${` value appears
+
+The warning is non-blocking: `valid` remains `True`, `errors` remains empty. Wording: `"Component '{name}' kubernetesManifest contains hardcoded value '{fragment}'; consider ${namespace} or a variables: substitution."` (abbreviated).
+
+### New Component: `operator_module/tests/test_render.py`
+
+New test file — directory `operator_module/tests/` does not currently exist and must be created along with an `__init__.py`. Coverage:
+
+- `render()` with JSON payload containing `{` and `}` characters (no crash)
+- undefined key raises `KeyError`
+- empty string returns empty string
+- `$$` produces literal `$`
+- `variables=None` or empty dict returns text unchanged
+- multi-occurrence: same `${VAR}` appears twice, both substituted
+
+### New Component: `mcp-server/tests/fixtures/sample_blueprints/ai-research-portable.yaml`
+
+New fixture demonstrating the recommended pattern with `variables:` and `${namespace}` usage. This fixture doubles as a regression guard: validate_yaml must return `valid=True` for a CR with `variables:`.
 
 ---
 
-## Anti-Patterns
+## Validated Architecture Questions
 
-### Anti-Pattern: Catalog owns its own filter state
+### 1. Variables-dict Construction Scope: Stack-Level Is Correct
 
-**What people do:** Add `selectedCategory` state inside `Catalog` and have it listen for events, or read the hash internally.
+The PRD proposes building `variables` once at the top of `handle_appstack_deployment`. This is confirmed correct.
 
-**Why it's wrong:** Creates hidden coupling. The filter trigger (Categories component) and the filter consumer (Catalog) must communicate through a side channel (events or global state) rather than through the React prop system. Makes both components harder to test and to reason about. Violates single-direction data flow.
+**Evidence:** `variables` is read from `app_stack.get('variables')`, which is a single field at `spec.appStack.variables`. It is not a per-component field in the CRD schema. The `variables` dict is read-only after construction and passed by reference into both execution branches — no mutation risk.
 
-**Do this instead:** `AppShell` owns `selectedCategory`. `Catalog` is a pure presentational component — it renders whatever `items` it receives. The filter happens above it.
+**Implication:** `variables` is constructed once at ~line 555, before the `for component in ordered_components:` loop at line 602. All components in a single reconcile share the same variable values. This is the intended behavior.
 
-### Anti-Pattern: `ThemeProvider` stays inside `Catalog`
+### 2. Inline `values:` Not Substituted — The Hole Is Real but Acceptable
 
-**What people do:** Leave `ThemeProvider` inside `Catalog` and wrap `Categories` in a second `ThemeProvider` instance.
+The PRD explicitly excludes `component.values:` (inline YAML object) from substitution. Confirmed: at main.py:668, `merged_values = component.get('values', {}).copy()` copies the already-parsed Python dict. By the time it reaches this line, the YAML has been parsed by Kubernetes admission into a Python object — the raw string form no longer exists. `string.Template` operates on strings only, so there is no insertion point.
 
-**Why it's wrong:** Produces two separate MUI theme contexts. Emotion's CSS-in-JS inserts two sets of style rules. The MUI team explicitly recommends one `ThemeProvider` per tree. Token updates would need to be applied in two places.
+**The hole:** A user who writes `${VAR}` directly in `component.values:` will not get substitution. The `$` will arrive at `helm install` as a literal string, which Helm does not interpret.
 
-**Do this instead:** Lift `ThemeProvider` to `AppShell` — it wraps the entire rendered tree once.
+**Practical severity: LOW.** The AIDP case uses `valuesFiles:` (ConfigMap/Secret references), not inline `values:`. The workaround is documented: put substitution-bearing values in a ConfigMap referenced by `valuesFiles:`.
 
-### Anti-Pattern: `useEffect` to read initial hash
+**Silent failure risk: MEDIUM.** A user who writes `${namespace}` in `component.values.someKey` expecting substitution will observe it arrive unexpanded in Helm with no error or warning. Recommend adding a README note: "`${VAR}` substitution does not apply to inline `values:` blocks. Use `valuesFiles:` instead."
 
-**What people do:** `const [cat, setCat] = useState('all'); useEffect(() => { const h = readHash(); if (h) setCat(h); }, []);`
+### 3. Multi-Document YAML in `kubernetesManifest` — Confirmed Supported
 
-**Why it's wrong:** Causes a visible render flash. The component renders with `'all'` first, then a synchronous DOM update via `useEffect` sets the correct category. On fast connections this can still cause a layout shift on the catalog grid.
+`string.Template` is string-level and treats `---` separators as any other substring. The operator's manifest branch at main.py:740-748 writes `manifest_yaml` verbatim to a tempfile and runs `kubectl apply -f <tempfile>`. The `kubectl apply` command processes multi-document YAML files natively. The operator does not call `yaml.safe_load` on `kubernetesManifest` content — it passes the raw (now rendered) string directly to kubectl.
 
-**Do this instead:** Lazy `useState` initializer — reads hash synchronously before first render.
+**Conclusion:** Multi-document manifests work today and continue to work after substitution is added. No special handling needed. `render()` produces a rendered multi-document string; kubectl applies it as-is.
 
-### Anti-Pattern: `pushState` for category toggles
+**Edge case confirmed safe:** `${VAR}` tokens inside multi-line YAML string values (e.g., inside a ConfigMap data key) are substituted correctly because `string.Template` operates on the raw string, not on parsed YAML structure.
 
-**What people do:** Use `history.pushState` so each category click creates a back-button entry.
+### 4. Idempotency Under kopf Reconcile
 
-**Why it's wrong:** The PRD success criterion explicitly requires "one back press leaves the page." With `pushState`, clicking NeuralMesh AIDP → WARP → Partner creates 3 history entries; the user needs 3 back presses to leave the page.
+kopf fires `on.create` once and `on.update` on every spec change. Both handlers call `handle_appstack_deployment` identically (confirmed at main.py:813, 1021).
 
-**Do this instead:** `history.replaceState` — overwrites the current history entry on each category change. One back press always leaves the page regardless of how many category toggles occurred.
+`render()` is a pure function: same input always produces same output. There is no state accumulated between reconcile runs. The operator does not cache substituted output.
+
+**Drift risk: None.** `string.Template.substitute` is deterministic: `$$` always becomes `$`, `${VAR}` always becomes the variable value. The only scenario producing different output between reconciles is if the ConfigMap or Secret content changes externally — but re-rendering on that change is correct behavior.
+
+**`kopf.PermanentError` idempotency:** If render fails with an undefined variable, kopf marks the CR permanently failed and stops retrying. The user must update the CR spec to fix the variable, which triggers `on.update` and a fresh render attempt. This is the correct UX.
+
+### 5. Status and Observability
+
+Per-component status is already confirmed in CRD schema at crd.yaml:224-249 (`componentStatus` array with `name`, `phase`, `message`, `lastTransitionTime`). The operator populates it at main.py:607-612 and the exception handler at main.py:762-765 catches all exceptions and sets `comp_status['phase'] = 'Failed'` and `comp_status['message'] = f"Error deploying component: {str(e)}"`.
+
+**Substitution failure path:** A `kopf.PermanentError` raised inside the per-component `try` block (line 614) is caught by `except Exception as e:` at line 762. The error message — which names the undefined variable and component — lands in `componentStatus[i].message`. `appStackPhase` becomes `Failed`.
+
+**What the user sees:** `kubectl describe wekaappstore <name>` shows the failed component with message: `"Undefined ${unset} in component foo.kubernetesManifest"`. No new status fields are required for v5.0 observability.
+
+### 6. Build Order Recommendation
+
+**Dependency graph:**
+
+```
+Phase 1: render() helper + operator_module/tests/ scaffolding
+    |
+    +-- Phase 2: CRD schema update (additive, safe to ship early)
+    |
+    +-- Phase 3: Operator wiring (depends on render() existing)
+    |     +-- variables dict construction in handle_appstack_deployment
+    |     +-- load_values_from_reference signature + call site update
+    |     +-- kubernetesManifest render call
+    |
+    +-- Phase 4: validator soft-warning + fixture (parallel to 2 and 3)
+          +-- validate_yaml.py soft-warning logic
+          +-- test_validate_yaml.py extensions
+          +-- ai-research-portable.yaml fixture
+
+Phase 5: AIDP migration (separate repo, separate PR, after Phases 1-3 deployed)
+```
+
+**If I were planning the phases:**
+
+**(1) render() helper + unit tests** — Pure Python function with no external dependencies. Write `operator_module/tests/__init__.py`, `operator_module/tests/test_render.py`, and the `render()` function in `main.py`. This phase is independently verifiable with `pytest` before anything touches live operator paths.
+
+**(2) CRD schema update** — Ship `variables:` field to the CRD immediately after the helper exists. The CRD must be deployed before new CRs with `variables:` pass Kubernetes admission validation. CRD changes are additive and backward-compatible (optional field, no `required:` annotation). Can be merged and deployed in isolation with zero operator risk.
+
+**(3) Operator wiring** — Wire variables construction, `load_values_from_reference` signature change, and the two render call sites. Safe to ship after the CRD schema exists in the cluster. Tests in `operator_module/tests/test_appstack.py` cover the wiring paths. This is the phase that delivers the actual feature.
+
+**(4) Validator soft-warning + fixture** — Entirely parallel to Phases 2 and 3. Has no dependency on operator code. The validator does not call `render()`. Can be merged any time as a standalone PR. Blocking it on Phase 3 is unnecessary.
+
+**(5) AIDP migration** — Separate repo (`aidp`), separate PR. Depends on Phases 1-3 being deployed to the cluster. This is the end-to-end smoke test.
+
+**Justification for Phase 2 before Phase 3:** If operator wiring ships before the CRD schema update, existing CRs still work (the operator reads `app_stack.get('variables') or {}` which returns `{}` if the field is absent). However, new CRs authored with `variables:` will fail Kubernetes admission validation until the CRD schema is updated. In a single-PR atomic deployment (operator + chart), Phases 2 and 3 ship together. If split across PRs, the CRD must go first.
+
+### 7. New vs Modified Summary
+
+| File | Status | Change |
+|------|--------|--------|
+| `operator_module/main.py` | MODIFIED | `render()` helper added (~line 13); `variables` dict at line ~555; `load_values_from_reference` new `variables` param at line 352; call site at line ~675 gets `variables=variables`; manifest branch at line 729 calls `render()` |
+| `weka-app-store-operator-chart/templates/crd.yaml` | MODIFIED | `variables:` property added ~line 89 under `spec.properties.appStack.properties` |
+| `mcp-server/tools/validate_yaml.py` | MODIFIED | Soft-warning logic for `.svc.cluster.local` and `namespace: <literal>` inside `kubernetesManifest`; `variables:` documented as valid |
+| `operator_module/tests/__init__.py` | NEW | Empty — creates the test package (directory is new) |
+| `operator_module/tests/test_render.py` | NEW | Unit tests for `render()` helper covering JSON content, undefined keys, `$$` escape, empty input, multi-occurrence |
+| `mcp-server/tests/fixtures/sample_blueprints/ai-research-portable.yaml` | NEW | Fixture with `variables:` block demonstrating portable pattern |
+| `mcp-server/tests/test_validate_yaml.py` | MODIFIED | Tests for `variables:` accepted; soft-warning emitted on hardcoded DNS literals |
+| `README.md` | MODIFIED | User-facing doc: `${VAR}` syntax, `$$` escape, `${namespace}` auto-default, inline `values:` exclusion caveat |
 
 ---
 
-## Integration Points
+## Data Flow: Substitution in Each Path
 
-### Internal Boundaries
+### Manifest Path
 
-| Boundary | Communication | Notes |
-|----------|---------------|-------|
-| `AppShell` → `Categories` | Props (`selected`, `counts`, `onSelect`) | `onSelect` is `setSelectedCategory` passed directly — no wrapper needed |
-| `AppShell` → `Catalog` | Props (`items` — pre-filtered array) | Catalog has no knowledge of filter or categories |
-| `AppShell` → `EmptyState` | None — rendered by branch condition | No props needed; copy is hardcoded |
-| `AppShell` ↔ `window.location.hash` | Read: lazy initializer. Write: `useEffect` → `history.replaceState` | One-way each direction; no bidirectional sync loop |
+```
+CR spec.appStack.components[i].kubernetesManifest  (raw string with ${VAR} tokens)
+        |
+        v  render(text, variables)  [main.py:729 NEW]
+        |  KeyError -> kopf.PermanentError naming variable + component
+        v
+rendered string (all ${VAR} resolved)
+        |
+        v  tempfile write  [main.py:741]
+        |
+        v  kubectl apply -f <tempfile> -n <targetNamespace>  [main.py:746]
+        |
+        v  comp_status.phase = Ready / Failed  [main.py:749-754]
+```
 
-### Functions and DOM elements touched by this milestone
+### Helm / valuesFiles Path
 
-| Element / Function | Location in current `index.html` | Change |
-|--------------------|------------------------------------|--------|
-| `<div id="catalog-root">` | line 163 | Rename attribute to `id="app-root"` |
-| `Catalog` function | lines 253–302 | Remove internal `ThemeProvider`; accept `items` prop instead of closure |
-| `root.render(h(Catalog))` | line 307 | Change to `root.render(h(AppShell))` |
-| `const rootEl = document.getElementById('catalog-root')` | line 304 | Update selector string to `'app-root'` |
-| `items` array | lines 217–251 | Add `category: '<key>'` field to each object |
-| IIFE destructure | line 166 | Add `useState`, `useEffect` to the React destructure |
+```
+CR spec.appStack.components[i].valuesFiles[j] -> {kind, name, key, namespace}
+        |
+        v  kr8s ConfigMap.get / base64.b64decode  [main.py:358-363]
+        |
+        v  raw string (YAML content with ${VAR} tokens)
+        |
+        v  render(raw_string, variables)  [load_values_from_reference NEW]
+        |  KeyError -> kopf.PermanentError naming kind/name/key
+        v
+rendered YAML string
+        |
+        v  yaml.safe_load(rendered_string)  [main.py:367]
+        |
+        v  deep_merge(inline_values, ref_values)  [main.py:678]
+        |
+        v  HelmOperator.install_or_upgrade(values=merged_values)  [main.py:697]
+```
 
-New additions (all inside the IIFE):
-- `CATEGORIES` constant (above `items`)
-- `AppShell` function
-- `Categories` function
-- `EmptyState` function
+---
+
+## Anti-Patterns to Avoid
+
+### Anti-Pattern 1: Per-Component Variables Construction
+
+**What people do:** Construct the `variables` dict inside the `for component in ordered_components:` loop.
+
+**Why it's wrong:** `variables` is stack-scoped in the CRD (`spec.appStack.variables`). Rebuilding per component is wasteful and obscures intent. The namespace auto-default does not vary per component.
+
+**Do this instead:** Build once before the loop at line ~555 and pass by reference.
+
+### Anti-Pattern 2: Applying `render()` to Parsed YAML Objects
+
+**What people do:** Attempt to walk the `component.values` dict recursively and apply string substitution to leaf string values.
+
+**Why it's wrong:** Requires recursive object traversal, type-checking at every leaf, and dict reassembly. The YAML has already been parsed to Python objects by Kubernetes admission. There is no raw string to apply `string.Template` to.
+
+**Do this instead:** Accept the constraint. Document the workaround (use `valuesFiles:` for values that need substitution). The AIDP use case is fully covered without this complexity.
+
+### Anti-Pattern 3: Using `safe_substitute` Instead of `substitute`
+
+**What people do:** Call `Template(text).safe_substitute(variables)` which silently leaves undefined `${VAR}` tokens in place.
+
+**Why it's wrong:** A typo like `${naemspace}` in a manifest silently passes through to `kubectl apply`, which either creates a resource with a literal `${naemspace}` namespace (rejected with a confusing API server error) or produces object names containing `${}` characters.
+
+**Do this instead:** Use `substitute` (strict). Catch `KeyError`, re-raise as `kopf.PermanentError` with a message naming the offending token and component. The user gets a clear actionable error.
+
+### Anti-Pattern 4: Touching the `on.create`/`on.update` Handler Signatures
+
+**What people do:** Add a `variables` parameter to the kopf handler functions themselves.
+
+**Why it's wrong:** kopf handler signatures are controlled by kopf's decorator injection system. Adding custom parameters that kopf does not inject will cause registration failure.
+
+**Do this instead:** Construct the variables dict inside `handle_appstack_deployment` from `spec` and `namespace` — both already available as kopf-injected kwargs. No handler signature changes needed.
+
+---
+
+## Scaling Considerations
+
+This feature has no meaningful scaling concerns. Substitution is O(n) on the length of the raw YAML string, performed once per component per reconcile. For the AIDP blueprint (the largest known AppStack), all `kubernetesManifest` strings combined are under 50KB. `string.Template` processing is in the microsecond range.
+
+The only runtime cost is the same `kr8s` API call that already exists for each `valuesFiles:` reference. Substitution adds no extra API calls.
 
 ---
 
 ## Sources
 
-- Direct inspection of `app-store-gui/webapp/templates/index.html` (lines 1–330) — HIGH confidence
-- React 18 documentation on lazy state initialization: https://react.dev/reference/react/useState#avoiding-recreating-the-initial-state — HIGH confidence
-- React 18 documentation on lifting state up: https://react.dev/learn/sharing-state-between-components — HIGH confidence
-- MDN: `history.replaceState` vs `pushState` and `hashchange` event behavior — HIGH confidence (replaceState does not fire hashchange in any current browser)
-- PRD `.planning/PRD-gui-app-categories.md` — Implementation Notes and Success Criteria sections
-- `app-store-gui/webapp/templates/index.html` grep confirms: no StrictMode, no existing useState/useEffect/useContext/createContext, no hashchange listener, no existing hash logic
+All findings are from direct inspection of the codebase at HEAD (2026-05-06). No external sources were required.
+
+- `operator_module/main.py` — lines 1-55 (imports), 352-370 (`load_values_from_reference`), 551-803 (`handle_appstack_deployment` and status handling), 807-830 (`on.create`), 1015-1027 (`on.update`)
+- `weka-app-store-operator-chart/templates/crd.yaml` — full file (259 lines), specifically lines 85-192 (appStack schema) and 194-253 (status schema)
+- `mcp-server/tools/validate_yaml.py` — full file (176 lines)
+- `mcp-server/tests/test_validate_yaml.py` — full file (249 lines)
+- `.planning/PRD-appstack-variable-substitution.md`
+- `.planning/PROJECT.md`
 
 ---
 
-*Architecture research for: v4.0 App Categories — single-file CDN React shared filter state*
-*Researched: 2026-04-21*
+*Architecture research for: WEKA App Store — AppStack variable substitution (v5.0)*
+*Researched: 2026-05-06*
