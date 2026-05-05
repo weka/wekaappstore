@@ -10,9 +10,35 @@ The primary users are platform users and cluster admins who interact with OpenCl
 
 OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
 
+## Current Milestone: v5.0 AppStack Variable Substitution
+
+**Goal:** Add a `spec.appStack.variables` map to the `WekaAppStore` CR. The operator performs a single `${VAR}` substitution pass over `kubernetesManifest` strings and over `valuesFiles` content (loaded from ConfigMaps/Secrets) before they are applied or merged into Helm values — so blueprints become portable across namespaces and environments without external pre-render tooling.
+
+**Source PRD:** `.planning/PRD-appstack-variable-substitution.md`
+
+**Target features:**
+- CRD schema: optional `spec.appStack.variables` (`additionalProperties: { type: string }`)
+- `render()` helper using `string.Template` — `${VAR}` syntax, `$$` literal-dollar escape, strict mode
+- Substitution applied to `component.kubernetesManifest` strings before `kubectl apply`
+- Substitution applied to raw ConfigMap/Secret content returned by `load_values_from_reference` before `yaml.safe_load`
+- Auto-default `${namespace}` → CR's `metadata.namespace`
+- Strict failure on undefined refs raised as `kopf.PermanentError` naming the variable + component
+- Validator soft-warning on hardcoded `*.svc.cluster.local` / inline `namespace:` literals inside `kubernetesManifest`
+- README user-facing doc (syntax, `$$` escape, auto-default behavior)
+- AIDP migration follow-up: 17 inline `namespace: rag` literals + DNS literals → `${namespace}` / `${milvusHost}` / `${postgresHost}` as the end-to-end smoke test
+
+**Out of scope (locked by PRD):**
+- Recursion into inline `component.values:` objects (workaround: route through `valuesFiles:`)
+- Templating of operator-control fields (`helmChart.*`, `releaseName`, `targetNamespace`, `readinessCheck.*`)
+- Conditionals, loops, full template engines (Jinja, Go templates)
+- Cross-component variable references
+- External variable sources (Vault, env vars, AWS Secrets Manager)
+- Substitution into `spec.appStack.components[].dependsOn` arrays
+- Backward-incompatible changes — existing CRs without `variables:` MUST behave identically
+
 ## Current State (after v4.0)
 
-No active milestone. v4.0 shipped 2026-04-21. Two natural next directions: pick up the v3.1 deferred E2E chat work (see `.planning/v3.0-KNOWN-ISSUES.md` for tool-wrapper bug, init-container config gap, and model reliability findings), or start a new product direction.
+v4.0 shipped 2026-04-21. v3.1 deferred E2E chat work remains tracked separately (see `.planning/v3.0-KNOWN-ISSUES.md`).
 
 **What's shipped end-to-end:**
 - 8-tool MCP server (`mcp-server/`, v2.0) with flat agent-friendly JSON responses, 103 tests, Dockerfile, CI/CD to `wekachrisjen/weka-app-store-mcp`
@@ -55,7 +81,7 @@ Infrastructure delivered: HTTP transport, EKS deployment via agent-sandbox CRD, 
 
 ### Active
 
-(No active milestone — ready to start next. Two tracked directions: v3.1 E2E chat validation work — see `.planning/v3.0-KNOWN-ISSUES.md` — or a new product milestone. Run `/gsd:new-milestone` to start.)
+v5.0 AppStack Variable Substitution — requirements being defined. See `.planning/REQUIREMENTS.md` once written and `.planning/PRD-appstack-variable-substitution.md` for the source PRD. v3.1 deferred E2E chat work remains tracked separately in `.planning/v3.0-KNOWN-ISSUES.md`.
 
 ### Out of Scope
 
@@ -100,5 +126,22 @@ OpenClaw connects via WebSocket Gateway, uses OpenAI-compatible model API, and r
 | No count Chip on category cards in v4.0 | Deferred to v4.1 polish milestone to keep v4.0 scope tight and ship in one session | ✓ Good — cleanly deferred; worth reconsidering if catalog grows beyond 5 items |
 | Acronym-first category labels ("AIDP" not "NeuralMesh AIDP") | Shorter horizontal footprint on the 3-card row; description beneath carries the full name for accessibility | — Pending — revisit after user feedback on whether "AIDP" alone is recognizable |
 
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd-transition`):
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd-complete-milestone`):
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
+
 ---
-*Last updated: 2026-04-21 after v4.0 milestone shipped*
+*Last updated: 2026-05-06 — milestone v5.0 AppStack Variable Substitution started*

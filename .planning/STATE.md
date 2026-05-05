@@ -1,11 +1,10 @@
 ---
 gsd_state_version: 1.0
-milestone: null
-milestone_name: null
-status: ready_for_next_milestone
-stopped_at: v4.0 shipped and archived 2026-04-21
-last_updated: "2026-04-21T17:58:00.000Z"
-last_activity: 2026-04-21 — v4.0 App Categories on Home Screen shipped, archived, and tagged
+milestone: v5.0
+milestone_name: AppStack Variable Substitution
+status: planning
+last_updated: "2026-05-05T22:25:26.440Z"
+last_activity: 2026-05-05
 progress:
   total_phases: 0
   completed_phases: 0
@@ -25,9 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-04-21 after v4.0 shipped)
 
 ## Current Position
 
-No active milestone.
-
-Last shipped: **v4.0 App Categories on Home Screen** (2026-04-21) — archive at `.planning/milestones/v4.0-*.md`.
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-05-05 — Milestone v5.0 started
 
 ## Accumulated Context
 
