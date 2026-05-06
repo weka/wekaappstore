@@ -5,6 +5,7 @@ import subprocess
 import yaml
 import tempfile
 import os
+import string
 import time
 from datetime import datetime
 from typing import Dict, Any, Optional, List
@@ -247,6 +248,43 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
         else:
             result[key] = value
     return result
+
+
+def render(text: str, variables: Optional[Dict[str, str]]) -> str:
+    """Single-pass ${VAR} substitution via stdlib string.Template.
+
+    Behavior contract (Phase 16, locked by CONTEXT.md D-01..D-06):
+      - Returns text unchanged if variables is None or {} (D-02 empty-vars check first).
+      - Returns text unchanged if '${' is not present in text (D-01 pre-scan guard;
+        backward-compat for cluster_init/app-store-cluster-init.yaml shell scripts
+        containing bare $CRDS, $CRD, $MISSING, $GATEWAY_API_URL — these never enter
+        Template.substitute()).
+      - Otherwise delegates to stdlib string.Template in strict substitution mode
+        (D-03 no subclass; OP-02 strict, not safe_substitute).
+      - $$ escapes to a literal $ (stdlib behavior; OP-04, locked by unit test).
+      - On undefined variable (KeyError) or malformed placeholder like ${} or ${123}
+        (ValueError), re-raises ValueError chained from the original exception
+        (D-04 ValueError not kopf.PermanentError; D-05 message format; D-06 'from e').
+        Phase 18 will catch this ValueError and wrap it in kopf.PermanentError with
+        component context.
+    """
+    if not variables:
+        return text
+    if '${' not in text:
+        # No braced placeholders. Bare $identifier shell content (e.g., $CRDS in
+        # cluster_init/app-store-cluster-init.yaml) MUST short-circuit here to
+        # avoid Template.substitute() raising KeyError on bare references. The
+        # one exception is the $$ literal-dollar escape (OP-04), which still
+        # requires Template processing to collapse $$ -> $.
+        if '$$' not in text:
+            return text
+    try:
+        return string.Template(text).substitute(variables)
+    except KeyError as e:
+        name = e.args[0] if e.args else ''
+        raise ValueError(f"Undefined variable: ${{{name}}}") from e
+    except ValueError as e:
+        raise ValueError(f"Malformed placeholder in template: {e}") from e
 
 
 # ===================== CRD Strategy Helpers =====================
