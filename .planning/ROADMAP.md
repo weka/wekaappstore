@@ -45,7 +45,7 @@ See MILESTONES.md for full v2.0 summary.
 
 **Milestone Goal:** Add `spec.appStack.variables` to the `WekaAppStore` CR. The operator performs a single `${VAR}` substitution pass over `kubernetesManifest` strings and `valuesFiles` content (loaded from ConfigMaps/Secrets) before they are applied or merged into Helm values. Blueprints become portable across namespaces and environments without external pre-render tooling.
 
-- [ ] **Phase 16: render() Helper and Test Scaffolding** — Pure `render()` function with pre-scan backward-compat guard; new `operator_module/tests/` directory; no live operator paths touched
+- [x] **Phase 16: render() Helper and Test Scaffolding** — Pure `render()` function with pre-scan backward-compat guard; new `operator_module/tests/` directory; no live operator paths touched (completed 2026-05-06)
 - [ ] **Phase 17: CRD Schema Additive Update** — `spec.appStack.variables` optional map added to CRD; admission-validated as string-only; independently deployable
 - [ ] **Phase 18: Operator Wiring and Docs** — Wire `render()` into `handle_appstack_deployment` and `load_values_from_reference`; key-name validation; fetch-error upgrade; `field='spec'` guard; user-facing README section
 - [ ] **Phase 19: Validator Soft-Warning and Portable Fixture** — Validator accepts `variables:` block without error; soft-warns on hardcoded DNS / `namespace:` literals; `ai-research-portable.yaml` fixture
@@ -122,10 +122,10 @@ Plans:
   3. `render("value: ${UNDEF}", {"x": "y"})` raises a descriptive error naming `UNDEF`; `render("bad: ${}", {"x": "y"})` also raises a descriptive error — both `KeyError` and `ValueError` are caught (OP-03 verified). Malformed-placeholder examples pass non-empty variables to bypass the D-02 empty-vars short-circuit; in production the variables dict always contains the auto-default `${namespace}` key so this is the realistic path.
   4. `render("no-tokens", None)` and `render("no-tokens", {})` both return `"no-tokens"` unchanged (OP-05 verified)
   5. `pytest operator_module/tests/test_render.py` passes all cases including JSON-safety check (TST-01 verified)
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 16-01-PLAN.md — render() helper added to operator_module/main.py + operator_module/tests/ scaffolding (__init__.py, conftest.py, test_render.py) + operator_module/requirements-dev.txt
+- [x] 16-01-PLAN.md — render() helper added to operator_module/main.py + operator_module/tests/ scaffolding (__init__.py, conftest.py, test_render.py) + operator_module/requirements-dev.txt
 **UI hint**: no
 
 ### Phase 17: CRD Schema Additive Update
@@ -196,7 +196,7 @@ Plans:
 | 13. Kubernetes Manifests and Sidecar Wiring | v3.0 | 3/3 | Complete | 2026-03-24 |
 | 14. End-to-End Validation | v3.1 | 1/2 | Descoped → v3.1 | 2026-04-21 |
 | 15. App Categories Feature | v4.0 | Complete | 2026-04-21 | 2026-04-21 |
-| 16. render() Helper and Test Scaffolding | v5.0 | 0/1 | Planned | - |
+| 16. render() Helper and Test Scaffolding | v5.0 | 1/1 | Complete   | 2026-05-06 |
 | 17. CRD Schema Additive Update | v5.0 | 0/TBD | Not started | - |
 | 18. Operator Wiring and Docs | v5.0 | 0/TBD | Not started | - |
 | 19. Validator Soft-Warning and Portable Fixture | v5.0 | 0/TBD | Not started | - |
