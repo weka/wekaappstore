@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: AppStack Variable Substitution
 status: completed
-stopped_at: Phase 16 context gathered
-last_updated: "2026-05-06T10:41:31.939Z"
+stopped_at: Phase 17 context gathered
+last_updated: "2026-05-06T11:58:26.750Z"
 last_activity: 2026-05-06 -- Phase 16 marked complete
 progress:
   total_phases: 9
@@ -60,6 +60,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-05-06T04:16:12.529Z
-Stopped at: Phase 16 context gathered
-Resume file: .planning/phases/16-render-helper-and-test-scaffolding/16-CONTEXT.md
+Last session: 2026-05-06T11:58:26.645Z
+Stopped at: Phase 17 context gathered
+Resume file: .planning/phases/17-crd-schema-additive-update/17-CONTEXT.md
