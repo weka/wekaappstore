@@ -102,7 +102,7 @@ Requirements covered: OP-01, OP-02, OP-03, OP-04, OP-05, TST-01.
 - Helper signature: `def render(text: str, variables: Optional[Dict[str, str]]) -> str:` — consistent with the type-hint style elsewhere in `main.py` (`Dict[str, Any]`, `Optional[...]`). Variables map is `str → str` (non-string values are blocked at the CRD admission layer per Phase 17's CRD-03; defensive coding here can stay minimal).
 - Error message exemplars (locked in the test):
   - `render("value: ${UNDEF}", {"x": "y"})` → `ValueError("Undefined variable: ${UNDEF}")`
-  - `render("bad: ${}", {})` → `ValueError("Malformed placeholder in template: ...")`
+  - `render("bad: ${}", {"x": "y"})` → `ValueError("Malformed placeholder in template: ...")` (note: variables dict is non-empty to bypass the D-02 empty-vars short-circuit; in production the dict always contains auto-default `namespace`)
   - `render("bad: ${123}", {"x": "y"})` → `ValueError("Malformed placeholder in template: ...")`
 - The `$$` test: `render("price is $$5", {"x": "y"})` → `"price is $5"`.
 - The cluster_init regression test loads from disk (using `Path(__file__).parents[2] / 'cluster_init' / 'app-store-cluster-init.yaml'`) rather than copy-pasting the shell script — this catches drift if the bootstrap manifest is later edited.

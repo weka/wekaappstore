@@ -119,10 +119,13 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. `render("$CRDS && $CRD", {})` returns the string unchanged (pre-scan guard; OP-01 verified) — existing `cluster_init/` shell-script manifests cannot regress after upgrade
   2. `render("hello ${NAME}", {"NAME": "world"})` returns `"hello world"`; `render("price is $$5", {"x": "y"})` returns `"price is $5"` (OP-02, OP-04 verified)
-  3. `render("value: ${UNDEF}", {"x": "y"})` raises a descriptive error naming `UNDEF`; `render("bad: ${}", {})` also raises a descriptive error — both `KeyError` and `ValueError` are caught (OP-03 verified)
+  3. `render("value: ${UNDEF}", {"x": "y"})` raises a descriptive error naming `UNDEF`; `render("bad: ${}", {"x": "y"})` also raises a descriptive error — both `KeyError` and `ValueError` are caught (OP-03 verified). Malformed-placeholder examples pass non-empty variables to bypass the D-02 empty-vars short-circuit; in production the variables dict always contains the auto-default `${namespace}` key so this is the realistic path.
   4. `render("no-tokens", None)` and `render("no-tokens", {})` both return `"no-tokens"` unchanged (OP-05 verified)
   5. `pytest operator_module/tests/test_render.py` passes all cases including JSON-safety check (TST-01 verified)
-**Plans**: TBD
+**Plans:** 1 plan
+
+Plans:
+- [ ] 16-01-PLAN.md — render() helper added to operator_module/main.py + operator_module/tests/ scaffolding (__init__.py, conftest.py, test_render.py) + operator_module/requirements-dev.txt
 **UI hint**: no
 
 ### Phase 17: CRD Schema Additive Update
@@ -193,7 +196,7 @@ Plans:
 | 13. Kubernetes Manifests and Sidecar Wiring | v3.0 | 3/3 | Complete | 2026-03-24 |
 | 14. End-to-End Validation | v3.1 | 1/2 | Descoped → v3.1 | 2026-04-21 |
 | 15. App Categories Feature | v4.0 | Complete | 2026-04-21 | 2026-04-21 |
-| 16. render() Helper and Test Scaffolding | v5.0 | 0/TBD | Not started | - |
+| 16. render() Helper and Test Scaffolding | v5.0 | 0/1 | Planned | - |
 | 17. CRD Schema Additive Update | v5.0 | 0/TBD | Not started | - |
 | 18. Operator Wiring and Docs | v5.0 | 0/TBD | Not started | - |
 | 19. Validator Soft-Warning and Portable Fixture | v5.0 | 0/TBD | Not started | - |
