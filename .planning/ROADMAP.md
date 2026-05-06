@@ -138,7 +138,10 @@ Plans:
   3. A CR with `spec.appStack.variables: {count: 42}` (integer value) is rejected at admission with a type error (CRD-03 verified)
   4. `kubectl explain wekastoreapp.spec.appStack.variables` shows the description including `${VAR}` syntax, `$$` escape, `${namespace}` auto-default, and identifier-name requirement (CRD-02 verified)
   5. Existing CRs without `variables:` continue to pass admission and reconcile identically — the field is optional with no `required:` constraint (CRD-01 verified)
-**Plans**: TBD
+**Plans:** 1 plan
+
+Plans:
+- [ ] 17-01-PLAN.md — Insert spec.appStack.variables schema block, bump Chart.yaml to 0.1.62, ship verify-crd.sh with 4 dry-run fixtures + --apply mode + kubectl explain keyword check
 
 ### Phase 18: Operator Wiring and Docs
 **Goal**: The `render()` helper is wired into both substitution sites in `handle_appstack_deployment` and `load_values_from_reference`; `${namespace}` auto-defaults to CR namespace; key-name validation, fetch-error upgrade, and `field='spec'` guard are in place; README documents the feature; the non-wiring of `handle_helm_deployment` is locked by a test
@@ -197,7 +200,7 @@ Plans:
 | 14. End-to-End Validation | v3.1 | 1/2 | Descoped → v3.1 | 2026-04-21 |
 | 15. App Categories Feature | v4.0 | Complete | 2026-04-21 | 2026-04-21 |
 | 16. render() Helper and Test Scaffolding | v5.0 | 1/1 | Complete   | 2026-05-06 |
-| 17. CRD Schema Additive Update | v5.0 | 0/TBD | Not started | - |
+| 17. CRD Schema Additive Update | v5.0 | 0/1 | Not started | - |
 | 18. Operator Wiring and Docs | v5.0 | 0/TBD | Not started | - |
 | 19. Validator Soft-Warning and Portable Fixture | v5.0 | 0/TBD | Not started | - |
 | 20. AIDP Migration Smoke Test | v5.0 | 0/TBD | Not started | - |
