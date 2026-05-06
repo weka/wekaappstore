@@ -4,8 +4,8 @@ milestone: v5.0
 milestone_name: AppStack Variable Substitution
 status: executing
 stopped_at: Phase 16 context gathered
-last_updated: "2026-05-06T04:37:19.721Z"
-last_activity: 2026-05-06 -- Phase 16 planning complete
+last_updated: "2026-05-06T10:25:02.064Z"
+last_activity: 2026-05-06 -- Phase 16 execution started
 progress:
   total_phases: 9
   completed_phases: 0
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-06 — milestone v5.0 started)
 
 **Core value:** OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
-**Current focus:** v5.0 AppStack Variable Substitution — roadmap defined, ready for Phase 16.
+**Current focus:** Phase 16 — render-helper-and-test-scaffolding
 
 ## Current Position
 
-Phase: 16 — render() Helper and Test Scaffolding
-Plan: —
-Status: Ready to execute
-Last activity: 2026-05-06 -- Phase 16 planning complete
+Phase: 16 (render-helper-and-test-scaffolding) — EXECUTING
+Plan: 1 of 1
+Status: Executing Phase 16
+Last activity: 2026-05-06 -- Phase 16 execution started
 
 ```
 Progress: [__________] 0% (0/5 phases)
