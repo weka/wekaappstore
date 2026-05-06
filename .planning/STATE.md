@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: AppStack Variable Substitution
 status: planning
-last_updated: "2026-05-05T22:25:26.440Z"
-last_activity: 2026-05-05
+last_updated: "2026-05-06T00:00:00.000Z"
+last_activity: 2026-05-06
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,19 +17,37 @@ progress:
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-04-21 after v4.0 shipped)
+See: `.planning/PROJECT.md` (updated 2026-05-06 — milestone v5.0 started)
 
 **Core value:** OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
-**Current focus:** No active milestone — ready for next. Candidates: v3.1 E2E chat validation (deferred from v3.0; see `v3.0-KNOWN-ISSUES.md`) or a new product direction.
+**Current focus:** v5.0 AppStack Variable Substitution — roadmap defined, ready for Phase 16.
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 16 — render() Helper and Test Scaffolding
 Plan: —
-Status: Defining requirements
-Last activity: 2026-05-05 — Milestone v5.0 started
+Status: Planning — roadmap approved, plans not yet written
+Last activity: 2026-05-06 — Roadmap created for v5.0 (Phases 16-20)
+
+```
+Progress: [__________] 0% (0/5 phases)
+```
 
 ## Accumulated Context
+
+### Key Architectural Decisions (v5.0)
+
+- **Pre-scan guard is non-negotiable:** `render()` must return text unchanged when no `${...}` pattern is present (regex check). The PRD's `if not variables` guard is broken because `${namespace}` auto-default makes variables always non-empty. Without the pre-scan guard, `cluster_init/app-store-cluster-init.yaml` shell scripts (`$CRDS`, `$CRD`, `$MISSING`, `$GATEWAY_API_URL`) raise `KeyError` on first reconcile after upgrade.
+- **Single-pass only — no recursive resolution:** Variable values are taken literally. The PRD's `milvusHost: milvus.${namespace}.svc.cluster.local` example does NOT work. AIDP migration must use fully-resolved values (e.g., `milvus.aidp-prod.svc.cluster.local`). README must NOT show the cross-referencing pattern.
+- **Both KeyError AND ValueError must be caught** at every `render()` call site — `Template.substitute()` raises `ValueError` for malformed placeholders like `${}` or `${123}`.
+- **handle_helm_deployment single-chart path must NOT receive variables wiring** — `variables=None` default protects it; TST-05 locks the non-wiring.
+- **Phase 20 is a separate repo** — all deliverables in `/Users/christopherjenkins/git/aidp`, not `wekaappstore`.
+
+### Phase Parallelism Notes
+
+- Phase 16 and Phase 17 can be started in parallel (no dependency between them)
+- Phase 19 can be worked in parallel with Phases 17-18 (no operator code dependency)
+- Phase 20 requires Phases 16-18 deployed to cluster before execution
 
 ### Open Blockers / Tracked Work
 
@@ -41,6 +59,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-21 — v4.0 shipping session
-Stopped at: v4.0 archived and tagged; ready for `/gsd:new-milestone` or v3.1 pickup
+Last session: 2026-05-06 — v5.0 roadmap creation session
+Stopped at: Roadmap written; ready for `/gsd-plan-phase 16`
 Resume file: None

@@ -108,48 +108,48 @@ Mapping of requirements to roadmap phases. Populated by the roadmapper.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| OP-01 | TBD | Pending |
-| OP-02 | TBD | Pending |
-| OP-03 | TBD | Pending |
-| OP-04 | TBD | Pending |
-| OP-05 | TBD | Pending |
-| OP-06 | TBD | Pending |
-| OP-07 | TBD | Pending |
-| OP-08 | TBD | Pending |
-| OP-09 | TBD | Pending |
-| OP-10 | TBD | Pending |
-| OP-11 | TBD | Pending |
-| OP-12 | TBD | Pending |
-| CRD-01 | TBD | Pending |
-| CRD-02 | TBD | Pending |
-| CRD-03 | TBD | Pending |
-| VAL-01 | TBD | Pending |
-| VAL-02 | TBD | Pending |
-| VAL-03 | TBD | Pending |
-| VAL-04 | TBD | Pending |
-| VAL-05 | TBD | Pending |
-| TST-01 | TBD | Pending |
-| TST-02 | TBD | Pending |
-| TST-03 | TBD | Pending |
-| TST-04 | TBD | Pending |
-| TST-05 | TBD | Pending |
-| DOC-01 | TBD | Pending |
-| DOC-02 | TBD | Pending |
-| DOC-03 | TBD | Pending |
-| DOC-04 | TBD | Pending |
-| DOC-05 | TBD | Pending |
-| DOC-06 | TBD | Pending |
-| MIG-01 | TBD | Pending |
-| MIG-02 | TBD | Pending |
-| MIG-03 | TBD | Pending |
-| MIG-04 | TBD | Pending |
-| MIG-05 | TBD | Pending |
+| OP-01 | Phase 16 | Pending |
+| OP-02 | Phase 16 | Pending |
+| OP-03 | Phase 16 | Pending |
+| OP-04 | Phase 16 | Pending |
+| OP-05 | Phase 16 | Pending |
+| OP-06 | Phase 18 | Pending |
+| OP-07 | Phase 18 | Pending |
+| OP-08 | Phase 18 | Pending |
+| OP-09 | Phase 18 | Pending |
+| OP-10 | Phase 18 | Pending |
+| OP-11 | Phase 18 | Pending |
+| OP-12 | Phase 18 | Pending |
+| CRD-01 | Phase 17 | Pending |
+| CRD-02 | Phase 17 | Pending |
+| CRD-03 | Phase 17 | Pending |
+| VAL-01 | Phase 19 | Pending |
+| VAL-02 | Phase 19 | Pending |
+| VAL-03 | Phase 19 | Pending |
+| VAL-04 | Phase 19 | Pending |
+| VAL-05 | Phase 19 | Pending |
+| TST-01 | Phase 16 | Pending |
+| TST-02 | Phase 18 | Pending |
+| TST-03 | Phase 18 | Pending |
+| TST-04 | Phase 19 | Pending |
+| TST-05 | Phase 18 | Pending |
+| DOC-01 | Phase 18 | Pending |
+| DOC-02 | Phase 18 | Pending |
+| DOC-03 | Phase 18 | Pending |
+| DOC-04 | Phase 18 | Pending |
+| DOC-05 | Phase 18 | Pending |
+| DOC-06 | Phase 18 | Pending |
+| MIG-01 | Phase 20 | Pending |
+| MIG-02 | Phase 20 | Pending |
+| MIG-03 | Phase 20 | Pending |
+| MIG-04 | Phase 20 | Pending |
+| MIG-05 | Phase 20 | Pending |
 
 **Coverage:**
 - v1 requirements: 36 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 36 ⚠️ (will be 0 after roadmap completes)
+- Mapped to phases: 36
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-05-06*
-*Last updated: 2026-05-06 — initial v5.0 definition*
+*Last updated: 2026-05-06 — traceability filled in by roadmapper (Phases 16-20)*
