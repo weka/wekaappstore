@@ -407,10 +407,34 @@ def should_skip_crds_for_component(helm_cfg: Dict[str, Any], chart_ref: str, ver
     return bool(chart_crds & existing)
 
 
-def load_values_from_reference(kind: str, name: str, key: str, namespace: str) -> Dict[str, Any]:
+def load_values_from_reference(
+    kind: str,
+    name: str,
+    key: str,
+    namespace: str,
+    variables: Optional[Dict[str, str]] = None,
+    *,
+    comp_name: Optional[str] = None,
+    ref_index: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Load Helm values from a ConfigMap or Secret, optionally rendering ${VAR} substitution.
+
+    New keyword-only params (Phase 18, OP-08/OP-09/OP-11):
+      variables  -- if not None, render the raw value string with these vars
+                    BEFORE yaml.safe_load (Phase 18 D-15 / OP-08).
+      comp_name  -- component name for error context (Phase 18 D-03/D-04).
+      ref_index  -- valuesFiles[] index for error context (Phase 18 D-03/D-04).
+
+    Error dispatch (Phase 18 D-01):
+      kr8s.NotFoundError, APITimeoutError, ServerError(>=500) -> kopf.TemporaryError(delay=30)
+      kr8s.ServerError(4xx)                                   -> kopf.PermanentError
+      yaml.YAMLError                                          -> kopf.PermanentError
+      render() ValueError (via _render_or_raise)              -> kopf.PermanentError
     """
-    Load Helm values from a ConfigMap or Secret
-    """
+    # Build a stable resource-locator string for error messages.
+    # Threat note (T-18-02): names ONLY metadata, never the rendered/decoded value.
+    ctx = f"Component {comp_name!r} valuesFiles[{ref_index}]" if comp_name is not None else f"valuesFiles {kind} {namespace}/{name}"
+
     try:
         if kind == "ConfigMap":
             cm = kr8s.objects.ConfigMap.get(name=name, namespace=namespace)
@@ -420,12 +444,42 @@ def load_values_from_reference(kind: str, name: str, key: str, namespace: str) -
             import base64
             values_yaml = base64.b64decode(secret.data.get(key, "")).decode('utf-8')
         else:
-            raise ValueError(f"Unsupported kind: {kind}")
-        
+            raise kopf.PermanentError(f"{ctx}: unsupported valuesFiles kind: {kind}")
+    except kr8s.NotFoundError as e:
+        raise kopf.TemporaryError(
+            f"{ctx}: {kind} {namespace}/{name} not found (will retry in 30s)",
+            delay=30,
+        ) from e
+    except kr8s.APITimeoutError as e:
+        raise kopf.TemporaryError(
+            f"{ctx}: timeout fetching {kind} {namespace}/{name} (will retry in 30s)",
+            delay=30,
+        ) from e
+    except kr8s.ServerError as e:
+        status = e.response.status_code if getattr(e, "response", None) is not None else None
+        if status is not None and status >= 500:
+            raise kopf.TemporaryError(
+                f"{ctx}: API server error {status} fetching {kind} {namespace}/{name} (will retry in 30s)",
+                delay=30,
+            ) from e
+        raise kopf.PermanentError(
+            f"{ctx}: API error fetching {kind} {namespace}/{name}: {e}"
+        ) from e
+
+    # Render BEFORE yaml.safe_load (Phase 18 OP-08). source_desc names only metadata (T-18-02).
+    if variables is not None:
+        values_yaml = _render_or_raise(
+            values_yaml,
+            variables,
+            source_desc=f"{ctx} {kind} {namespace}/{name}[{key}]",
+        )
+
+    try:
         return yaml.safe_load(values_yaml) or {}
-    except Exception as e:
-        logging.error(f"Error loading values from {kind}/{name}: {str(e)}")
-        return {}
+    except yaml.YAMLError as e:
+        raise kopf.PermanentError(
+            f"{ctx}: malformed YAML in {kind} {namespace}/{name}[{key}]: {e}"
+        ) from e
 
 
 def resolve_dependencies(components: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
