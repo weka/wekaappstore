@@ -287,6 +287,26 @@ def render(text: str, variables: Optional[Dict[str, str]]) -> str:
         raise ValueError(f"Malformed placeholder in template: {e}") from e
 
 
+def _render_or_raise(
+    text: str,
+    variables: Optional[Dict[str, str]],
+    *,
+    source_desc: str,
+) -> str:
+    """Render text with variables; convert KeyError/ValueError to kopf.PermanentError.
+
+    Wraps Phase 16 render() so each substitution call site can pass a
+    caller-specific source_desc (component name, valuesFiles index, kind,
+    namespace/name, key) without duplicating try/except boilerplate.
+
+    Per CONTEXT.md D-15 (Phase 18, locked).
+    """
+    try:
+        return render(text, variables)
+    except (KeyError, ValueError) as e:
+        raise kopf.PermanentError(f"{source_desc}: {e}") from e
+
+
 # ===================== CRD Strategy Helpers =====================
 
 class HelmError(RuntimeError):
