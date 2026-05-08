@@ -77,6 +77,127 @@ Example: expose the service externally and change the image tag
 Alternatively, create a custom values.yaml and pass -f values.yaml.
 
 
+## Variable substitution in AppStack manifests
+
+The operator performs single-pass `${VAR}` substitution over `kubernetesManifest:` strings and `valuesFiles:` content (loaded from ConfigMaps and Secrets) before they are applied or merged into Helm values. This makes a single AppStack CR portable across namespaces and environments — the same blueprint deploys into `staging`, `aidp-prod`, or `aidp-test` by changing `metadata.namespace` and the `spec.appStack.variables` map, without forking the YAML.
+
+### Syntax
+
+| Syntax | Behavior |
+| --- | --- |
+| `${VAR}` | Substituted with the value of `VAR` from `spec.appStack.variables`. Strict — undefined references fail loudly. |
+| `$$` | Literal dollar sign. Use this when a manifest needs a real `$` (for example a database password starting with `$`). |
+| `${namespace}` | Auto-defaults to the CR's `metadata.namespace`. You can override by listing `namespace:` explicitly under `spec.appStack.variables`. |
+| undefined `${VAR}` | Raises `kopf.PermanentError` naming the variable, the component, and the manifest/valuesFiles location. The CR must be fixed and re-applied. |
+| invalid key (e.g., `my-host`) | Rejected at admission by the CRD schema, and again at the operator. Variable names must match the Python identifier pattern `[_a-zA-Z][_a-zA-Z0-9]*`. |
+
+### Worked example
+
+The example below mirrors the AIDP migration pattern: two components, `${namespace}` auto-defaulting, an explicit `${milvusHost}` consumed both inside a `kubernetesManifest` and inside a ConfigMap-loaded `valuesFiles` reference.
+
+```yaml
+apiVersion: warp.io/v1alpha1
+kind: WekaAppStore
+metadata:
+  name: ai-research
+  namespace: aidp-prod
+spec:
+  appStack:
+    variables:
+      milvusHost: milvus.aidp-prod.svc.cluster.local
+    components:
+      - name: vector-db
+        helmChart:
+          repository: oci://registry.example.com/charts
+          name: milvus
+          version: 4.2.1
+        valuesFiles:
+          - kind: ConfigMap
+            name: milvus-values
+            key: values.yaml
+        # The ConfigMap above contains:
+        #   externalAccess:
+        #     enabled: true
+        #     host: ${milvusHost}
+        # which the operator renders to milvus.aidp-prod.svc.cluster.local
+        # before merging into Helm values.
+
+      - name: ingress
+        kubernetesManifest: |
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: ai-research-ingress
+            namespace: ${namespace}
+          spec:
+            rules:
+              - host: ai-research.example.com
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: ai-research
+                          port:
+                            number: 80
+```
+
+Apply the same blueprint to a different namespace by changing `metadata.namespace` (and the `milvusHost` value to match):
+
+```yaml
+metadata:
+  name: ai-research
+  namespace: aidp-test
+spec:
+  appStack:
+    variables:
+      milvusHost: milvus.aidp-test.svc.cluster.local
+    components:
+      # ... unchanged ...
+```
+
+### Variable values are NOT recursively resolved
+
+> **Note:** Variable values are taken literally — no recursive resolution. The operator runs a single substitution pass; `${...}` tokens that appear inside variable VALUES are NOT expanded.
+
+```yaml
+# WRONG (this does NOT work):
+spec:
+  appStack:
+    variables:
+      milvusHost: milvus.${namespace}.svc.cluster.local   # nested ${} is NOT expanded
+```
+
+```yaml
+# CORRECT (use fully-resolved values):
+spec:
+  appStack:
+    variables:
+      milvusHost: milvus.aidp-prod.svc.cluster.local
+```
+
+If you have many environments, generate the fully-resolved CR per environment from your own templating tool (Helm chart wrapper, kustomize, sed, etc.) — the operator deliberately stops at single-pass substitution to keep failure modes predictable.
+
+### Operator-control fields are NOT templated
+
+The fields below are operator-control fields and are NOT subject to `${VAR}` substitution. Putting `${...}` in any of them is a no-op that will silently fail to resolve at deploy time:
+
+- `helmChart.repository`, `helmChart.name`, `helmChart.version`
+- `releaseName`
+- `targetNamespace`
+- `readinessCheck.*` (`type`, `name`, `namespace`, `timeout`)
+
+**Recommendation:** Omit `targetNamespace` and let the operator default to `metadata.namespace`. Templating is not supported on this field; setting it pins the component to a specific namespace and defeats the portability the variables block provides.
+
+### Errors
+
+- **Undefined variable** (e.g., `${unset}` appears in a manifest with no matching key in `spec.appStack.variables`): `kopf.PermanentError` is raised. The error message names the variable, the component, and the source location. The reconcile does NOT retry — the CR must be edited and re-applied.
+- **Missing referenced ConfigMap or Secret** (e.g., `valuesFiles[].name` does not exist in the cluster yet): `kopf.TemporaryError(delay=30)` is raised. The operator retries every 30 seconds — useful when the ConfigMap is created after the CR.
+- **Malformed `${...}`** (e.g., `${}`, `${123}`, bare `$` at end of line): `kopf.PermanentError` is raised. The error message names the malformed placeholder.
+- **Invalid variable key** (e.g., `my-host` with a hyphen): `kopf.PermanentError` is raised at the start of reconcile, before any deployment work. Variable names must match `[_a-zA-Z][_a-zA-Z0-9]*`.
+
+
 ## Upgrading
 Fetch the latest chart index and upgrade the release:
 - helm repo update
