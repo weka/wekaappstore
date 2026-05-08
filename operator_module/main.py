@@ -6,6 +6,7 @@ import yaml
 import tempfile
 import os
 import string
+import re
 import time
 from datetime import datetime
 from typing import Dict, Any, Optional, List
@@ -686,7 +687,22 @@ def handle_appstack_deployment(body, spec, name, namespace, status, **kwargs):
                 'lastTransitionTime': datetime.utcnow().isoformat() + 'Z'
             }]
         }
-    
+
+    # Build stack-scope variables dict with key/type validation (OP-06, OP-10).
+    # Validation runs BEFORE any deployment work — invalid keys/values fail fast
+    # without partial deployment. Defense-in-depth alongside Phase 17 CRD admission.
+    raw_user_vars = app_stack.get('variables') or {}
+    for key in raw_user_vars:
+        if not re.fullmatch(r'^[_a-zA-Z][_a-zA-Z0-9]*$', key):
+            raise kopf.PermanentError(
+                f"Invalid variable key {key!r}: must match Python identifier syntax [_a-zA-Z][_a-zA-Z0-9]*"
+            )
+        if not isinstance(raw_user_vars[key], str):
+            raise kopf.PermanentError(
+                f"Invalid variable value for {key!r}: must be a string"
+            )
+    stack_vars = {'namespace': namespace, **raw_user_vars}
+
     # Resolve dependencies
     try:
         ordered_components = resolve_dependencies(enabled_components)
@@ -779,13 +795,16 @@ def handle_appstack_deployment(body, spec, name, namespace, status, **kwargs):
                 # Merge values (inline + referenced files)
                 merged_values = component.get('values', {}).copy()
                 if 'valuesFiles' in component:
-                    for values_ref in component['valuesFiles']:
+                    for idx, values_ref in enumerate(component['valuesFiles']):
                         ref_ns = values_ref.get('namespace', target_namespace)
                         ref_values = load_values_from_reference(
                             kind=values_ref['kind'],
                             name=values_ref['name'],
                             key=values_ref['key'],
-                            namespace=ref_ns
+                            namespace=ref_ns,
+                            variables=stack_vars,
+                            comp_name=comp_name,
+                            ref_index=idx,
                         )
                         merged_values = _deep_merge(merged_values, ref_values)
                 
@@ -849,6 +868,12 @@ def handle_appstack_deployment(body, spec, name, namespace, status, **kwargs):
                     comp_status['phase'] = 'Ready'
                     comp_status['message'] = 'Skipped: Empty manifest (placeholder component)'
                 else:
+                    # Render ${VAR} substitutions before kubectl apply (OP-07).
+                    manifest_yaml = _render_or_raise(
+                        manifest_yaml,
+                        stack_vars,
+                        source_desc=f"Component '{comp_name}'.kubernetesManifest",
+                    )
                     # Write manifest to temp file and apply
                     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
                         f.write(manifest_yaml)
@@ -1124,7 +1149,7 @@ def handle_pod_deployment(body, spec, name, namespace, **kwargs):
 
 
 # Handle updates to WarrpAppStore resources
-@kopf.on.update('warp.io', 'v1alpha1', 'wekaappstores')
+@kopf.on.update('warp.io', 'v1alpha1', 'wekaappstores', field='spec')
 def update_warrpappstore_function(body, spec, name, namespace, status, patch, **kwargs):
     logging.info(f"*** WarrpAppStore Updated: {name}")
     
