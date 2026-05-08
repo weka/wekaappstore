@@ -193,40 +193,14 @@ def test_kubernetes_manifest_substitutes_namespace():
 
 
 def test_undefined_variable_in_manifest_raises_permanent_error():
-    """OP-07 + DOC-04: undefined ${VAR} in manifest -> kopf.PermanentError naming variable + component."""
+    """OP-07 + DOC-04: undefined ${VAR} -> kopf.PermanentError naming variable + component.
+
+    Targets _render_or_raise directly to lock the exact error format string
+    (message must contain the variable name AND `Component '<name>'`).
+    Reconcile-boundary propagation is asserted separately by
+    test_handle_appstack_propagates_permanent_error_to_kopf_boundary.
+    """
     import kopf
-    from main import handle_appstack_deployment
-
-    components = [{
-        "name": "ingress",
-        "kubernetesManifest": "metadata:\n  namespace: ${unset}\n",
-    }]
-    spec = {"appStack": {"components": components}}
-
-    with patch("main.subprocess.run"), \
-         patch("main._load_kube_config_once", return_value=False), \
-         patch("main.HelmOperator"):
-        handle_appstack_deployment(
-            body={"spec": spec},
-            spec=spec,
-            name="ai-research",
-            namespace="staging",
-            status={},
-        )
-
-    # The operator catches per-component exceptions and records them in
-    # comp_status['message'] rather than re-raising. Verify the rendered
-    # error chain reaches that field with the expected metadata.
-    # We re-run with patch on _render_or_raise direct invocation expectation:
-    # The test above proves no exception escapes; now assert message content.
-    # Re-run with capture:
-    captured_messages = []
-
-    def _capture_run(*args, **kwargs):
-        return _real_subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
-
-    # Direct verification: invoke _render_or_raise to confirm the format,
-    # since the AppStack loop wraps it inside a try/except logged into comp_status.
     from main import _render_or_raise
 
     with pytest.raises(kopf.PermanentError) as exc_info:
@@ -478,6 +452,73 @@ def test_malformed_yaml_raises_permanent_error():
         f"got chain ending with {type(cause).__name__}: {cause!r}"
     )
     assert "malformed-cm" in str(exc_info.value)
+
+
+def test_handle_appstack_propagates_permanent_error_to_kopf_boundary():
+    """OP-07 reconcile-boundary: kopf.PermanentError raised by render() inside the
+    component loop must propagate OUT of handle_appstack_deployment, not be
+    swallowed into comp_status['message']. Phase 18 closure fix added the explicit
+    re-raise at main.py:899-905 before the broad `except Exception`.
+    """
+    import kopf
+    from main import handle_appstack_deployment
+
+    components = [{
+        "name": "ingress",
+        "kubernetesManifest": "metadata:\n  namespace: ${unset}\n",
+    }]
+    spec = {"appStack": {"components": components}}
+
+    with patch("main.subprocess.run"), \
+         patch("main._load_kube_config_once", return_value=False), \
+         patch("main.HelmOperator"), \
+         pytest.raises(kopf.PermanentError) as exc_info:
+        handle_appstack_deployment(
+            body={"spec": spec},
+            spec=spec,
+            name="ai-research",
+            namespace="staging",
+            status={},
+        )
+
+    msg = str(exc_info.value)
+    assert "unset" in msg
+    assert "ingress" in msg
+
+
+def test_handle_appstack_propagates_temporary_error_to_kopf_boundary():
+    """OP-11 reconcile-boundary: kopf.TemporaryError(delay=30) raised by
+    load_values_from_reference inside the component loop must propagate OUT of
+    handle_appstack_deployment so kopf can reschedule the reconcile. Pre-Phase-18
+    swallow at main.py:899 hid transient cluster failures from kopf; the closure
+    fix re-raises kopf.* explicitly.
+    """
+    import kopf
+    import kr8s
+    from main import handle_appstack_deployment
+
+    components = [_appstack_oci_helm_component(
+        comp_name="vector-db",
+        values_files=[{"kind": "ConfigMap", "name": "missing-cm", "key": "values.yaml"}],
+    )]
+    spec = {"appStack": {"components": components}}
+
+    with patch("main.subprocess.run"), \
+         patch("main._load_kube_config_once", return_value=False), \
+         patch("main.kr8s.objects.ConfigMap.get", side_effect=kr8s.NotFoundError("not found")), \
+         patch("main.HelmOperator"), \
+         patch("main.should_skip_crds_for_component", return_value=False), \
+         pytest.raises(kopf.TemporaryError) as exc_info:
+        handle_appstack_deployment(
+            body={"spec": spec},
+            spec=spec,
+            name="ai-research",
+            namespace="staging",
+            status={},
+        )
+
+    assert getattr(exc_info.value, "delay", None) == 30
+    assert "missing-cm" in str(exc_info.value)
 
 
 def test_update_handler_has_field_spec_filter():

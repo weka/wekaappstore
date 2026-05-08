@@ -895,7 +895,14 @@ def handle_appstack_deployment(body, spec, name, namespace, status, **kwargs):
                             os.unlink(manifest_file)
             else:
                 raise ValueError(f"Component {comp_name} must specify either helmChart or kubernetesManifest")
-                
+
+        except (kopf.PermanentError, kopf.TemporaryError):
+            # Phase 18 OP-07/OP-08/OP-11: kopf-typed errors must reach the reconcile
+            # boundary so kopf can re-schedule (TemporaryError) or fail loudly
+            # (PermanentError). Don't swallow into comp_status['message'] — that
+            # hides transient cluster failures and undefined-variable bugs from
+            # operators monitoring the CR's status conditions.
+            raise
         except Exception as e:
             comp_status['phase'] = 'Failed'
             comp_status['message'] = f"Error deploying component: {str(e)}"
