@@ -678,28 +678,28 @@ content = OPENCLAW_JSON_PATH.read_text(encoding="utf-8")
 | A3 | No new runtime deps required for Phase 18 (only stdlib + existing pinned `kopf`/`kr8s`/`pytest`) | Installation | If a future planner adds `pytest-mock` or `syrupy`, `requirements-dev.txt` changes — neutral cost. |
 | A4 | The kr8s `>=0.17.0` minimum still ships `NotFoundError`, `ServerError`, `APITimeoutError`, `ConnectionClosedError` with the same names | Code Examples | Verified at 0.20.10. If user runs production with kr8s 0.17.x, names should match (per kr8s changelog, the public exception API has been stable since 0.10+) but not re-verified. Production operator images already pull whatever pip resolves — bump `requirements.txt` to `kr8s>=0.20.0` if the planner wants to lock the verified surface. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **TST-03 fixture mismatch (snake_case vs camelCase) — needs decision before TST-03 implementation**
    - What we know: `mcp-server/tests/fixtures/sample_blueprints/ai-research.yaml` uses snake_case (`helm_chart`, `target_namespace`, `release_name`, `crds_strategy`, `wait_for_ready`, `readiness_check`, `depends_on`). The operator's `handle_appstack_deployment` reads camelCase (`helmChart`, `targetNamespace`, `releaseName`, `crdsStrategy`, `waitForReady`, `readinessCheck`, `dependsOn`).
    - What's unclear: Whether the planner will fix the fixture in place (touching mcp-server validator consumers) or normalize in-test.
-   - Recommendation: **Option 1 — in-test conversion**. Add a 5-line `_normalize_camel(d)` helper at the top of `test_backward_compat_snapshot.py` that recursively renames keys via a snake→camel map (`helm_chart→helmChart`, etc.). Rationale: (a) lowest blast radius; (b) keeps the validator's accepted surface unchanged; (c) Phase 19 will add `ai-research-portable.yaml` as a sibling — if the fixture format is going to change shape there, do it in the new file rather than retrofitting the existing one.
+   - **RESOLVED:** Recommendation: **Option 1 — in-test conversion**. Add a 5-line `_normalize_camel(d)` helper at the top of `test_backward_compat_snapshot.py` that recursively renames keys via a snake→camel map (`helm_chart→helmChart`, etc.). Rationale: (a) lowest blast radius; (b) keeps the validator's accepted surface unchanged; (c) Phase 19 will add `ai-research-portable.yaml` as a sibling — if the fixture format is going to change shape there, do it in the new file rather than retrofitting the existing one.
    - Action: Planner should add this 5-line helper to TST-03, OR the discuss-phase tool can re-engage if the user wants Option 2/3.
 
 2. **Snapshot baseline file format: JSON vs YAML for merged Helm values dict (D-12 Claude's Discretion)**
    - What we know: D-12 says values + manifest baselines live under `operator_module/tests/snapshots/ai-research/`. Choice between `values_<comp>.json` and `values_<comp>.yaml` is explicit Claude's discretion.
    - What's unclear: Which produces the most reviewable PR diff.
-   - Recommendation: **JSON with `indent=2, sort_keys=True`**. Rationale: deterministic ordering eliminates spurious diffs from Python dict ordering changes; YAML's anchors/aliases/flow style add diff noise; `json.dumps` is stdlib. Manifest content stays as YAML (it IS YAML).
+   - **RESOLVED:** Recommendation: **JSON with `indent=2, sort_keys=True`**. Rationale: deterministic ordering eliminates spurious diffs from Python dict ordering changes; YAML's anchors/aliases/flow style add diff noise; `json.dumps` is stdlib. Manifest content stays as YAML (it IS YAML).
 
 3. **Baseline regeneration UX — pytest fixture vs env var**
    - What we know: D-12 requires explicit re-generation gate.
    - What's unclear: Whether `BASELINE_REGEN=1 pytest ...` env var or `--update-snapshots` pytest option is more discoverable.
-   - Recommendation: **`BASELINE_REGEN=1` env var** (no plugin needed). Document at top of `test_backward_compat_snapshot.py`. A pytest option would require `conftest.py` parser changes.
+   - **RESOLVED:** Recommendation: **`BASELINE_REGEN=1` env var** (no plugin needed). Document at top of `test_backward_compat_snapshot.py`. A pytest option would require `conftest.py` parser changes.
 
 4. **kr8s minimum version pin in `operator_module/requirements.txt`**
    - What we know: Currently `kr8s>=0.17.0`. Verified surface is 0.20.10. Exception class names appear stable across that range (per kr8s public API discipline).
    - What's unclear: Whether 0.17.x raises `NotFoundError` in `.get()` or used a different mechanism. (No re-verification done.)
-   - Recommendation: **Bump to `kr8s>=0.20.0`** in this phase ONLY IF the planner finds evidence of behavior drift. Otherwise leave the existing pin. Out-of-scope churn risk.
+   - **RESOLVED:** Recommendation: **Bump to `kr8s>=0.20.0`** in this phase ONLY IF the planner finds evidence of behavior drift. Otherwise leave the existing pin. Out-of-scope churn risk.
 
 ## Environment Availability
 

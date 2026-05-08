@@ -153,7 +153,14 @@ Plans:
   3. A ConfigMap referenced via `valuesFiles:` containing `host: ${milvusHost}` deep-merges into Helm values with the resolved value given `variables: {milvusHost: milvus.staging.svc.cluster.local}`; a ConfigMap or Secret that is missing surfaces as `kopf.TemporaryError(delay=30)` rather than a silent empty dict (OP-08, OP-11 verified)
   4. A CR with `variables: {my-host: foo}` (hyphenated key) raises `kopf.PermanentError` at variables-dict build time with a message identifying `my-host` as invalid; `handle_helm_deployment` single-chart path does not receive `variables` wiring and its unit test passes (OP-09, OP-10, TST-05 verified)
   5. README contains a worked `${VAR}` example, `$$` password example, `${namespace}` auto-default explanation, strict-failure documentation using fully-resolved values (not the cross-referencing PRD example), and explicit callout that operator-control fields are not templated (DOC-01..06 verified)
-**Plans**: TBD
+**Plans:** 5 plans
+
+Plans:
+- [ ] 18-01-PLAN.md — Operator wiring (handle_appstack_deployment, load_values_from_reference, _render_or_raise helper, field='spec' decorator, Chart.yaml bump 0.1.62 -> 0.1.63)
+- [ ] 18-02-PLAN.md — README new top-level section ## Variable substitution in AppStack manifests (DOC-01..06)
+- [ ] 18-03-PLAN.md — operator_module/tests/test_appstack.py (TST-02 surface; OP-06..08, OP-10..12)
+- [ ] 18-04-PLAN.md — operator_module/tests/test_helm_non_wiring.py (TST-05; OP-09 non-wiring lock)
+- [ ] 18-05-PLAN.md — operator_module/tests/test_backward_compat_snapshot.py + snapshots/ai-research/ baselines (TST-03)
 
 ### Phase 19: Validator Soft-Warning and Portable Fixture
 **Goal**: The MCP server validator accepts CRs with `spec.appStack.variables` without spurious errors; it soft-warns operators when manifests contain hardcoded DNS names or namespace literals that could be parameterized; a portable sample blueprint fixture demonstrates the recommended pattern
