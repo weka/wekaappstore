@@ -408,9 +408,11 @@ data:
         # Required for most Grafana dashboards ("Kubernetes / Compute Resources" etc).
         cAdvisor: true
         # On-prem kubeadm clusters use self-signed kubelet TLS certs.
-        # insecureSkipVerify allows Prometheus to scrape over HTTPS without
-        # a valid CA — standard practice for kubeadm/bare-metal clusters.
+        # Both flags are required: insecureSkipVerify covers the main kubelet
+        # endpoint (/metrics), cAdvisorInsecureSkipVerify covers the cAdvisor
+        # endpoint (/metrics/cadvisor) — they are scraped separately.
         insecureSkipVerify: true
+        cAdvisorInsecureSkipVerify: true
 
     ## Deploy a Prometheus instance
     ##
