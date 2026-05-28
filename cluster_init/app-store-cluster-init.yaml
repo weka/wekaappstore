@@ -421,6 +421,11 @@ data:
 
       ## IMPORTANT: enable cluster-wide monitoring
       prometheusSpec:
+        # Stamp a cluster label on all metrics so Kubernetes dashboard
+        # $cluster variables resolve and dashboard queries return data.
+        externalLabels:
+          cluster: weka-aidp
+
         # Allow Prometheus to discover ServiceMonitors/PodMonitors in ALL namespaces
         serviceMonitorNamespaceSelector: {}
         podMonitorNamespaceSelector: {}
