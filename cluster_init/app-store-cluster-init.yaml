@@ -317,23 +317,46 @@ data:
   prom-stack_values.yaml: |
     ## Create default rules for monitoring the cluster
     #
-    # Disable `etcd` and `kubeScheduler` rules (managed by DOKS, so metrics are not accessible)
+    # Disable rules for components whose metrics endpoints are not reachable:
+    # - etcd/kubeScheduler: managed control-plane components, metrics not exposed
+    # - kubeProxy/kubeControllerManager: bind to 127.0.0.1 by default; Prometheus
+    #   can't scrape them via node IP (connection refused on 10249/10257)
     defaultRules:
       create: true
       rules:
         etcd: false
         kubeScheduler: false
+        kubeProxy: false
+        kubeControllerManager: false
 
     ## Component scraping kube scheduler
     ##
-    # Disabled because it's being managed by DOKS, so it's not accessible
+    # Disabled — metrics endpoint not reachable
     kubeScheduler:
       enabled: false
 
     ## Component scraping etcd
     ##
-    # Disabled because it's being managed by DOKS, so it's not accessible
+    # Disabled — metrics endpoint not reachable
     kubeEtcd:
+      enabled: false
+
+    ## Component scraping kube-controller-manager
+    ##
+    # Disabled — kube-controller-manager binds metrics to 127.0.0.1:10257 by
+    # default; Prometheus cannot reach it via the node IP (connection refused).
+    # To re-enable: add --bind-address=0.0.0.0 to the kube-controller-manager
+    # static pod manifest on each control plane node and set enabled: true here.
+    kubeControllerManager:
+      enabled: false
+
+    ## Component scraping kube-proxy
+    ##
+    # Disabled — kube-proxy binds metrics to 127.0.0.1:10249 by default;
+    # Prometheus cannot reach it via the node IP (connection refused).
+    # To re-enable: patch kube-proxy ConfigMap (metricsBindAddress: 0.0.0.0:10249),
+    # restart kube-proxy DaemonSet, then set enabled: true here.
+    kubeProxy:
       enabled: false
 
     alertmanager:
@@ -363,6 +386,9 @@ data:
       enabled: true
       adminPassword: prom-operator # Please change the default password in production !!!
       # persistence / affinity omitted for brevity
+      sidecar:
+        datasources:
+          searchNamespace: ALL
 
     ## Manages Prometheus and Alertmanager components
     ##
@@ -378,8 +404,13 @@ data:
       enabled: true
       serviceMonitor:
         enabled: true
-        # Enable cAdvisor metrics if your chart supports this flag
-        # cAdvisor: true
+        # cAdvisor provides per-container CPU, memory, and network metrics.
+        # Required for most Grafana dashboards ("Kubernetes / Compute Resources" etc).
+        cAdvisor: true
+        # On-prem kubeadm clusters use self-signed kubelet TLS certs.
+        # insecureSkipVerify allows Prometheus to scrape over HTTPS without
+        # a valid CA — standard practice for kubeadm/bare-metal clusters.
+        insecureSkipVerify: true
 
     ## Deploy a Prometheus instance
     ##
