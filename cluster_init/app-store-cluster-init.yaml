@@ -6,6 +6,67 @@ metadata:
 spec:
   appStack:
     components:
+      - name: cadvisor-containerd-sock-fix
+        description: "DaemonSet that symlinks /run/spectro/containerd/containerd.sock to the standard path so cAdvisor can resolve container metadata. Required because Palette runs containerd at a non-standard path and cAdvisor falls back to /run/containerd/containerd.sock for metadata lookups."
+        enabled: true
+        dependsOn: []
+        kubernetesManifest: |
+          apiVersion: apps/v1
+          kind: DaemonSet
+          metadata:
+            name: cadvisor-containerd-fix
+            namespace: kube-system
+            labels:
+              app: cadvisor-containerd-fix
+          spec:
+            selector:
+              matchLabels:
+                app: cadvisor-containerd-fix
+            updateStrategy:
+              type: RollingUpdate
+            template:
+              metadata:
+                labels:
+                  app: cadvisor-containerd-fix
+              spec:
+                tolerations:
+                - operator: Exists
+                priorityClassName: system-node-critical
+                hostPID: true
+                initContainers:
+                - name: fix-containerd-sock
+                  image: alpine:3.18
+                  securityContext:
+                    privileged: true
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /host/run/containerd
+                    ln -sf /run/spectro/containerd/containerd.sock /host/run/containerd/containerd.sock
+                    echo "Symlink: $(ls -la /host/run/containerd/containerd.sock)"
+                    mkdir -p /host/etc/systemd/system/multi-user.target.wants
+                    printf '[Unit]\nDescription=Symlink Spectro containerd socket for cAdvisor\nBefore=kubelet.service\nAfter=local-fs.target\n\n[Service]\nType=oneshot\nExecStart=/bin/bash -c "mkdir -p /run/containerd && ln -sf /run/spectro/containerd/containerd.sock /run/containerd/containerd.sock"\nRemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n' > /host/etc/systemd/system/containerd-sock-symlink.service
+                    ln -sf /etc/systemd/system/containerd-sock-symlink.service \
+                      /host/etc/systemd/system/multi-user.target.wants/containerd-sock-symlink.service
+                    echo "Systemd service written and enabled"
+                  volumeMounts:
+                  - name: host-run
+                    mountPath: /host/run
+                  - name: host-etc
+                    mountPath: /host/etc
+                containers:
+                - name: pause
+                  image: registry.k8s.io/pause:3.9
+                volumes:
+                - name: host-run
+                  hostPath:
+                    path: /run
+                - name: host-etc
+                  hostPath:
+                    path: /etc
+        targetNamespace: kube-system
+
       - name: kube-prom-stack
         description: "Prometheus and Grafana monitoring stack"
         enabled: true
