@@ -1480,3 +1480,195 @@ def delete_warpcredential(name, namespace, logger, **_):
         f'warp-{name}-* are intentionally retained (OPS-08). '
         f'Administrator must delete them manually if no longer needed.'
     )
+
+
+# D-04, OPS-01..OPS-09 — stacked decorators so create/update/resume all converge to the
+# same reconcile function.  field='spec' on @kopf.on.update is REQUIRED (Pitfall 3, D-04):
+# it prevents the operator's own status writes from re-triggering the handler, avoiding an
+# infinite reconcile loop (mirrors WekaAppStore convention at main.py:1159).
+@kopf.on.create('warp.io', 'v1alpha1', 'warpcredentials')
+@kopf.on.update('warp.io', 'v1alpha1', 'warpcredentials', field='spec')
+@kopf.on.resume('warp.io', 'v1alpha1', 'warpcredentials')
+def reconcile_warpcredential(body, spec, name, namespace, patch, logger, **kwargs):
+    """Reconcile a WarpCredential CR — derive type-appropriate Kubernetes Secrets and update status.
+
+    Stacked decorators (D-04): create / update(field='spec') / resume all call this function.
+    @kopf.on.resume fires when the operator pod restarts, re-checking every existing CR and
+    restoring any deleted derived secrets (OPS-09 idempotency after restart).
+
+    Error classification (D-07/D-08/D-09/D-10):
+      - Unknown spec.type -> PermanentError, reason='UnknownType' (OPS-01, D-08)
+      - Missing secretRef.name or .key -> PermanentError, reason='InvalidSpec' (belt-and-suspenders)
+      - Source Secret not found -> TemporaryError(delay=30), reason='KeyMissing' (OPS-02, D-07)
+      - Key absent from source Secret -> PermanentError, reason='KeyMissing' (OPS-02)
+      - Empty/whitespace key value -> PermanentError, reason='EmptyKey' (OPS-03, D-09)
+      - API/network error reading source Secret -> TemporaryError or PermanentError (D-10)
+
+    Derivation helpers (D-11/D-12/D-13):
+      - nvidia-ngc  -> _derive_ngc_payloads(key) -> apikey + dockerconfigjson Secrets (OPS-04)
+      - huggingface -> _derive_hf_payload(key) -> token Secret (OPS-05)
+      - weka-storage -> _derive_weka_payload(username, token, endpoint) -> token Secret (OPS-06)
+
+    Status writes (D-14/D-15, S-4):
+      - Failure paths patch status.conditions BEFORE raising (every single branch).
+      - Success path writes conditions, derivedSecrets, lastSyncTime; weka-storage also wekaEndpoint.
+
+    Security (API-08/D-03):
+      - The decoded key/token/username/endpoint values are NEVER passed to any logger call.
+      - All logger and exception messages use ctx (CR name+namespace+displayName), source Secret
+        name, key NAME — never key VALUES.
+
+    Requirements covered: OPS-01, OPS-02, OPS-03, OPS-04, OPS-05, OPS-06, OPS-07, OPS-09, API-08.
+    """
+    cred_type = spec.get('type')
+    display_name = spec.get('displayName', name)
+    ctx = f'WarpCredential {namespace}/{name}({display_name})'
+
+    # OPS-01 (D-08) — unknown type belt-and-suspenders (CRD admission should block this first)
+    if cred_type not in _VALID_WARPCRED_TYPES:
+        patch.status['conditions'] = [_build_condition(
+            'KeyReady', 'False', 'UnknownType',
+            f'spec.type {cred_type!r} not recognized')]
+        raise kopf.PermanentError(f'{ctx}: unknown spec.type {cred_type!r}')
+
+    # Belt-and-suspenders secretRef validation (CRD required=[name,key] gates this at admission)
+    secret_ref = spec.get('secretRef', {})
+    src_name = secret_ref.get('name')
+    src_key = secret_ref.get('key')
+    if not src_name or not src_key:
+        patch.status['conditions'] = [_build_condition(
+            'KeyReady', 'False', 'InvalidSpec',
+            'spec.secretRef.name and .key required')]
+        raise kopf.PermanentError(f'{ctx}: spec.secretRef.name and .key required')
+
+    # OPS-02 (D-07) — read source Secret; wrap to patch status BEFORE the kopf error escapes
+    try:
+        src_data = _read_source_secret(src_name, namespace, ctx=ctx)
+    except kopf.TemporaryError:
+        patch.status['conditions'] = [_build_condition(
+            'KeyReady', 'False', 'KeyMissing',
+            f'Source Secret {namespace}/{src_name} not found (retrying)')]
+        raise
+    except kopf.PermanentError:
+        patch.status['conditions'] = [_build_condition(
+            'KeyReady', 'False', 'KeyReadError',
+            f'API error fetching Secret {namespace}/{src_name}')]
+        raise
+
+    # Type-specific key extraction and derivation
+    derived_secrets_list = []
+
+    if cred_type in ('nvidia-ngc', 'huggingface'):
+        # For single-key types: verify the named key exists and is non-empty
+        if src_key not in src_data:
+            patch.status['conditions'] = [_build_condition(
+                'KeyReady', 'False', 'KeyMissing',
+                f'Source Secret {namespace}/{src_name} has no key {src_key!r}')]
+            raise kopf.PermanentError(
+                f'{ctx}: source Secret {src_name!r} missing key {src_key!r}')
+
+        key = src_data[src_key].decode('utf-8')
+
+        # OPS-03 (D-09) — empty/whitespace key -> PermanentError; key NAME in message, not value
+        if not key.strip():
+            patch.status['conditions'] = [_build_condition(
+                'KeyReady', 'False', 'EmptyKey',
+                f'Source Secret {namespace}/{src_name}[{src_key}] is empty')]
+            raise kopf.PermanentError(
+                f'{ctx}: source Secret key {src_key!r} is empty')
+
+        if cred_type == 'nvidia-ngc':
+            # OPS-04 — two derived Secrets: warp-{name}-apikey (Opaque) + warp-{name}-docker
+            apikey_data, docker_data = _derive_ngc_payloads(key)
+            apikey_secret = kr8s.objects.Secret({
+                'apiVersion': 'v1',
+                'kind': 'Secret',
+                'metadata': {'name': f'warp-{name}-apikey', 'namespace': namespace},
+                'type': 'Opaque',
+                'data': apikey_data,
+            })
+            docker_secret = kr8s.objects.Secret({
+                'apiVersion': 'v1',
+                'kind': 'Secret',
+                'metadata': {'name': f'warp-{name}-docker', 'namespace': namespace},
+                'type': 'kubernetes.io/dockerconfigjson',
+                'data': docker_data,
+            })
+            _apply_secret_idempotent(apikey_secret, ctx=f'{ctx}: apikey')
+            _apply_secret_idempotent(docker_secret, ctx=f'{ctx}: docker')
+            derived_secrets_list = [
+                {'name': f'warp-{name}-apikey', 'type': 'Opaque'},
+                {'name': f'warp-{name}-docker', 'type': 'kubernetes.io/dockerconfigjson'},
+            ]
+
+        else:  # huggingface
+            # OPS-05 — single derived Secret: warp-{name}-token (Opaque, HF_API_KEY)
+            hf_data = _derive_hf_payload(key)
+            hf_secret = kr8s.objects.Secret({
+                'apiVersion': 'v1',
+                'kind': 'Secret',
+                'metadata': {'name': f'warp-{name}-token', 'namespace': namespace},
+                'type': 'Opaque',
+                'data': hf_data,
+            })
+            _apply_secret_idempotent(hf_secret, ctx=f'{ctx}: token')
+            derived_secrets_list = [{'name': f'warp-{name}-token', 'type': 'Opaque'}]
+
+    else:  # weka-storage
+        # OPS-06, RESEARCH §5 — source Secret contains three hard-coded keys.
+        # spec.secretRef.key is read for schema symmetry only (set to WEKA_API_TOKEN by convention);
+        # the operator reads all three keys directly by their literal names.
+        username_bytes = src_data.get('WEKA_API_USERNAME')
+        token_bytes = src_data.get('WEKA_API_TOKEN')
+        endpoint_bytes = src_data.get('WEKA_API_ENDPOINT')
+
+        # Validate each required key individually (names in messages, not values — T-22-04)
+        for key_name, key_bytes in [
+            ('WEKA_API_USERNAME', username_bytes),
+            ('WEKA_API_TOKEN', token_bytes),
+            ('WEKA_API_ENDPOINT', endpoint_bytes),
+        ]:
+            if key_bytes is None:
+                patch.status['conditions'] = [_build_condition(
+                    'KeyReady', 'False', 'KeyMissing',
+                    f'weka-storage source Secret {namespace}/{src_name} missing key {key_name}')]
+                raise kopf.PermanentError(
+                    f'{ctx}: weka-storage source Secret {src_name!r} missing key {key_name!r}')
+            if not key_bytes.decode('utf-8').strip():
+                patch.status['conditions'] = [_build_condition(
+                    'KeyReady', 'False', 'EmptyKey',
+                    f'weka-storage source Secret {namespace}/{src_name} key {key_name} is empty')]
+                raise kopf.PermanentError(
+                    f'{ctx}: weka-storage source Secret key {key_name!r} is empty')
+
+        username = username_bytes.decode('utf-8')
+        token = token_bytes.decode('utf-8')
+        endpoint_from_src = endpoint_bytes.decode('utf-8')
+        # spec.endpoint takes precedence; fall back to source Secret value (defense-in-depth)
+        endpoint = spec.get('endpoint') or endpoint_from_src
+
+        weka_data = _derive_weka_payload(username, token, endpoint)
+        weka_secret = kr8s.objects.Secret({
+            'apiVersion': 'v1',
+            'kind': 'Secret',
+            'metadata': {'name': f'warp-{name}-token', 'namespace': namespace},
+            'type': 'Opaque',
+            'data': weka_data,
+        })
+        _apply_secret_idempotent(weka_secret, ctx=f'{ctx}: token')
+        derived_secrets_list = [{'name': f'warp-{name}-token', 'type': 'Opaque'}]
+
+    # OPS-07 (D-14) — success status write; all failure paths above already patched status
+    conditions = [_build_condition('KeyReady', 'True', 'KeyPresent', 'Derived secrets reconciled')]
+    if cred_type == 'nvidia-ngc':
+        conditions.append(_build_condition(
+            'DockerSecretReady', 'True', 'DockerSecretPresent', 'NGC docker Secret reconciled'))
+
+    patch.status['conditions'] = conditions
+    patch.status['derivedSecrets'] = derived_secrets_list
+    patch.status['lastSyncTime'] = _now_iso()
+    if cred_type == 'weka-storage':
+        patch.status['wekaEndpoint'] = spec.get('endpoint', '')
+
+    # Log metadata only — key values, token values, username, endpoint are NEVER included (API-08, D-03)
+    logger.info(f'{ctx}: reconciled {len(derived_secrets_list)} derived Secret(s)')
