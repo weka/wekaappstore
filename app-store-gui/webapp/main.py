@@ -4,7 +4,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import os
 import re
 import yaml
@@ -17,6 +17,10 @@ import subprocess
 import shutil
 import platform
 import logging
+import ssl
+import datetime
+import urllib.request
+import urllib.error
 
 from kubernetes import client, config, utils
 from kubernetes.client.rest import ApiException
@@ -1298,6 +1302,254 @@ async def uninit_cluster():
 @app.get("/healthz")
 async def healthz():
     return {"ok": True}
+
+# ---------------------------------------------------------------------------
+# WEKA Overview Proxy — helpers, cache, and route
+# ---------------------------------------------------------------------------
+
+_weka_overview_cache: Dict[str, Dict[str, Any]] = {}
+_WEKA_CACHE_TTL_SECONDS = 60
+
+
+def _weka_ssl_context() -> ssl.SSLContext:
+    """Return an SSL context for WEKA API calls.
+
+    By default uses a verifying context (ssl.create_default_context()).
+    Set WEKA_OVERVIEW_INSECURE_TLS=true to disable certificate verification
+    (needed for self-signed certs on typical WEKA production clusters).
+    """
+    ctx = ssl.create_default_context()
+    if os.getenv("WEKA_OVERVIEW_INSECURE_TLS", "false").lower() in ("1", "true", "yes"):
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def _weka_get_json(url: str, headers: Dict[str, str], timeout: float = 15.0) -> Dict[str, Any]:
+    """Issue a GET request to the WEKA REST API and return the parsed JSON response.
+
+    Never includes header values in error messages (T-23-03-01, T-23-03-08).
+    """
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=_weka_ssl_context()) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"WEKA API call failed: {url} -> {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"WEKA API call failed: {url} -> {exc.reason}") from exc
+
+
+def _weka_post_json(url: str, payload: Dict[str, Any], timeout: float = 15.0) -> Dict[str, Any]:
+    """Issue a POST request to the WEKA REST API and return the parsed JSON response.
+
+    Never logs or includes payload contents in error messages (T-23-03-01, T-23-03-08).
+    """
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=_weka_ssl_context()) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"WEKA login failed: {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"WEKA login failed: {exc.reason}") from exc
+
+
+def _weka_login(endpoint: str, username: str, token: str) -> str:
+    """Exchange WEKA API username + token for a short-lived Bearer access token.
+
+    Tries the following response field paths in order (PRD note: verify against
+    /api/v2/docs Swagger UI for the deployed WEKA version):
+      1. resp["access_token"]
+      2. resp["data"]["access_token"]
+      3. resp["token"]
+
+    Raises RuntimeError if none are present.  Never logs the returned token.
+    """
+    endpoint = endpoint.rstrip("/")
+    resp = _weka_post_json(f"{endpoint}/api/v2/login", {"username": username, "password": token})
+
+    access_token = resp.get("access_token")
+    if access_token is None:
+        data_block = resp.get("data")
+        if isinstance(data_block, dict):
+            access_token = data_block.get("access_token")
+    if access_token is None:
+        access_token = resp.get("token")
+
+    if access_token is None:
+        raise RuntimeError(
+            "WEKA login response missing access token field; confirm field name against "
+            "/api/v2/docs Swagger UI for the deployed WEKA version"
+        )
+    return str(access_token)
+
+
+def _resolve_weka_credential_secret(credential_name: str, namespace: str) -> Tuple[str, str, str]:
+    """Look up a weka-storage WarpCredential CR and return (endpoint, username, token).
+
+    Validates the CR type is weka-storage, then reads the corresponding raw Secret
+    (warp-cred-<credential_name> by default, or the name stored in spec.secretRef.name).
+    Raises RuntimeError if the credential is the wrong type or if the Secret is missing
+    any required key.  Never returns or logs credential values.
+    """
+    co_api = client.CustomObjectsApi()
+    cr = co_api.get_namespaced_custom_object(
+        group="warp.io",
+        version="v1alpha1",
+        namespace=namespace,
+        plural="warpcredentials",
+        name=credential_name,
+    )
+
+    cr_type = (cr.get("spec") or {}).get("type")
+    if cr_type != "weka-storage":
+        raise RuntimeError(f"credential {credential_name} is not of type weka-storage")
+
+    secret_name = ((cr.get("spec") or {}).get("secretRef") or {}).get("name") or f"warp-cred-{credential_name}"
+
+    core = client.CoreV1Api()
+    secret = core.read_namespaced_secret(name=secret_name, namespace=namespace)
+    data = secret.data or {}
+
+    required_keys = _CREDENTIAL_TYPE_KEYS["weka-storage"]["secret_data_keys"]
+    decoded: Dict[str, str] = {}
+    for key in required_keys:
+        if key not in data:
+            raise RuntimeError(f"weka-storage Secret {secret_name} missing key {key}")
+        decoded[key] = base64.b64decode(data[key]).decode("utf-8")
+
+    return decoded["WEKA_API_ENDPOINT"], decoded["WEKA_API_USERNAME"], decoded["WEKA_API_TOKEN"]
+
+
+def _assemble_weka_overview(
+    filesystems_resp: Any,
+    cluster_resp: Any,
+    containers_resp: Any,
+    fetched_at_iso: str,
+) -> Dict[str, Any]:
+    """Assemble the API-06 WEKA overview response shape from raw WEKA API responses.
+
+    Pure function (no I/O) — tolerates multiple field-name variants per the PRD
+    "verify against Swagger" note and T-23-03-07 (field name drift across WEKA versions).
+    Never copies the input dicts verbatim; only whitelisted fields appear in the output
+    (T-23-03-01).
+    """
+    # --- Filesystems ---
+    # Response may be a list directly or {"data": [...]}
+    if isinstance(filesystems_resp, list):
+        fs_items = filesystems_resp
+    elif isinstance(filesystems_resp, dict):
+        fs_items = filesystems_resp.get("data") or []
+        if not isinstance(fs_items, list):
+            fs_items = []
+    else:
+        fs_items = []
+
+    filesystems = []
+    for fs in fs_items:
+        name = fs.get("name")
+        total = fs.get("total_budget") or fs.get("size") or fs.get("totalBytes") or 0
+        used = fs.get("used_total") or fs.get("used_size") or fs.get("usedBytes") or 0
+        total = int(total)
+        used = int(used)
+        used_percent = round((used / total) * 100, 2) if total else 0
+        filesystems.append({
+            "name": name,
+            "totalBytes": total,
+            "usedBytes": used,
+            "usedPercent": used_percent,
+        })
+
+    # --- Cluster capacity ---
+    # Tolerate {"data": {...}} wrapper
+    if isinstance(cluster_resp, dict) and "data" in cluster_resp and isinstance(cluster_resp["data"], dict):
+        cluster_data = cluster_resp["data"]
+    elif isinstance(cluster_resp, dict):
+        cluster_data = cluster_resp
+    else:
+        cluster_data = {}
+
+    capacity_block = cluster_data.get("capacity")
+    capacity: Dict[str, Any] = {}
+    if isinstance(capacity_block, dict):
+        c_total = capacity_block.get("total_bytes") or capacity_block.get("total") or capacity_block.get("totalBytes") or 0
+        c_used = capacity_block.get("used_bytes") or capacity_block.get("used") or capacity_block.get("usedBytes") or 0
+        c_total = int(c_total)
+        c_used = int(c_used)
+        c_avail = c_total - c_used
+        c_pct = round((c_used / c_total) * 100, 2) if c_total else 0
+        capacity = {
+            "totalBytes": c_total,
+            "usedBytes": c_used,
+            "availableBytes": c_avail,
+            "usedPercent": c_pct,
+        }
+    else:
+        # Fallback: sum filesystem totals/used when cluster capacity dict is absent
+        fallback_total = sum(fs["totalBytes"] for fs in filesystems)
+        fallback_used = sum(fs["usedBytes"] for fs in filesystems)
+        fallback_avail = fallback_total - fallback_used
+        fallback_pct = round((fallback_used / fallback_total) * 100, 2) if fallback_total else 0
+        capacity = {
+            "totalBytes": fallback_total,
+            "usedBytes": fallback_used,
+            "availableBytes": fallback_avail,
+            "usedPercent": fallback_pct,
+            "capacity_source": "fallback-sum",
+        }
+
+    # --- Backend nodes ---
+    if isinstance(containers_resp, list):
+        container_items = containers_resp
+    elif isinstance(containers_resp, dict):
+        container_items = containers_resp.get("data") or []
+        if not isinstance(container_items, list):
+            container_items = []
+    else:
+        container_items = []
+
+    backend_nodes = []
+    for c in container_items:
+        # Determine if this is a BACKEND role
+        role = c.get("role") or c.get("mode")
+        roles = c.get("roles")
+        is_backend = (
+            role == "BACKEND"
+            or (isinstance(roles, list) and "BACKEND" in roles)
+        )
+        if not is_backend:
+            continue
+
+        # Resolve IP
+        ip = c.get("ip") or c.get("ip_address") or c.get("management_ip")
+        if ip is None:
+            ips = c.get("ips")
+            if isinstance(ips, list):
+                for candidate in ips:
+                    if not candidate.startswith("127.") and not candidate.startswith("169.254."):
+                        ip = candidate
+                        break
+        if ip is None:
+            continue
+        # Skip loopback and link-local
+        if ip.startswith("127.") or ip.startswith("169.254."):
+            continue
+        backend_nodes.append({"ip": ip})
+
+    return {
+        "capacity": capacity,
+        "filesystems": filesystems,
+        "backendNodes": backend_nodes,
+        "fetchedAt": fetched_at_iso,
+    }
+
 
 # Readiness: dependent systems are reachable so we can actually do useful work
 # This differs from liveness: a pod can be alive but not ready if, for example,
