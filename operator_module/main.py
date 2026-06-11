@@ -8,6 +8,8 @@ import os
 import string
 import re
 import time
+import base64
+import json
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from functools import lru_cache
@@ -306,6 +308,213 @@ def _render_or_raise(
         return render(text, variables)
     except (KeyError, ValueError) as e:
         raise kopf.PermanentError(f"{source_desc}: {e}") from e
+
+
+# ===================== WarpCredential Pure Helpers =====================
+# Decision-citing docstrings per Pattern S-3 from 22-PATTERNS.md.
+# Helpers are placed in the "pure helper" zone immediately after _render_or_raise
+# to mirror the _render_or_raise pattern established in Phase 18.
+
+# Valid WarpCredential spec.type values — used by reconcile_warpcredential (Plan 02)
+# for OPS-01 belt-and-suspenders type check (CRD admission already blocks unknown types).
+_VALID_WARPCRED_TYPES = {'nvidia-ngc', 'huggingface', 'weka-storage'}
+
+
+def _b64(s: str) -> str:
+    """Standard base64 encode a UTF-8 string, returning ASCII-decoded str.
+
+    Uses standard base64 WITH padding (not URL-safe, not stripped).
+    Locked: D-12 — Docker and Kubernetes Secret APIs require standard padded base64.
+    Do NOT switch to base64.urlsafe_b64encode or strip trailing '=' characters.
+    """
+    return base64.b64encode(s.encode('utf-8')).decode('ascii')
+
+
+def _now_iso() -> str:
+    """Return the current UTC time as an ISO 8601 string with a trailing 'Z'.
+
+    Match project pattern at main.py:727, 939, 972, 1109 — DO NOT migrate to
+    datetime.now(timezone.utc) per RESEARCH.md Pitfall 5.  The project uses
+    datetime.utcnow() throughout for consistency; a migration to the non-deprecated
+    form is a separate project-wide refactor.
+    """
+    return datetime.utcnow().isoformat() + 'Z'
+
+
+def _build_condition(type_: str, status: str, reason: str, message: str) -> dict:
+    """Build a Kubernetes-style status condition dict.
+
+    Output shape matches crd.yaml:330-358 for WarpCredential status.conditions[]:
+      type (required), status (required, enum True/False/Unknown),
+      reason (optional), message (optional), lastTransitionTime (optional ISO 8601).
+
+    Locked: D-14; CRD lines 330-358.
+    """
+    return {
+        'type': type_,
+        'status': status,
+        'reason': reason,
+        'message': message,
+        'lastTransitionTime': _now_iso(),
+    }
+
+
+def _derive_ngc_payloads(key: str) -> tuple[dict, dict]:
+    """Return (apikey_data, docker_data) for the nvidia-ngc credential type.
+
+    Both dicts contain already-base64-encoded values (D-13) ready to drop into
+    the 'data' field of a kr8s Secret object.
+
+    apikey_data  = {'NGC_API_KEY': _b64(key)}  (Opaque secret, OPS-04)
+    docker_data  = {'.dockerconfigjson': _b64(json.dumps(...))}  (dockerconfigjson secret, OPS-04)
+
+    The dockerconfigjson payload uses the nvcr.io convention:
+      username = literal '$oauthtoken'
+      auth     = base64('$oauthtoken:<key>') using standard padding (D-12)
+
+    Locked: D-11 (per-type helper signature), D-12 (standard base64 with padding),
+    D-13 (return already-encoded data), OPS-04 (NGC apikey + docker secrets).
+    NEVER log or reference the `key` parameter value in any log call or docstring.
+    """
+    apikey_data = {'NGC_API_KEY': _b64(key)}
+    docker_auth_b64 = _b64(f'$oauthtoken:{key}')
+    docker_config = {
+        'auths': {
+            'nvcr.io': {
+                'username': '$oauthtoken',
+                'password': key,
+                'auth': docker_auth_b64,
+            }
+        }
+    }
+    docker_data = {'.dockerconfigjson': _b64(json.dumps(docker_config))}
+    return apikey_data, docker_data
+
+
+def _derive_hf_payload(key: str) -> dict:
+    """Return the data dict for the huggingface credential type.
+
+    Returns {'HF_API_KEY': _b64(key)} — a single-key Opaque Secret (OPS-05).
+    Values are already base64-encoded (D-13); caller builds kr8s Secret directly.
+
+    Locked: D-11 (per-type helper), D-13 (pre-encoded), OPS-05.
+    NEVER log or reference the `key` parameter value.
+    """
+    return {'HF_API_KEY': _b64(key)}
+
+
+def _derive_weka_payload(username: str, token: str, endpoint: str) -> dict:
+    """Return the data dict for the weka-storage credential type.
+
+    Returns exactly three keys, all base64-encoded (D-13):
+      WEKA_API_USERNAME, WEKA_API_TOKEN, WEKA_API_ENDPOINT
+
+    The caller has already extracted these values from the source Secret using the
+    hard-coded key names resolved in RESEARCH.md §5: the source Secret for
+    weka-storage contains all three keys with those literal names.  This helper
+    assumes the caller has already selected and validated them.
+
+    Locked: D-11 (per-type helper), D-13 (pre-encoded), OPS-06,
+    RESEARCH.md §5 (resolution — source Secret carries all three hard-coded keys).
+    NEVER log or reference the `username`, `token`, or `endpoint` parameter values.
+    """
+    return {
+        'WEKA_API_USERNAME': _b64(username),
+        'WEKA_API_TOKEN': _b64(token),
+        'WEKA_API_ENDPOINT': _b64(endpoint),
+    }
+
+
+def _read_source_secret(name: str, namespace: str, *, ctx: str) -> dict:
+    """Read the WarpCredential spec.secretRef Secret and return decoded bytes per key.
+
+    Returns dict[key_name -> bytes] where values are the base64-decoded raw bytes
+    from the source Secret's .data field.  Callers select required keys per credential
+    type before passing to _derive_* helpers.
+
+    Error dispatch mirrors load_values_from_reference at main.py:449-468 (canonical
+    Phase 18 pattern) verbatim:
+      kr8s.NotFoundError           -> kopf.TemporaryError(delay=30)  (OPS-02, D-07)
+      kr8s.APITimeoutError         -> kopf.TemporaryError(delay=30)  (D-10)
+      kr8s.ServerError(>=500)      -> kopf.TemporaryError(delay=30)  (D-10)
+      kr8s.ServerError(4xx)        -> kopf.PermanentError            (D-10)
+
+    Locked: D-07 (NotFoundError -> TemporaryError), D-10 (ServerError dispatch),
+    OPS-02 (retry on missing secret); mirror of main.py:449-468.
+    NEVER include any decoded value in exception messages (T-22-04).
+    """
+    try:
+        secret = kr8s.objects.Secret.get(name=name, namespace=namespace)
+    except kr8s.NotFoundError as e:
+        raise kopf.TemporaryError(
+            f'{ctx}: source Secret {namespace}/{name} not found (will retry in 30s)',
+            delay=30,
+        ) from e
+    except kr8s.APITimeoutError as e:
+        raise kopf.TemporaryError(
+            f'{ctx}: timeout fetching source Secret {namespace}/{name} (will retry in 30s)',
+            delay=30,
+        ) from e
+    except kr8s.ServerError as e:
+        status = e.response.status_code if getattr(e, 'response', None) is not None else None
+        if status is not None and status >= 500:
+            raise kopf.TemporaryError(
+                f'{ctx}: API server error {status} fetching Secret {namespace}/{name} (will retry in 30s)',
+                delay=30,
+            ) from e
+        raise kopf.PermanentError(
+            f'{ctx}: API error fetching Secret {namespace}/{name}: {e}'
+        ) from e
+
+    raw_data = secret.data or {}
+    return {k: base64.b64decode(v) for k, v in raw_data.items()}
+
+
+def _apply_secret_idempotent(secret_obj: kr8s.objects.Secret, *, ctx: str) -> None:
+    """Create-or-patch a kr8s Secret.  Locked by D-02 (no delete-and-recreate).
+
+    Idempotent: on 409 Conflict (already exists), issues a merge-patch
+    with the new .data and .type values.  A single round-trip in steady
+    state (create succeeds immediately).
+
+    Error dispatch:
+      409 Conflict (Secret already exists) -> patch({data, type}) and return (D-02)
+      kr8s.ServerError(>=500)             -> kopf.TemporaryError(delay=30) (D-10)
+      kr8s.ServerError(other 4xx)         -> kopf.PermanentError           (D-10)
+      kr8s.APITimeoutError                -> kopf.TemporaryError(delay=30) (D-10)
+
+    IMPORTANT — Pitfall 1 (RESEARCH.md §7.1): kr8s 0.20.10 does not have a
+    dedicated AlreadyExists exception class.  The 409 path MUST be detected via
+    e.response.status_code == 409 inside the except kr8s.ServerError block.
+    Do not import a non-existent AlreadyExists class from kr8s — it will fail.
+
+    The patch call passes exactly {'data': secret_obj.raw['data'], 'type': secret_obj.raw['type']}
+    — two keys only (Plan 03 asserts on this exact dict shape).
+
+    Locked: D-02 (create-or-patch idempotency), OPS-09 (derived secret restored on
+    next reconcile); mirrors kr8s section in RESEARCH.md §1.
+    NEVER log the contents of secret_obj.raw['data'] (T-22-04).
+    """
+    try:
+        secret_obj.create()
+    except kr8s.ServerError as e:
+        status = e.response.status_code if getattr(e, 'response', None) is not None else None
+        if status == 409:
+            # Already exists — merge-patch with new .data to converge to desired state.
+            # Patch dict is exactly two keys; Plan 03 asserts on this shape.
+            secret_obj.patch({'data': secret_obj.raw['data'], 'type': secret_obj.raw['type']})
+            return
+        if status is not None and status >= 500:
+            raise kopf.TemporaryError(
+                f'{ctx}: API server error {status} writing Secret (will retry in 30s)',
+                delay=30,
+            ) from e
+        raise kopf.PermanentError(f'{ctx}: API error writing Secret: {e}') from e
+    except kr8s.APITimeoutError as e:
+        raise kopf.TemporaryError(
+            f'{ctx}: timeout writing Secret (will retry in 30s)',
+            delay=30,
+        ) from e
 
 
 # ===================== CRD Strategy Helpers =====================
@@ -1244,3 +1453,30 @@ def delete_warrpappstore_function(spec, name, namespace, **kwargs):
             logging.warning(f"Failed to uninstall Helm release {release_name}: {message}")
     else:
         logging.info(f"Pod-based deployment cleanup handled by owner reference")
+
+
+# ===================== WarpCredential Handlers =====================
+
+# D-05, OPS-08, RESEARCH.md §Pattern 3 — optional=True prevents kopf from adding
+# a finalizer to the CR.  Without a finalizer the handler is best-effort (kopf may
+# miss the event if Kubernetes removes the resource before kopf processes DELETED).
+# Acceptable: this handler does no destructive work; logging a warning is best-effort
+# by design (nolar/kopf#701).
+@kopf.on.delete('warp.io', 'v1alpha1', 'warpcredentials', optional=True)
+def delete_warpcredential(name, namespace, logger, **_):
+    """OPS-08: log a warning only; do NOT delete derived secrets.
+
+    optional=True prevents kopf from adding a finalizer (kopf maintainer comment
+    in nolar/kopf#701: with optional=True, no finalizer is added; the handler is
+    best-effort logging).  This is intentional — derived secrets must outlive the
+    WarpCredential CR (OPS-08).  The inaction (preserving derived secrets) is the
+    contract; cluster state is the same whether the warning was logged or not.
+
+    Locked: D-05 (warning-only delete, no destructive work), OPS-08 (derived secrets
+    must survive CR deletion), RESEARCH.md §Pattern 3 (optional=True rationale).
+    """
+    logger.warning(
+        f'WarpCredential {namespace}/{name} deleted; derived secrets '
+        f'warp-{name}-* are intentionally retained (OPS-08). '
+        f'Administrator must delete them manually if no longer needed.'
+    )
