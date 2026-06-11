@@ -320,14 +320,15 @@
         if (nsA !== 0) return nsA;
         return (a.name||'').localeCompare(b.name||'');
       });
+      const esc = s => (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       for (const it of sorted) {
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td class="py-2 pr-4 font-mono">${it.namespace||'-'}</td>
-          <td class="py-2 pr-4 font-mono">${it.name||'-'}</td>
+          <td class="py-2 pr-4 font-mono">${esc(it.namespace)||'-'}</td>
+          <td class="py-2 pr-4 font-mono">${esc(it.name)||'-'}</td>
           <td class="py-2 pr-4">${it.creationTimestamp ? new Date(it.creationTimestamp).toLocaleString() : '-'}</td>
           <td class="py-2 pr-4 text-right">
-            <button class="px-3 py-1 rounded-md text-sm border border-red-400/40 text-red-300 hover:bg-red-500/10" data-ns="${it.namespace}" data-name="${it.name}">Delete</button>
+            <button class="px-3 py-1 rounded-md text-sm border border-red-400/40 text-red-300 hover:bg-red-500/10" data-ns="${esc(it.namespace)}" data-name="${esc(it.name)}">Delete</button>
           </td>`;
         tbody.appendChild(tr);
       }
