@@ -1593,8 +1593,14 @@ def reconcile_warpcredential(body, spec, name, namespace, patch, logger, **kwarg
                 'type': 'kubernetes.io/dockerconfigjson',
                 'data': docker_data,
             })
-            _apply_secret_idempotent(apikey_secret, ctx=f'{ctx}: apikey')
-            _apply_secret_idempotent(docker_secret, ctx=f'{ctx}: docker')
+            try:
+                _apply_secret_idempotent(apikey_secret, ctx=f'{ctx}: apikey')
+                _apply_secret_idempotent(docker_secret, ctx=f'{ctx}: docker')
+            except (kopf.TemporaryError, kopf.PermanentError):
+                patch.status['conditions'] = [_build_condition(
+                    'KeyReady', 'False', 'SecretWriteError',
+                    'Failed to write derived Secret(s) to the API server (see operator logs)')]
+                raise
             derived_secrets_list = [
                 {'name': f'warp-{name}-apikey', 'type': 'Opaque'},
                 {'name': f'warp-{name}-docker', 'type': 'kubernetes.io/dockerconfigjson'},
@@ -1610,7 +1616,13 @@ def reconcile_warpcredential(body, spec, name, namespace, patch, logger, **kwarg
                 'type': 'Opaque',
                 'data': hf_data,
             })
-            _apply_secret_idempotent(hf_secret, ctx=f'{ctx}: token')
+            try:
+                _apply_secret_idempotent(hf_secret, ctx=f'{ctx}: token')
+            except (kopf.TemporaryError, kopf.PermanentError):
+                patch.status['conditions'] = [_build_condition(
+                    'KeyReady', 'False', 'SecretWriteError',
+                    'Failed to write derived Secret(s) to the API server (see operator logs)')]
+                raise
             derived_secrets_list = [{'name': f'warp-{name}-token', 'type': 'Opaque'}]
 
     else:  # weka-storage
@@ -1654,7 +1666,13 @@ def reconcile_warpcredential(body, spec, name, namespace, patch, logger, **kwarg
             'type': 'Opaque',
             'data': weka_data,
         })
-        _apply_secret_idempotent(weka_secret, ctx=f'{ctx}: token')
+        try:
+            _apply_secret_idempotent(weka_secret, ctx=f'{ctx}: token')
+        except (kopf.TemporaryError, kopf.PermanentError):
+            patch.status['conditions'] = [_build_condition(
+                'KeyReady', 'False', 'SecretWriteError',
+                'Failed to write derived Secret(s) to the API server (see operator logs)')]
+            raise
         derived_secrets_list = [{'name': f'warp-{name}-token', 'type': 'Opaque'}]
 
     # OPS-07 (D-14) — success status write; all failure paths above already patched status
