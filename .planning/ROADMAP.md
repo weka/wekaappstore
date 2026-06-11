@@ -56,7 +56,7 @@ See MILESTONES.md for full v2.0 summary.
 
 **Milestone Goal:** Give App Store administrators a first-class credential management system — named, multi-key storage for NGC/HuggingFace/WEKA credentials via a new `WarpCredential` CRD, automatic secret derivation by the operator, a blueprint Jinja2 macro SDK for credential selection, and live WEKA storage visibility on the Settings page.
 
-- [ ] **Phase 21: WarpCredential CRD and Helm RBAC** — `WarpCredential` CRD defined in Helm chart; operator service account has Secret CRUD permissions scoped to the App Store namespace
+- [x] **Phase 21: WarpCredential CRD and Helm RBAC** — `WarpCredential` CRD defined in Helm chart; operator service account has Secret CRUD permissions scoped to the App Store namespace (completed 2026-06-11)
 - [ ] **Phase 22: Operator WarpCredential Reconciler** — Operator reconciles `WarpCredential` CRs, deriving correct secrets per type and maintaining `status` conditions; idempotent
 - [ ] **Phase 23: Backend Credentials API and WEKA Overview Proxy** — GUI backend exposes `/api/credentials` CRUD endpoints and `/api/weka/overview` proxy; old secret endpoints removed
 - [ ] **Phase 24: Settings GUI Overhaul** — Settings page restructured with Credential Management first, per-type credential lists with traffic-light states, inline add forms, and WEKA Storage Overview panel
@@ -215,8 +215,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 21-01-PLAN.md — WarpCredential CRD schema (spec + status subresource)
-- [ ] 21-02-PLAN.md — Namespace-scoped Secret CRUD Role + RoleBinding + Chart.yaml 0.1.64 bump
+- [x] 21-01-PLAN.md — WarpCredential CRD schema (spec + status subresource)
+- [x] 21-02-PLAN.md — Namespace-scoped Secret CRUD Role + RoleBinding + Chart.yaml 0.1.64 bump
 
 ### Phase 22: Operator WarpCredential Reconciler
 **Goal**: The operator reconciles `WarpCredential` CRs, deriving the correct secrets for each credential type and maintaining `status` conditions; derived secrets are idempotent
@@ -298,7 +298,7 @@ v6.0 Execution Order: 21 → 22 → 23 → 24/25 (Phases 24 and 25 can be develo
 | 18. Operator Wiring and Docs | v5.0 | 5/5 | Complete   | 2026-05-08 |
 | 19. Validator Soft-Warning and Portable Fixture | v5.0 | 0/TBD | Not started | - |
 | 20. AIDP Migration Smoke Test | v5.0 | 0/TBD | Not started | - |
-| 21. WarpCredential CRD and Helm RBAC | v6.0 | 0/2 | Not started | - |
+| 21. WarpCredential CRD and Helm RBAC | v6.0 | 2/2 | Complete   | 2026-06-11 |
 | 22. Operator WarpCredential Reconciler | v6.0 | 0/TBD | Not started | - |
 | 23. Backend Credentials API and WEKA Overview Proxy | v6.0 | 0/TBD | Not started | - |
 | 24. Settings GUI Overhaul | v6.0 | 0/TBD | Not started | - |

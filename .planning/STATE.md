@@ -4,8 +4,8 @@ milestone: v6.0
 milestone_name: Secret Management & WEKA Storage Integration
 status: executing
 stopped_at: Phase 18 planned (5 plans, 2 waves)
-last_updated: "2026-06-11T04:51:32.741Z"
-last_activity: 2026-06-11 -- Phase 21 planning complete
+last_updated: "2026-06-11T04:55:21.612Z"
+last_activity: 2026-06-11 -- Phase 21 execution started
 progress:
   total_phases: 14
   completed_phases: 3
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-05-06 — milestone v5.0 started)
 
 **Core value:** OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
-**Current focus:** Phase 18 — Operator Wiring and Docs
+**Current focus:** Phase 21 — warpcredential-crd-and-helm-rbac
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Ready to execute
-Last activity: 2026-06-11 -- Phase 21 planning complete
+Phase: 21 (warpcredential-crd-and-helm-rbac) — EXECUTING
+Plan: 1 of 2
+Status: Executing Phase 21
+Last activity: 2026-06-11 -- Phase 21 execution started
 
 ## Accumulated Context
 
