@@ -556,25 +556,30 @@ def test_no_key_in_logs_anywhere(caplog):
     patch_obj = _make_patch_obj()
     factory = _make_secret_class_mock()
 
-    with caplog.at_level(logging.DEBUG):
-        with patch('main.kr8s.objects.Secret') as mock_secret_cls:
-            mock_secret_cls.get.return_value = src_secret
-            mock_secret_cls.side_effect = factory
-            reconcile_warpcredential(
-                body={},
-                spec={
-                    'type': 'nvidia-ngc',
-                    'displayName': 'NGC Test',
-                    'secretRef': {'name': 'src', 'key': 'NGC_API_KEY'},
-                },
-                name='ngc-test',
-                namespace='weka-app-store',
-                patch=patch_obj,
-                logger=logging.getLogger('test'),
-            )
+    with caplog.at_level(logging.DEBUG, logger='main'):
+        with caplog.at_level(logging.DEBUG):
+            with patch('main.kr8s.objects.Secret') as mock_secret_cls:
+                mock_secret_cls.get.return_value = src_secret
+                mock_secret_cls.side_effect = factory
+                reconcile_warpcredential(
+                    body={},
+                    spec={
+                        'type': 'nvidia-ngc',
+                        'displayName': 'NGC Test',
+                        'secretRef': {'name': 'src', 'key': 'NGC_API_KEY'},
+                    },
+                    name='ngc-test',
+                    namespace='weka-app-store',
+                    patch=patch_obj,
+                    logger=logging.getLogger('test'),
+                )
 
     # Must have captured at least one log record (confirms caplog was actually active)
     assert len(caplog.records) >= 1, 'No log records captured — was caplog.at_level active?'
+    # Confirm that records from the module logger or the injected test logger were captured
+    assert any(r.name in ('main', 'test') for r in caplog.records), (
+        'No records from main or test logger — module log paths may not be covered'
+    )
 
     # Across ALL captured records at ANY level, the raw key value must not appear
     for record in caplog.records:
