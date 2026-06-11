@@ -1,7 +1,8 @@
 ---
 phase: 24
 slug: settings-gui-overhaul
-status: draft
+status: approved
+reviewed_at: 2026-06-12
 shadcn_initialized: false
 preset: none
 created: 2026-06-12
