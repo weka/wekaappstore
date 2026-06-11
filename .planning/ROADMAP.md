@@ -282,7 +282,12 @@ Plans:
   6. With one WEKA Storage credential registered, the WEKA Storage Overview panel appears below Credential Management showing a capacity bar, filesystem table (human names, utilisation bars, >=90% amber), and backend IP grid
   7. With zero WEKA credentials, the panel is replaced by a "No WEKA Storage credential configured" hint
   8. `[Refresh]` button triggers a fresh WEKA API call (bypasses 60s cache); "Last updated" shows actual data age
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 24-01-PLAN.md — Extend /settings route with credentials_by_type context; restructure settings.html section order with Credential Management and WEKA Storage Overview shells (Wave 1)
+- [ ] 24-02-PLAN.md — Credential Management JS: inline forms, traffic-light state machine, 2-s polling with 30-s timeout, browser-confirm delete (Wave 2)
+- [ ] 24-03-PLAN.md — WEKA Storage Overview JS: header controls, four-state machine, humanBytes capacity row, filesystem table with sort and Show-all toggle, backend node grid (Wave 3)
 **UI hint**: yes
 
 ### Phase 25: Blueprint Credential Selector SDK
