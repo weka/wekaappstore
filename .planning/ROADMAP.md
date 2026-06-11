@@ -230,7 +230,17 @@ Plans:
   5. A `WarpCredential` whose referenced Secret does not exist results in `kopf.TemporaryError` (not a crash); `status.conditions[KeyReady].status = "False"` with reason `KeyMissing`
   6. Deleting a `WarpCredential` CR leaves all `warp-<name>-*` secrets intact; operator logs a warning
   7. No key values appear in operator logs at any log level (`pytest operator_module/tests/test_warp_credential.py` verifies derivation logic without network access)
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+**Wave 1**
+- [ ] 22-01-PLAN.md — Pure derivation helpers (_derive_ngc_payloads, _derive_hf_payload, _derive_weka_payload), kr8s I/O wrappers (_read_source_secret, _apply_secret_idempotent), status-condition builder, _VALID_WARPCRED_TYPES constant, delete_warpcredential handler with optional=True (OPS-04/05/06 payloads, OPS-08, OPS-09 plumbing, API-08)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 22-02-PLAN.md — reconcile_warpcredential stacked-decorator handler (create / update field=spec / resume) with type dispatch, status patch on every failure branch, success status writes including wekaEndpoint (OPS-01/02/03/07, OPS-04/05/06 wiring, OPS-09)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 22-03-PLAN.md — operator_module/tests/test_warp_credential.py: pure-helper tests + idempotency tests + handler-path tests + delete-handler test + caplog-based API-08 assertion (validates all 7 ROADMAP success criteria)
 
 ### Phase 23: Backend Credentials API and WEKA Overview Proxy
 **Goal**: The GUI backend exposes the `/api/credentials` CRUD endpoints and `/api/weka/overview` proxy; old secret endpoints removed
@@ -299,7 +309,7 @@ v6.0 Execution Order: 21 → 22 → 23 → 24/25 (Phases 24 and 25 can be develo
 | 19. Validator Soft-Warning and Portable Fixture | v5.0 | 0/TBD | Not started | - |
 | 20. AIDP Migration Smoke Test | v5.0 | 0/TBD | Not started | - |
 | 21. WarpCredential CRD and Helm RBAC | v6.0 | 2/2 | Complete    | 2026-06-11 |
-| 22. Operator WarpCredential Reconciler | v6.0 | 0/TBD | Not started | - |
+| 22. Operator WarpCredential Reconciler | v6.0 | 0/3 | Planned | - |
 | 23. Backend Credentials API and WEKA Overview Proxy | v6.0 | 0/TBD | Not started | - |
 | 24. Settings GUI Overhaul | v6.0 | 0/TBD | Not started | - |
 | 25. Blueprint Credential Selector SDK | v6.0 | 0/TBD | Not started | - |
