@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v5.0
-milestone_name: AppStack Variable Substitution
-status: completed
-stopped_at: Phase 18 planned (5 plans, 2 waves)
-last_updated: "2026-05-08T07:16:20.089Z"
-last_activity: 2026-05-08 -- Phase 18 marked complete
+milestone: v6.0
+milestone_name: Secret Management & WEKA Storage Integration
+status: planning
+last_updated: "2026-06-11T04:35:11.294Z"
+last_activity: 2026-06-11
 progress:
-  total_phases: 9
-  completed_phases: 3
-  total_plans: 7
-  completed_plans: 7
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,14 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-06 — milestone v5.0 started)
 
 ## Current Position
 
-Phase: 18 — COMPLETE
-Plan: 1 of 5
-Status: Phase 18 complete
-Last activity: 2026-05-08 -- Phase 18 marked complete
-
-```
-Progress: [__________] 0% (0/5 phases)
-```
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-11 — Milestone v6.0 started
 
 ## Accumulated Context
 

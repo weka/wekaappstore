@@ -10,26 +10,19 @@ The primary users are platform users and cluster admins who interact with OpenCl
 
 OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
 
-## Current Milestone: v5.0 AppStack Variable Substitution
+## Current Milestone: v6.0 Secret Management & WEKA Storage Integration
 
-**Goal:** Add a `spec.appStack.variables` map to the `WekaAppStore` CR. The operator performs a single `${VAR}` substitution pass over `kubernetesManifest` strings and over `valuesFiles` content (loaded from ConfigMaps/Secrets) before they are applied or merged into Helm values — so blueprints become portable across namespaces and environments without external pre-render tooling.
+**Goal:** Give App Store administrators a first-class credential management system — named, multi-key storage for NGC/HuggingFace/WEKA credentials via a new `WarpCredential` CRD, automatic secret derivation by the operator, a blueprint Jinja2 macro SDK for credential selection, and live WEKA storage visibility on the Settings page.
 
-**Source PRD:** `.planning/PRD-appstack-variable-substitution.md`
+**Source PRD:** `.planning/PRD-secret-management-overhaul.md`
 
 **Target features:**
-- CRD schema: optional `spec.appStack.variables` (`additionalProperties: { type: string }`)
-- `render()` helper using `string.Template` — `${VAR}` syntax, `$$` literal-dollar escape, strict mode
-- Substitution applied to `component.kubernetesManifest` strings before `kubectl apply`
-- Substitution applied to raw ConfigMap/Secret content returned by `load_values_from_reference` before `yaml.safe_load`
-- Auto-default `${namespace}` → CR's `metadata.namespace`
-- Strict failure on undefined refs raised as `kopf.PermanentError` naming the variable + component
-- Validator soft-warning on hardcoded `*.svc.cluster.local` / inline `namespace:` literals inside `kubernetesManifest`
-- README user-facing doc (syntax, `$$` escape, auto-default behavior)
-- AIDP migration follow-up: 17 inline `namespace: rag` literals + DNS literals → `${namespace}` / `${milvusHost}` / `${postgresHost}` as the end-to-end smoke test
-
-**Out of scope (locked by PRD):**
-- Recursion into inline `component.values:` objects (workaround: route through `valuesFiles:`)
-- Templating of operator-control fields (`helmChart.*`, `releaseName`, `targetNamespace`, `readinessCheck.*`)
+- `WarpCredential` CRD (multi-instance, one CR per named credential, types: `nvidia-ngc` / `huggingface` / `weka-storage`)
+- Operator reconciler: NGC docker pull secret + Opaque API key auto-derivation per credential; WEKA token/endpoint/username storage
+- Settings GUI overhaul: Credential Management section at top, per-type multi-key lists, traffic-light status (red=add / green=delete), amber transitional state
+- Blueprint Credential Selector SDK: `_credential_macros.html` Jinja2 macro library (`credential_select`, `weka_storage_select`) + `GET /api/credentials?type=<t>` REST endpoint
+- WEKA Storage Overview panel: cluster capacity bar, filesystem table (human-readable names, utilisation, ≥90% amber), backend node IP grid, multi-cluster selector, 60s cache + refresh
+- Retire old `/api/secret/nvidia` + `/api/secret/huggingface` endpoints
 - Conditionals, loops, full template engines (Jinja, Go templates)
 - Cross-component variable references
 - External variable sources (Vault, env vars, AWS Secrets Manager)
@@ -81,7 +74,7 @@ Infrastructure delivered: HTTP transport, EKS deployment via agent-sandbox CRD, 
 
 ### Active
 
-v5.0 AppStack Variable Substitution — requirements being defined. See `.planning/REQUIREMENTS.md` once written and `.planning/PRD-appstack-variable-substitution.md` for the source PRD. v3.1 deferred E2E chat work remains tracked separately in `.planning/v3.0-KNOWN-ISSUES.md`.
+v6.0 Secret Management & WEKA Storage Integration — requirements being defined. See `.planning/REQUIREMENTS.md` and `.planning/PRD-secret-management-overhaul.md` for the source PRD.
 
 ### Out of Scope
 
@@ -144,4 +137,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-06 — milestone v5.0 AppStack Variable Substitution started*
+*Last updated: 2026-06-11 — milestone v6.0 Secret Management & WEKA Storage Integration started*
