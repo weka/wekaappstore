@@ -76,7 +76,13 @@ rbac:
         resources: ["customresourcedefinitions"]
         verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
       - apiGroups: ["warp.io"]
-        resources: ["wekaappstores", "wekaappstores/status", "wekaappstores/finalizers"]
+        resources:
+          - wekaappstores
+          - wekaappstores/status
+          - wekaappstores/finalizers
+          - warpcredentials
+          - warpcredentials/status
+          - warpcredentials/finalizers
         verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
     # Add any extra rules without overriding defaults
     extraRules:
