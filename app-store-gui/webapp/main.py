@@ -223,6 +223,10 @@ except Exception:
     TOKENVISOR_ARCH_B64 = None
 
 # Helper: load kube config
+# _config_loaded is intentionally a process-level singleton: once the kube
+# config is loaded for this process there is no need (or safe way) to reload
+# it dynamically.  Tests that need a fresh config should restart the process
+# or mock load_kube_config() directly.
 _config_loaded = False
 
 
