@@ -382,6 +382,7 @@ def _derive_ngc_payloads(key: str) -> tuple[dict, dict]:
         'auths': {
             'nvcr.io': {
                 'username': '$oauthtoken',
+                'password': key,
                 'auth': docker_auth_b64,
             }
         }

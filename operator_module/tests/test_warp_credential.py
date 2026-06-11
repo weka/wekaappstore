@@ -137,7 +137,7 @@ def test_ngc_docker_auth_is_oauthtoken_b64():
     _apikey, docker = _derive_ngc_payloads('my-secret-key')
     docker_json = json.loads(base64.b64decode(docker['.dockerconfigjson']))
     assert docker_json['auths']['nvcr.io']['username'] == '$oauthtoken'
-    assert 'password' not in docker_json['auths']['nvcr.io']
+    assert docker_json['auths']['nvcr.io']['password'] == 'my-secret-key'
     assert docker_json['auths']['nvcr.io']['auth'] == base64.b64encode(
         b'$oauthtoken:my-secret-key'
     ).decode('ascii')
