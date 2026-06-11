@@ -555,21 +555,6 @@ def create_or_update_secret(name: str, namespace: str, string_data: Dict[str, st
         raise
 
 
-@app.post("/api/secret/huggingface")
-async def save_huggingface_key(api_key: str = Form(...), namespace: str = Form("default")):
-    try:
-        result = create_or_update_secret(
-            name="hf-api-key",
-            namespace=namespace.strip() or "default",
-            string_data={"HF_API_KEY": api_key},
-        )
-        return JSONResponse({"ok": True, "secret_name": result["name"], "namespace": result["namespace"], "action": result["action"]})
-    except ApiException as ae:
-        return JSONResponse({"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"}, status_code=500)
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
 @app.get("/api/blueprints")
 async def list_blueprints(namespace: str = Query("all", description="Namespace to list WekaAppStore CRs from; use 'all' for cluster-wide")):
     """List Weka App Store custom resources (CRs).
@@ -617,21 +602,6 @@ async def delete_blueprint(namespace: str, name: str):
             body=body,
         )
         return JSONResponse({"ok": True})
-    except ApiException as ae:
-        return JSONResponse({"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"}, status_code=500)
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-@app.post("/api/secret/nvidia")
-async def save_nvidia_key(api_key: str = Form(...), namespace: str = Form("default")):
-    try:
-        result = create_or_update_secret(
-            name="nvidia-api-key",
-            namespace=namespace.strip() or "default",
-            string_data={"NVIDIA_API_KEY": api_key},
-        )
-        return JSONResponse({"ok": True, "secret_name": result["name"], "namespace": result["namespace"], "action": result["action"]})
     except ApiException as ae:
         return JSONResponse({"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"}, status_code=500)
     except Exception as e:
