@@ -6,6 +6,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from typing import Optional, Dict, Any, List
 import os
+import re
 import yaml
 import base64
 import json
@@ -634,6 +635,324 @@ async def list_secrets(namespace: str = Query("all", description="Namespace to l
         return JSONResponse({"ok": True, "items": items})
     except ApiException as ae:
         # Permission errors or others
+        return JSONResponse({"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# ---------------------------------------------------------------------------
+# Credentials API — WarpCredential CRD (group=warp.io, version=v1alpha1)
+# ---------------------------------------------------------------------------
+
+_CREDENTIAL_TYPE_KEYS: Dict[str, Dict[str, Any]] = {
+    "nvidia-ngc": {
+        "secret_ref_key": "NGC_API_KEY",
+        "secret_data_keys": ["NGC_API_KEY"],
+    },
+    "huggingface": {
+        "secret_ref_key": "HF_API_KEY",
+        "secret_data_keys": ["HF_API_KEY"],
+    },
+    "weka-storage": {
+        "secret_ref_key": "WEKA_API_TOKEN",
+        "secret_data_keys": ["WEKA_API_USERNAME", "WEKA_API_TOKEN", "WEKA_API_ENDPOINT"],
+    },
+}
+
+_VALID_CREDENTIAL_TYPES: tuple = tuple(_CREDENTIAL_TYPE_KEYS.keys())
+
+
+def _make_credential_slug(display_name: str) -> str:
+    """Convert a human-readable displayName into a DNS-1123-compatible slug.
+
+    Rules (D-11): lowercase, replace non-alphanumeric runs with '-',
+    strip leading/trailing hyphens, truncate to 52 characters.
+    Raises ValueError if the result is empty.
+    """
+    slug = display_name.lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    slug = slug.strip("-")
+    slug = slug[:52]
+    if not slug:
+        raise ValueError("displayName produced an empty slug")
+    return slug
+
+
+def _allocate_unique_credential_slug(co_api: Any, namespace: str, base_slug: str) -> str:
+    """Return a slug that does not collide with any existing WarpCredential in the namespace.
+
+    Appends -2, -3, ... up to -99 until a unique name is found (D-12).
+    Raises RuntimeError if exhausted.
+    """
+    resp = co_api.list_namespaced_custom_object(
+        group="warp.io",
+        version="v1alpha1",
+        plural="warpcredentials",
+        namespace=namespace,
+    )
+    existing_names = {
+        (it.get("metadata") or {}).get("name")
+        for it in (resp or {}).get("items", []) or []
+    }
+    if base_slug not in existing_names:
+        return base_slug
+    for suffix in range(2, 100):
+        candidate = f"{base_slug}-{suffix}"
+        if candidate not in existing_names:
+            return candidate
+    raise RuntimeError("could not allocate unique credential slug after 99 attempts")
+
+
+def _build_credential_response_item(cr: Dict[str, Any]) -> Dict[str, Any]:
+    """Transform a WarpCredential CR dict into the API response item shape.
+
+    Never includes raw credential values — only safe metadata and status fields.
+    """
+    md = cr.get("metadata") or {}
+    spec = cr.get("spec") or {}
+    status = cr.get("status") or {}
+    conditions = status.get("conditions") or []
+
+    cred_type = spec.get("type", "")
+
+    # Derive ready flag from KeyReady condition
+    key_ready_condition = next((c for c in conditions if c.get("type") == "KeyReady"), None)
+    ready = (key_ready_condition.get("status") == "True") if key_ready_condition else False
+
+    item: Dict[str, Any] = {
+        "name": md.get("name"),
+        "namespace": md.get("namespace") or "default",
+        "type": cred_type,
+        "displayName": spec.get("displayName"),
+        "ready": ready,
+        "lastSyncTime": status.get("lastSyncTime"),
+        "derivedSecrets": status.get("derivedSecrets") or [],
+    }
+
+    # Add error field when not ready and a message is available
+    if not ready and key_ready_condition and key_ready_condition.get("message"):
+        item["error"] = key_ready_condition["message"]
+
+    # nvidia-ngc: add dockerSecretReady
+    if cred_type == "nvidia-ngc":
+        docker_condition = next((c for c in conditions if c.get("type") == "DockerSecretReady"), None)
+        item["dockerSecretReady"] = (docker_condition.get("status") == "True") if docker_condition else False
+
+    # weka-storage: add endpoint from status (never from raw Secret)
+    if cred_type == "weka-storage":
+        item["endpoint"] = status.get("wekaEndpoint")
+
+    return item
+
+
+@app.get("/api/credentials")
+async def list_credentials(
+    namespace: str = Query("default", description="Namespace to list WarpCredential CRs from; use 'all' for cluster-wide"),
+    type: Optional[str] = Query(None, description="Filter by credential type; if set, only items of this type with ready=true are returned"),
+):
+    """List WarpCredential CRs with safe status shape.
+
+    Returns safe metadata and status only — never raw credential values.
+    CRD: group=warp.io, version=v1alpha1, plural=warpcredentials
+    """
+    try:
+        load_kube_config()
+
+        def _list() -> Dict[str, Any]:
+            co_api = client.CustomObjectsApi()
+            ns = (namespace or "").strip()
+            if ns.lower() in ("all", "*"):
+                return co_api.list_cluster_custom_object(
+                    group="warp.io",
+                    version="v1alpha1",
+                    plural="warpcredentials",
+                )
+            return co_api.list_namespaced_custom_object(
+                group="warp.io",
+                version="v1alpha1",
+                plural="warpcredentials",
+                namespace=ns,
+            )
+
+        resp = await asyncio.to_thread(_list)
+        items = [
+            _build_credential_response_item(cr)
+            for cr in (resp or {}).get("items", []) or []
+        ]
+
+        # Apply type filter: only ready items of the requested type (API-02)
+        if type is not None:
+            items = [it for it in items if it["type"] == type and it["ready"] is True]
+
+        return JSONResponse({"ok": True, "items": items})
+    except ApiException as ae:
+        return JSONResponse({"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/credentials")
+async def create_credential(
+    display_name: str = Form(...),
+    type: str = Form(...),
+    namespace: str = Form("default"),
+    key: str = Form(...),
+    username: Optional[str] = Form(None),
+    endpoint: Optional[str] = Form(None),
+):
+    """Create a new WarpCredential CR and its raw warp-cred-<slug> Secret.
+
+    Handles slug collision by appending -2, -3, ... (D-12).
+    Never echoes raw credential values in the response (API-08).
+    """
+    try:
+        # --- Validation ---
+        if not display_name.strip():
+            return JSONResponse({"ok": False, "error": "displayName is required"}, status_code=400)
+
+        if type not in _VALID_CREDENTIAL_TYPES:
+            return JSONResponse(
+                {"ok": False, "error": f"invalid credential type: {type}; must be one of {list(_VALID_CREDENTIAL_TYPES)}"},
+                status_code=400,
+            )
+
+        if type == "weka-storage":
+            if not username or not username.strip():
+                return JSONResponse({"ok": False, "error": "username is required for weka-storage credentials"}, status_code=400)
+            if not endpoint or not endpoint.strip():
+                return JSONResponse({"ok": False, "error": "endpoint is required for weka-storage credentials"}, status_code=400)
+
+        load_kube_config()
+        ns = namespace.strip() or "default"
+
+        try:
+            base_slug = _make_credential_slug(display_name)
+        except ValueError as ve:
+            return JSONResponse({"ok": False, "error": str(ve)}, status_code=400)
+
+        co_api = client.CustomObjectsApi()
+        slug = await asyncio.to_thread(_allocate_unique_credential_slug, co_api, ns, base_slug)
+
+        # Build string_data for the raw Secret per D-08/D-09/D-10
+        if type == "nvidia-ngc":
+            string_data = {"NGC_API_KEY": key}
+        elif type == "huggingface":
+            string_data = {"HF_API_KEY": key}
+        else:  # weka-storage
+            string_data = {
+                "WEKA_API_USERNAME": username.strip(),
+                "WEKA_API_TOKEN": key,
+                "WEKA_API_ENDPOINT": endpoint.strip(),
+            }
+
+        # Create the raw Secret (warp-cred-<slug>)
+        await asyncio.to_thread(create_or_update_secret, f"warp-cred-{slug}", ns, string_data)
+
+        # Build the WarpCredential CR body
+        body: Dict[str, Any] = {
+            "apiVersion": "warp.io/v1alpha1",
+            "kind": "WarpCredential",
+            "metadata": {"name": slug, "namespace": ns},
+            "spec": {
+                "type": type,
+                "displayName": display_name.strip(),
+                "secretRef": {
+                    "name": f"warp-cred-{slug}",
+                    "key": _CREDENTIAL_TYPE_KEYS[type]["secret_ref_key"],
+                },
+            },
+        }
+        if type == "weka-storage":
+            body["spec"]["endpoint"] = endpoint.strip()
+
+        # Create the WarpCredential CR
+        try:
+            await asyncio.to_thread(
+                co_api.create_namespaced_custom_object,
+                group="warp.io",
+                version="v1alpha1",
+                namespace=ns,
+                plural="warpcredentials",
+                body=body,
+            )
+        except ApiException as ae:
+            if ae.status == 409:
+                return JSONResponse({"ok": False, "error": f"slug {slug} already taken; retry"}, status_code=409)
+            raise
+
+        logger.info("Created WarpCredential: name=%s namespace=%s type=%s", slug, ns, type)
+
+        # Return metadata only — never echo key, username, or endpoint values (API-08)
+        return JSONResponse({
+            "ok": True,
+            "name": slug,
+            "namespace": ns,
+            "type": type,
+            "displayName": display_name.strip(),
+        })
+    except ApiException as ae:
+        return JSONResponse({"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+_CREDENTIAL_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,251}[a-z0-9])?$")
+
+
+@app.delete("/api/credentials/{name}")
+async def delete_credential(
+    name: str,
+    namespace: str = Query("default", description="Namespace of the WarpCredential CR"),
+):
+    """Delete a WarpCredential CR and its raw warp-cred-<name> Secret.
+
+    Deletes the CR first (stops operator reconcile loop), then the raw Secret.
+    Derived secrets (warp-<name>-*) are never touched (API-04, OPS-08).
+    """
+    try:
+        load_kube_config()
+
+        # Validate name against DNS-1123 subdomain pattern (T-23-02-04)
+        if not _CREDENTIAL_NAME_RE.match(name):
+            return JSONResponse({"ok": False, "error": "invalid credential name"}, status_code=400)
+
+        ns = namespace.strip() or "default"
+        co_api = client.CustomObjectsApi()
+        core = client.CoreV1Api()
+
+        # Step 1: Delete the WarpCredential CR first (stops operator reconcile loop)
+        delete_opts = client.V1DeleteOptions(propagation_policy="Foreground")
+        try:
+            await asyncio.to_thread(
+                co_api.delete_namespaced_custom_object,
+                group="warp.io",
+                version="v1alpha1",
+                namespace=ns,
+                plural="warpcredentials",
+                name=name,
+                body=delete_opts,
+            )
+        except ApiException as ae:
+            if ae.status != 404:
+                raise
+            # 404 means CR already gone — still attempt raw Secret cleanup
+
+        # Step 2: Delete the raw warp-cred-<name> Secret
+        # Derived warp-<name>-* secrets are intentionally NOT deleted here (API-04, OPS-08)
+        try:
+            await asyncio.to_thread(
+                core.delete_namespaced_secret,
+                name=f"warp-cred-{name}",
+                namespace=ns,
+            )
+        except ApiException as ae:
+            if ae.status != 404:
+                raise
+            # 404 means Secret already gone — idempotent delete
+
+        logger.info("Deleted WarpCredential: name=%s namespace=%s", name, ns)
+        return JSONResponse({"ok": True})
+    except ApiException as ae:
         return JSONResponse({"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"}, status_code=500)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
