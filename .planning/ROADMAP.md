@@ -254,14 +254,14 @@ Plans:
   5. `GET /api/weka/overview?credential=<name>` returns the structured JSON schema (capacity, filesystems, backendNodes, fetchedAt); second request within 60 seconds returns cached data (same `fetchedAt`); `?bust=1` bypasses cache
   6. `GET /api/secret/nvidia` and `GET /api/secret/huggingface` return 404
   7. No token values appear in response bodies or server logs
-**Plans:** 1/4 plans executed
+**Plans:** 2/4 plans executed
 
 Plans:
 **Wave 1**
 - [x] 23-01-PLAN.md — Remove deprecated /api/secret/{huggingface,nvidia} handlers from main.py; strip HuggingFace + NVIDIA HTML sections and JS from settings.html; rewire loadBlueprints namespace fallback (API-07)
 
 **Wave 2** *(blocked on Wave 1 completion — same main.py file ownership)*
-- [ ] 23-02-PLAN.md — /api/credentials CRUD: GET list + ?type filter, POST with slug + collision + raw Secret + WarpCredential CR, DELETE preserving derived secrets; slug + response helpers; _CREDENTIAL_TYPE_KEYS constant (API-01, API-02, API-03, API-04, API-08)
+- [x] 23-02-PLAN.md — /api/credentials CRUD: GET list + ?type filter, POST with slug + collision + raw Secret + WarpCredential CR, DELETE preserving derived secrets; slug + response helpers; _CREDENTIAL_TYPE_KEYS constant (API-01, API-02, API-03, API-04, API-08)
 
 **Wave 3** *(blocked on Wave 2 completion — same main.py file ownership)*
 - [ ] 23-03-PLAN.md — /api/weka/overview proxy: _resolve_weka_credential_secret + _weka_login + _weka_get_json helpers; _assemble_weka_overview pure transform; 60s namespace-scoped cache; ?bust=1 bypass; 502 on WEKA failures (API-05, API-06, API-08)
@@ -323,6 +323,6 @@ v6.0 Execution Order: 21 → 22 → 23 → 24/25 (Phases 24 and 25 can be develo
 | 20. AIDP Migration Smoke Test | v5.0 | 0/TBD | Not started | - |
 | 21. WarpCredential CRD and Helm RBAC | v6.0 | 2/2 | Complete    | 2026-06-11 |
 | 22. Operator WarpCredential Reconciler | v6.0 | 3/3 | Complete    | 2026-06-11 |
-| 23. Backend Credentials API and WEKA Overview Proxy | v6.0 | 1/4 | In Progress|  |
+| 23. Backend Credentials API and WEKA Overview Proxy | v6.0 | 2/4 | In Progress|  |
 | 24. Settings GUI Overhaul | v6.0 | 0/TBD | Not started | - |
 | 25. Blueprint Credential Selector SDK | v6.0 | 0/TBD | Not started | - |
