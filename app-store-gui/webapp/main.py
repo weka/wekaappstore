@@ -675,13 +675,15 @@ def _make_credential_slug(display_name: str) -> str:
     """Convert a human-readable displayName into a DNS-1123-compatible slug.
 
     Rules (D-11): lowercase, replace non-alphanumeric runs with '-',
-    strip leading/trailing hyphens, truncate to 52 characters.
+    strip leading/trailing hyphens, truncate to 48 characters.
+    Truncating to 48 (not 52) leaves room for the -99 suffix added by
+    _allocate_unique_credential_slug while staying within 51 characters total.
     Raises ValueError if the result is empty.
     """
     slug = display_name.lower()
     slug = re.sub(r"[^a-z0-9]+", "-", slug)
     slug = slug.strip("-")
-    slug = slug[:52]
+    slug = slug[:48]
     if not slug:
         raise ValueError("displayName produced an empty slug")
     return slug
