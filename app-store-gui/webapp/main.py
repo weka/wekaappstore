@@ -1043,12 +1043,16 @@ async def get_weka_overview(
         base = endpoint.rstrip("/")
 
         # 5f: Three parallel WEKA data calls (D-05)
-        fs_resp, cluster_resp, containers_resp = await asyncio.gather(
+        # return_exceptions=True lets one endpoint fail without cancelling the others
+        results = await asyncio.gather(
             asyncio.to_thread(_weka_get_json, f"{base}/api/v2/fileSystems", headers),
             asyncio.to_thread(_weka_get_json, f"{base}/api/v2/cluster", headers),
             asyncio.to_thread(_weka_get_json, f"{base}/api/v2/containers", headers),
-            return_exceptions=False,
+            return_exceptions=True,
         )
+        fs_resp = results[0] if not isinstance(results[0], Exception) else []
+        cluster_resp = results[1] if not isinstance(results[1], Exception) else {}
+        containers_resp = results[2] if not isinstance(results[2], Exception) else []
 
         # 5g-h: Assemble response
         fetched_at_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
