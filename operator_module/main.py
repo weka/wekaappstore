@@ -425,6 +425,98 @@ def _derive_weka_payload(username: str, token: str, endpoint: str) -> dict:
     }
 
 
+def _read_source_secret(name: str, namespace: str, *, ctx: str) -> dict:
+    """Read the WarpCredential spec.secretRef Secret and return decoded bytes per key.
+
+    Returns dict[key_name -> bytes] where values are the base64-decoded raw bytes
+    from the source Secret's .data field.  Callers select required keys per credential
+    type before passing to _derive_* helpers.
+
+    Error dispatch mirrors load_values_from_reference at main.py:449-468 (canonical
+    Phase 18 pattern) verbatim:
+      kr8s.NotFoundError           -> kopf.TemporaryError(delay=30)  (OPS-02, D-07)
+      kr8s.APITimeoutError         -> kopf.TemporaryError(delay=30)  (D-10)
+      kr8s.ServerError(>=500)      -> kopf.TemporaryError(delay=30)  (D-10)
+      kr8s.ServerError(4xx)        -> kopf.PermanentError            (D-10)
+
+    Locked: D-07 (NotFoundError -> TemporaryError), D-10 (ServerError dispatch),
+    OPS-02 (retry on missing secret); mirror of main.py:449-468.
+    NEVER include any decoded value in exception messages (T-22-04).
+    """
+    try:
+        secret = kr8s.objects.Secret.get(name=name, namespace=namespace)
+    except kr8s.NotFoundError as e:
+        raise kopf.TemporaryError(
+            f'{ctx}: source Secret {namespace}/{name} not found (will retry in 30s)',
+            delay=30,
+        ) from e
+    except kr8s.APITimeoutError as e:
+        raise kopf.TemporaryError(
+            f'{ctx}: timeout fetching source Secret {namespace}/{name} (will retry in 30s)',
+            delay=30,
+        ) from e
+    except kr8s.ServerError as e:
+        status = e.response.status_code if getattr(e, 'response', None) is not None else None
+        if status is not None and status >= 500:
+            raise kopf.TemporaryError(
+                f'{ctx}: API server error {status} fetching Secret {namespace}/{name} (will retry in 30s)',
+                delay=30,
+            ) from e
+        raise kopf.PermanentError(
+            f'{ctx}: API error fetching Secret {namespace}/{name}: {e}'
+        ) from e
+
+    raw_data = secret.data or {}
+    return {k: base64.b64decode(v) for k, v in raw_data.items()}
+
+
+def _apply_secret_idempotent(secret_obj: kr8s.objects.Secret, *, ctx: str) -> None:
+    """Create-or-patch a kr8s Secret.  Locked by D-02 (no delete-and-recreate).
+
+    Idempotent: on 409 Conflict (already exists), issues a merge-patch
+    with the new .data and .type values.  A single round-trip in steady
+    state (create succeeds immediately).
+
+    Error dispatch:
+      409 Conflict (Secret already exists) -> patch({data, type}) and return (D-02)
+      kr8s.ServerError(>=500)             -> kopf.TemporaryError(delay=30) (D-10)
+      kr8s.ServerError(other 4xx)         -> kopf.PermanentError           (D-10)
+      kr8s.APITimeoutError                -> kopf.TemporaryError(delay=30) (D-10)
+
+    IMPORTANT — Pitfall 1 (RESEARCH.md §7.1): kr8s 0.20.10 does not have a
+    dedicated AlreadyExists exception class.  The 409 path MUST be detected via
+    e.response.status_code == 409 inside the except kr8s.ServerError block.
+    Do not import a non-existent AlreadyExists class from kr8s — it will fail.
+
+    The patch call passes exactly {'data': secret_obj.raw['data'], 'type': secret_obj.raw['type']}
+    — two keys only (Plan 03 asserts on this exact dict shape).
+
+    Locked: D-02 (create-or-patch idempotency), OPS-09 (derived secret restored on
+    next reconcile); mirrors kr8s section in RESEARCH.md §1.
+    NEVER log the contents of secret_obj.raw['data'] (T-22-04).
+    """
+    try:
+        secret_obj.create()
+    except kr8s.ServerError as e:
+        status = e.response.status_code if getattr(e, 'response', None) is not None else None
+        if status == 409:
+            # Already exists — merge-patch with new .data to converge to desired state.
+            # Patch dict is exactly two keys; Plan 03 asserts on this shape.
+            secret_obj.patch({'data': secret_obj.raw['data'], 'type': secret_obj.raw['type']})
+            return
+        if status is not None and status >= 500:
+            raise kopf.TemporaryError(
+                f'{ctx}: API server error {status} writing Secret (will retry in 30s)',
+                delay=30,
+            ) from e
+        raise kopf.PermanentError(f'{ctx}: API error writing Secret: {e}') from e
+    except kr8s.APITimeoutError as e:
+        raise kopf.TemporaryError(
+            f'{ctx}: timeout writing Secret (will retry in 30s)',
+            delay=30,
+        ) from e
+
+
 # ===================== CRD Strategy Helpers =====================
 
 class HelmError(RuntimeError):
