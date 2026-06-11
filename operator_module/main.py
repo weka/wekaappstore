@@ -456,7 +456,12 @@ def _read_source_secret(name: str, namespace: str, *, ctx: str) -> dict:
         ) from e
     except kr8s.ServerError as e:
         status = e.response.status_code if getattr(e, 'response', None) is not None else None
-        if status is not None and status >= 500:
+        if status is None:
+            raise kopf.TemporaryError(
+                f'{ctx}: unclassified API error fetching Secret {namespace}/{name} (no response; will retry in 30s)',
+                delay=30,
+            ) from e
+        if status >= 500:
             raise kopf.TemporaryError(
                 f'{ctx}: API server error {status} fetching Secret {namespace}/{name} (will retry in 30s)',
                 delay=30,
@@ -498,12 +503,17 @@ def _apply_secret_idempotent(secret_obj: kr8s.objects.Secret, *, ctx: str) -> No
         secret_obj.create()
     except kr8s.ServerError as e:
         status = e.response.status_code if getattr(e, 'response', None) is not None else None
+        if status is None:
+            raise kopf.TemporaryError(
+                f'{ctx}: unclassified API error writing Secret (no response; will retry in 30s)',
+                delay=30,
+            ) from e
         if status == 409:
             # Already exists — merge-patch with new .data to converge to desired state.
             # Patch dict is exactly two keys; Plan 03 asserts on this shape.
             secret_obj.patch({'data': secret_obj.raw['data'], 'type': secret_obj.raw['type']})
             return
-        if status is not None and status >= 500:
+        if status >= 500:
             raise kopf.TemporaryError(
                 f'{ctx}: API server error {status} writing Secret (will retry in 30s)',
                 delay=30,
