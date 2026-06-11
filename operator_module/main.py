@@ -1453,3 +1453,30 @@ def delete_warrpappstore_function(spec, name, namespace, **kwargs):
             logging.warning(f"Failed to uninstall Helm release {release_name}: {message}")
     else:
         logging.info(f"Pod-based deployment cleanup handled by owner reference")
+
+
+# ===================== WarpCredential Handlers =====================
+
+# D-05, OPS-08, RESEARCH.md §Pattern 3 — optional=True prevents kopf from adding
+# a finalizer to the CR.  Without a finalizer the handler is best-effort (kopf may
+# miss the event if Kubernetes removes the resource before kopf processes DELETED).
+# Acceptable: this handler does no destructive work; logging a warning is best-effort
+# by design (nolar/kopf#701).
+@kopf.on.delete('warp.io', 'v1alpha1', 'warpcredentials', optional=True)
+def delete_warpcredential(name, namespace, logger, **_):
+    """OPS-08: log a warning only; do NOT delete derived secrets.
+
+    optional=True prevents kopf from adding a finalizer (kopf maintainer comment
+    in nolar/kopf#701: with optional=True, no finalizer is added; the handler is
+    best-effort logging).  This is intentional — derived secrets must outlive the
+    WarpCredential CR (OPS-08).  The inaction (preserving derived secrets) is the
+    contract; cluster state is the same whether the warning was logged or not.
+
+    Locked: D-05 (warning-only delete, no destructive work), OPS-08 (derived secrets
+    must survive CR deletion), RESEARCH.md §Pattern 3 (optional=True rationale).
+    """
+    logger.warning(
+        f'WarpCredential {namespace}/{name} deleted; derived secrets '
+        f'warp-{name}-* are intentionally retained (OPS-08). '
+        f'Administrator must delete them manually if no longer needed.'
+    )
