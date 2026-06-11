@@ -18,15 +18,15 @@
 
 ### OPS (Operator)
 
-- [ ] **OPS-01**: kopf `on.create` / `on.update` handler watches `WarpCredential` resources; raises `kopf.PermanentError` for unrecognised `spec.type`
-- [ ] **OPS-02**: If `spec.secretRef` Secret does not exist in the App Store namespace, raises `kopf.TemporaryError(delay=30)` (not a crash; retries until Secret appears)
-- [ ] **OPS-03**: Empty or whitespace-only key value read from the referenced Secret raises `kopf.PermanentError` naming the credential
-- [ ] **OPS-04**: For `nvidia-ngc`: creates/patches `warp-<name>-apikey` (Opaque, key `NGC_API_KEY`) and `warp-<name>-docker` (type `kubernetes.io/dockerconfigjson` for `nvcr.io`) in the App Store namespace; docker payload: `{"auths":{"nvcr.io":{"username":"$oauthtoken","password":"<key>","auth":"<base64>"}}}`
-- [ ] **OPS-05**: For `huggingface`: creates/patches `warp-<name>-token` (Opaque, key `HF_API_KEY`) in the App Store namespace
-- [ ] **OPS-06**: For `weka-storage`: creates/patches `warp-<name>-token` (Opaque, keys `WEKA_API_USERNAME`, `WEKA_API_TOKEN`, `WEKA_API_ENDPOINT`) in the App Store namespace; copies `spec.endpoint` to `status.wekaEndpoint`
-- [ ] **OPS-07**: After each reconcile, updates `status.conditions` (type `KeyReady`, and `DockerSecretReady` for nvidia-ngc), `status.derivedSecrets` (list of created secret names with type), and `status.lastSyncTime`
-- [ ] **OPS-08**: On delete of a `WarpCredential`, derived secrets (`warp-<name>-*`) are NOT deleted; operator logs a warning; administrator must delete them manually
-- [ ] **OPS-09**: Derived secret creation is idempotent — if a derived secret is manually deleted, the next reconcile cycle restores it automatically within the kopf retry window
+- [x] **OPS-01**: kopf `on.create` / `on.update` handler watches `WarpCredential` resources; raises `kopf.PermanentError` for unrecognised `spec.type`
+- [x] **OPS-02**: If `spec.secretRef` Secret does not exist in the App Store namespace, raises `kopf.TemporaryError(delay=30)` (not a crash; retries until Secret appears)
+- [x] **OPS-03**: Empty or whitespace-only key value read from the referenced Secret raises `kopf.PermanentError` naming the credential
+- [x] **OPS-04**: For `nvidia-ngc`: creates/patches `warp-<name>-apikey` (Opaque, key `NGC_API_KEY`) and `warp-<name>-docker` (type `kubernetes.io/dockerconfigjson` for `nvcr.io`) in the App Store namespace; docker payload: `{"auths":{"nvcr.io":{"username":"$oauthtoken","password":"<key>","auth":"<base64>"}}}`
+- [x] **OPS-05**: For `huggingface`: creates/patches `warp-<name>-token` (Opaque, key `HF_API_KEY`) in the App Store namespace
+- [x] **OPS-06**: For `weka-storage`: creates/patches `warp-<name>-token` (Opaque, keys `WEKA_API_USERNAME`, `WEKA_API_TOKEN`, `WEKA_API_ENDPOINT`) in the App Store namespace; copies `spec.endpoint` to `status.wekaEndpoint`
+- [x] **OPS-07**: After each reconcile, updates `status.conditions` (type `KeyReady`, and `DockerSecretReady` for nvidia-ngc), `status.derivedSecrets` (list of created secret names with type), and `status.lastSyncTime`
+- [x] **OPS-08**: On delete of a `WarpCredential`, derived secrets (`warp-<name>-*`) are NOT deleted; operator logs a warning; administrator must delete them manually
+- [x] **OPS-09**: Derived secret creation is idempotent — if a derived secret is manually deleted, the next reconcile cycle restores it automatically within the kopf retry window
 
 ### GUI
 
@@ -55,7 +55,7 @@
 - [ ] **API-05**: `GET /api/weka/overview?credential=<name>` proxies the WEKA REST API: resolves credential, reads raw Secret, exchanges for Bearer token via `POST /api/v2/login`, makes three parallel calls (`fileSystems`, `cluster`, `containers`), assembles and returns structured JSON; 60s server-side cache keyed by credential name; `?bust=1` query param bypasses cache (used by Refresh button)
 - [ ] **API-06**: `/api/weka/overview` response schema: `capacity` object (totalBytes, usedBytes, availableBytes, usedPercent), `filesystems` array (name, totalBytes, usedBytes, usedPercent — no uid), `backendNodes` array (ip string only), `fetchedAt` ISO timestamp
 - [ ] **API-07**: Remove `/api/secret/nvidia` and `/api/secret/huggingface` endpoints; update the old settings page JavaScript that called them
-- [ ] **API-08**: No raw key values or token values are logged at any log level by the GUI backend or the operator at any point in the credential lifecycle
+- [x] **API-08**: No raw key values or token values are logged at any log level by the GUI backend or the operator at any point in the credential lifecycle
 
 ### SDK
 
@@ -105,15 +105,15 @@
 | CRD-04 | Phase 21 | Complete |
 | CRD-05 | Phase 21 | Complete |
 | CRD-06 | Phase 21 | Complete |
-| OPS-01 | Phase 22 | Pending |
-| OPS-02 | Phase 22 | Pending |
-| OPS-03 | Phase 22 | Pending |
-| OPS-04 | Phase 22 | Pending |
-| OPS-05 | Phase 22 | Pending |
-| OPS-06 | Phase 22 | Pending |
-| OPS-07 | Phase 22 | Pending |
-| OPS-08 | Phase 22 | Pending |
-| OPS-09 | Phase 22 | Pending |
+| OPS-01 | Phase 22 | Complete |
+| OPS-02 | Phase 22 | Complete |
+| OPS-03 | Phase 22 | Complete |
+| OPS-04 | Phase 22 | Complete |
+| OPS-05 | Phase 22 | Complete |
+| OPS-06 | Phase 22 | Complete |
+| OPS-07 | Phase 22 | Complete |
+| OPS-08 | Phase 22 | Complete |
+| OPS-09 | Phase 22 | Complete |
 | GUI-01 | Phase 24 | Pending |
 | GUI-02 | Phase 24 | Pending |
 | GUI-03 | Phase 24 | Pending |
@@ -136,7 +136,7 @@
 | API-05 | Phase 23 | Pending |
 | API-06 | Phase 23 | Pending |
 | API-07 | Phase 23 | Pending |
-| API-08 | Phase 22 + 23 | Pending |
+| API-08 | Phase 22 + 23 | Complete |
 | SDK-01 | Phase 25 | Pending |
 | SDK-02 | Phase 25 | Pending |
 | SDK-03 | Phase 25 | Pending |
