@@ -1,155 +1,153 @@
-# Requirements: WEKA App Store v5.0 — AppStack Variable Substitution
+# Requirements: WEKA App Store v6.0 — Secret Management & WEKA Storage Integration
 
-**Defined:** 2026-05-06
+**Defined:** 2026-06-11
 **Core Value:** OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
-**Milestone Goal:** Add `spec.appStack.variables` to the `WekaAppStore` CR. Operator performs `${VAR}` substitution over `kubernetesManifest:` strings and `valuesFiles:` content (loaded from ConfigMaps/Secrets) before they are applied or merged into Helm values. Blueprint authors get one-CR portability across namespaces and environments without external pre-render tooling.
-**Source PRD:** `.planning/PRD-appstack-variable-substitution.md`
-**Source Research:** `.planning/research/SUMMARY.md`
+**Milestone Goal:** Give App Store administrators a first-class credential management system — named, multi-key storage for NGC/HuggingFace/WEKA credentials via a new `WarpCredential` CRD, automatic secret derivation by the operator, a blueprint Jinja2 macro SDK for credential selection, and live WEKA storage visibility on the Settings page.
+**Source PRD:** `.planning/PRD-secret-management-overhaul.md`
 
 ## v1 Requirements
 
-Requirements for milestone v5.0. Each maps to exactly one roadmap phase.
-
-### OPERATOR
-
-Render helper and wiring inside `operator_module/main.py`.
-
-- [ ] **OP-01**: `render(text, variables)` pre-scan guard returns text unchanged when no `${...}` pattern is present (CRITICAL backward-compat — without this, existing `cluster_init/app-store-cluster-init.yaml` shell scripts containing bare `$CRDS`/`$CRD`/`$MISSING`/`$GATEWAY_API_URL` would `KeyError` on first reconcile after upgrade)
-- [ ] **OP-02**: `render()` uses `string.Template.substitute()` strict mode, not `safe_substitute()` — undefined references must fail loudly
-- [ ] **OP-03**: `render()` catches BOTH `KeyError` AND `ValueError` and re-raises a descriptive error naming the variable and component context
-- [ ] **OP-04**: `render()` preserves `$$` literal-dollar escape semantics (stdlib behavior; lock with unit test)
-- [ ] **OP-05**: `render()` returns text unchanged when the variables dict is `None` or empty (backward-compat)
-- [ ] **OP-06**: `handle_appstack_deployment` builds the variables dict once at stack scope as `{'namespace': cr_namespace, **(spec.appStack.variables or {})}` before the component loop
-- [ ] **OP-07**: `kubernetesManifest` strings are rendered before `kubectl apply`; render failures raise `kopf.PermanentError` whose message names the variable and component
-- [ ] **OP-08**: `load_values_from_reference` renders the raw ConfigMap data string and the base64-decoded Secret string before `yaml.safe_load`
-- [ ] **OP-09**: `load_values_from_reference` signature uses `variables=None` default; the `handle_helm_deployment` single-chart call site (`main.py:~885`) is NOT wired with variables
-- [ ] **OP-10**: Variable key names are validated as Python identifiers when the dict is built; invalid keys (e.g., `my-host`) raise `kopf.PermanentError` early instead of cryptic `ValueError` from `Template.substitute`
-- [ ] **OP-11**: `load_values_from_reference` fetch failures (ConfigMap/Secret missing or API error) surface as `kopf.TemporaryError(delay=30)` instead of silent `{}` return
-- [ ] **OP-12**: `@kopf.on.update` decorator gets `field='spec'` filter to prevent reconcile storms triggered by the operator's own status patches
-
 ### CRD
 
-CRD schema additions in `weka-app-store-operator-chart/templates/crd.yaml`.
+- [ ] **CRD-01**: `WarpCredential` CRD (`warp.io/v1alpha1`, kind `WarpCredential`) added to `weka-app-store-operator-chart/templates/crd.yaml`; multi-instance (one CR per named credential, multiple CRs of same type allowed)
+- [ ] **CRD-02**: CRD schema validates `spec.type` as an enum (`nvidia-ngc`, `huggingface`, `weka-storage`); invalid values rejected at admission
+- [ ] **CRD-03**: CRD schema requires `spec.displayName` (string), `spec.secretRef.name` (string), and `spec.secretRef.key` (string)
+- [ ] **CRD-04**: CRD schema accepts optional `spec.endpoint` field (string, URL) used only for `weka-storage` type; silently ignored for other types
+- [ ] **CRD-05**: CRD defines `status` subresource with `conditions` array (`KeyReady`, `DockerSecretReady` for nvidia-ngc), `derivedSecrets` list, `lastSyncTime`, and optional `wekaEndpoint` string
+- [ ] **CRD-06**: Helm chart RBAC adds a `Role` + `RoleBinding` granting the operator's service account create/patch/get/delete on Secrets, scoped to the App Store namespace only (not cluster-wide)
 
-- [ ] **CRD-01**: `spec.appStack.variables` added as an optional map under `spec.versions[0].schema.openAPIV3Schema.properties.spec.properties.appStack.properties`
-- [ ] **CRD-02**: Schema `description` documents `${VAR}` syntax, `$$` escape, `${namespace}` auto-default, and the identifier-name requirement
-- [ ] **CRD-03**: `additionalProperties: { type: string }` enforces string-only values at admission (no `x-kubernetes-preserve-unknown-fields`)
+### OPS (Operator)
 
-### VALIDATOR
+- [ ] **OPS-01**: kopf `on.create` / `on.update` handler watches `WarpCredential` resources; raises `kopf.PermanentError` for unrecognised `spec.type`
+- [ ] **OPS-02**: If `spec.secretRef` Secret does not exist in the App Store namespace, raises `kopf.TemporaryError(delay=30)` (not a crash; retries until Secret appears)
+- [ ] **OPS-03**: Empty or whitespace-only key value read from the referenced Secret raises `kopf.PermanentError` naming the credential
+- [ ] **OPS-04**: For `nvidia-ngc`: creates/patches `warp-<name>-apikey` (Opaque, key `NGC_API_KEY`) and `warp-<name>-docker` (type `kubernetes.io/dockerconfigjson` for `nvcr.io`) in the App Store namespace; docker payload: `{"auths":{"nvcr.io":{"username":"$oauthtoken","password":"<key>","auth":"<base64>"}}}`
+- [ ] **OPS-05**: For `huggingface`: creates/patches `warp-<name>-token` (Opaque, key `HF_API_KEY`) in the App Store namespace
+- [ ] **OPS-06**: For `weka-storage`: creates/patches `warp-<name>-token` (Opaque, keys `WEKA_API_USERNAME`, `WEKA_API_TOKEN`, `WEKA_API_ENDPOINT`) in the App Store namespace; copies `spec.endpoint` to `status.wekaEndpoint`
+- [ ] **OPS-07**: After each reconcile, updates `status.conditions` (type `KeyReady`, and `DockerSecretReady` for nvidia-ngc), `status.derivedSecrets` (list of created secret names with type), and `status.lastSyncTime`
+- [ ] **OPS-08**: On delete of a `WarpCredential`, derived secrets (`warp-<name>-*`) are NOT deleted; operator logs a warning; administrator must delete them manually
+- [ ] **OPS-09**: Derived secret creation is idempotent — if a derived secret is manually deleted, the next reconcile cycle restores it automatically within the kopf retry window
 
-Soft-warning UX in `mcp-server/tools/validate_yaml.py`.
+### GUI
 
-- [ ] **VAL-01**: Validator accepts a `spec.appStack.variables` block without raising a spurious schema error
-- [ ] **VAL-02**: Validator soft-warns on hardcoded `*.svc.cluster.local` DNS literals inside `kubernetesManifest` strings, suggesting a `${VAR}` replacement
-- [ ] **VAL-03**: Validator soft-warns on inline `namespace: <literal>` lines inside `kubernetesManifest` when the literal differs from `metadata.namespace`, suggesting `${namespace}`
-- [ ] **VAL-04**: Validator errors (not soft-warns) on invalid variable key names that do not match `[_a-zA-Z][_a-zA-Z0-9]*`
-- [ ] **VAL-05**: Validator errors (not soft-warns) on non-string variable values
+- [ ] **GUI-01**: Settings page restructured so the Credential Management section appears first, above Kubernetes Auth Status, Cluster Status, Blueprint Management, and Debug sections
+- [ ] **GUI-02**: Credential Management section shows three sub-sections: NVIDIA NGC API Keys, HuggingFace Tokens, WEKA Storage API Tokens — each with a list of stored credentials and a `[+ Add]` button
+- [ ] **GUI-03**: `[+ Add]` expands an inline form at the bottom of that type's list; only one add-form is open at a time per credential type
+- [ ] **GUI-04**: Add form for NGC and HuggingFace: required `Name` (free-text display name) and required `Key` (password input, `type="password"`)
+- [ ] **GUI-05**: Add form for WEKA Storage: required `Name`, required `Username` (WEKA API user account), required `API Token` (`type="password"`), required `Endpoint` (URL input, client-side URL validation before Save is enabled)
+- [ ] **GUI-06**: Green state (operator confirmed ready): credential row shows display name + `[●] Ready` + `[Delete]` button — no input fields visible
+- [ ] **GUI-07**: Amber state (transitional): row shows `[◐] Verifying...` — polls every 2 seconds, times out after 30 seconds with inline error
+- [ ] **GUI-08**: Red state (operator reported error): row shows display name + error reason + `[Delete]` button
+- [ ] **GUI-09**: `[Delete]` button sends `DELETE /api/credentials/<name>`; row disappears from the list; derived secrets remain in cluster (not deleted)
+- [ ] **GUI-10**: WEKA Storage Overview panel appears below Credential Management when at least one `weka-storage` credential is registered; hidden with a "No WEKA credential configured" hint otherwise
+- [ ] **GUI-11**: Overview panel header: credential dropdown (if multiple WEKA credentials — replaced by static label if only one), `[↺ Refresh]` button, "Last updated" timestamp showing actual data age (not page-load time)
+- [ ] **GUI-12**: Overview panel capacity row: Total / Used / Available in human-readable TiB/GiB, with a percentage utilisation bar
+- [ ] **GUI-13**: Overview panel filesystem table: human-readable `name` only (no UUIDs), columns Total / Used / Utilisation, sorted descending by utilisation; filesystems ≥ 90% utilisation render bar in amber/orange; max 20 rows with "Show all" toggle if more exist
+- [ ] **GUI-14**: Overview panel backend node grid: count header, primary management IP per node in a wrapped grid (no hostname resolution, no loopback/link-local addresses)
+- [ ] **GUI-15**: Overview panel states: no credential → hint with link; loading → spinner; WEKA API error → error message only, no stale data; success → full panel
 
-### TEST
+### API
 
-Test scaffolding and coverage. `operator_module/tests/` does not currently exist.
+- [ ] **API-01**: `GET /api/credentials` returns JSON array of all `WarpCredential` CRs; each entry: `name`, `displayName`, `type`, `ready` (bool), `lastSyncTime`; nginx-ngc adds `dockerSecretReady`; weka-storage adds `endpoint` (from `status.wekaEndpoint`, never from raw Secret); error state adds `error` string
+- [ ] **API-02**: `GET /api/credentials?type=<t>` returns only credentials of the requested type with `ready: true` (used by blueprint SDK to populate dropdowns)
+- [ ] **API-03**: `POST /api/credentials` body: `type`, `displayName`, `key`, optional `username` (weka-storage), optional `endpoint` (weka-storage); backend slugifies `displayName` to create `metadata.name`, creates raw `warp-cred-<slug>` Secret first, then creates `WarpCredential` CR pointing to it; slug collision appends short suffix
+- [ ] **API-04**: `DELETE /api/credentials/<name>` deletes the `WarpCredential` CR and the raw `warp-cred-<slug>` Secret; derived `warp-<name>-*` secrets are left intact
+- [ ] **API-05**: `GET /api/weka/overview?credential=<name>` proxies the WEKA REST API: resolves credential, reads raw Secret, exchanges for Bearer token via `POST /api/v2/login`, makes three parallel calls (`fileSystems`, `cluster`, `containers`), assembles and returns structured JSON; 60s server-side cache keyed by credential name; `?bust=1` query param bypasses cache (used by Refresh button)
+- [ ] **API-06**: `/api/weka/overview` response schema: `capacity` object (totalBytes, usedBytes, availableBytes, usedPercent), `filesystems` array (name, totalBytes, usedBytes, usedPercent — no uid), `backendNodes` array (ip string only), `fetchedAt` ISO timestamp
+- [ ] **API-07**: Remove `/api/secret/nvidia` and `/api/secret/huggingface` endpoints; update the old settings page JavaScript that called them
+- [ ] **API-08**: No raw key values or token values are logged at any log level by the GUI backend or the operator at any point in the credential lifecycle
 
-- [ ] **TST-01**: `operator_module/tests/__init__.py` + `operator_module/tests/test_render.py` with unit coverage for pre-scan guard, `$$`, JSON-safety, undefined-variable error, malformed-placeholder error, and no-op when variables dict is empty/None
-- [ ] **TST-02**: `operator_module/tests/test_appstack.py` covers `handle_appstack_deployment` substitution behavior — manifest path, `valuesFiles` path, `${namespace}` auto-default, explicit override
-- [ ] **TST-03**: Backward-compat snapshot test — an existing AppStack fixture without `variables:` produces byte-identical merged values dict and manifest tempfile content pre/post change
-- [ ] **TST-04**: `mcp-server/tests/fixtures/sample_blueprints/ai-research-portable.yaml` fixture demonstrating `${namespace}` and `${milvusHost}` portable pattern
-- [ ] **TST-05**: Test locks `handle_helm_deployment` non-wiring (`variables=None` passes through; substitution does not run on the single-chart path)
+### SDK
 
-### DOCS
-
-User-facing documentation in `README.md`.
-
-- [ ] **DOC-01**: README section explaining `${VAR}` syntax with a worked example
-- [ ] **DOC-02**: README documents `$$` literal-dollar escape with a password example
-- [ ] **DOC-03**: README documents `${namespace}` auto-defaulting to the CR's `metadata.namespace`
-- [ ] **DOC-04**: README documents strict failure on undefined references (`kopf.PermanentError` with named variable + component)
-- [ ] **DOC-05**: README documents that variable values are NOT recursively resolved — the PRD's `milvusHost: milvus.${namespace}.svc.cluster.local` example does not work; documented examples must use fully-resolved values
-- [ ] **DOC-06**: README documents that operator-control fields (`helmChart.*`, `releaseName`, `targetNamespace`, `readinessCheck.*`) are NOT templated, and recommends dropping `targetNamespace` so the existing namespace fallback chain handles it
-
-### MIGRATION
-
-End-to-end smoke test via the AIDP blueprint. Lives in the separate `aidp` repo and ships in a follow-up PR; tracked here so v5.0 is "really done" only when AIDP confirms the feature works in production.
-
-- [ ] **MIG-01**: `aidp/appstack/weka-aidp-appstack.yaml` declares `spec.appStack.variables` with `milvusHost`, `postgresHost`, plus any other DNS literals (fully-resolved values, not cross-referencing)
-- [ ] **MIG-02**: 17 inline `namespace: rag` literals across `kubernetesManifest` blocks → `namespace: ${namespace}`
-- [ ] **MIG-03**: PV/PVC `claimRef.namespace: rag` → `${namespace}`
-- [ ] **MIG-04**: `aidp/appstack/aidp-site-config.yaml` DNS literals replaced — `milvus.rag.svc.cluster.local` → `${milvusHost}`, etc.
-- [ ] **MIG-05**: `kubectl apply -f appstack/weka-aidp-appstack.yaml` with `metadata.namespace: aidp-test` deploys cleanly into `aidp-test` with no other file changes (acceptance evidence captured as command output)
+- [ ] **SDK-01**: New file `app-store-gui/webapp/templates/_credential_macros.html` containing Jinja2 macros `credential_select` and `weka_storage_select`
+- [ ] **SDK-02**: `credential_select(type, field_name, label=None, required=True)` renders a `<select>` populated from `credentials_by_type[type]`; when no credentials of the requested type are ready, renders a hint paragraph with a link to `/settings#credentials` instead of an empty select
+- [ ] **SDK-03**: `weka_storage_select(credential_field, endpoint_field, label)` renders a credential dropdown where each `<option>` carries a `data-endpoint` attribute; an endpoint `<input type="url">` is pre-populated from the selected credential's endpoint; an inline `warpSyncEndpoint` JavaScript function updates the endpoint input when the selection changes
+- [ ] **SDK-04**: All blueprint install page route handlers in `app-store-gui/webapp/main.py` inject `credentials_by_type` (dict keyed by credential type, values are lists of ready credential objects) into the Jinja2 template context
+- [ ] **SDK-05**: `credentials_by_type` data is fetched from live `WarpCredential` CRs at route-render time via a shared helper; empty dict is used as fallback if the Kubernetes API is unreachable (macros degrade gracefully to hint mode)
 
 ## v2 Requirements
 
-Acknowledged but deferred to a future release.
+### Keycloak Group Scoping
 
-### V51
+- **KCLO-01**: Uncomment `spec.groups` in `WarpCredential` CRD and enforce in admission
+- **KCLO-02**: `GET /api/credentials?type=<t>` filters results by the authenticated user's Keycloak group memberships against `spec.groups`
+- **KCLO-03**: Blueprint pages automatically show only credentials the current user is permitted to use (no changes to macros required)
 
-- **V51-01**: Allow `${VAR}` substitution in `targetNamespace` (PRD Open Q2). Workaround for v5.0: drop `targetNamespace` and rely on the existing fallback chain. Reconsider if customers ask.
-- **V51-02**: Optional `status.conditions[type=VariablesResolved]` boolean condition for observability (PRD Open Q3 partial). Do NOT publish resolved-values map — sensitive content.
-- **V51-03**: Default-value syntax (e.g., `${VAR:-default}`) — Python `string.Template` does not support this natively; would require subclass.
+### Credential Distribution
+
+- **DIST-01**: At blueprint install time, selected credential names are used to copy derived secrets (`warp-<name>-*`) into the blueprint's target namespace
+- **DIST-02**: Operator or install hook cleans up copied secrets when a blueprint is uninstalled
+
+### Secret Rotation
+
+- **ROT-01**: Administrator can update a credential's key value in place (without delete-and-recreate)
+- **ROT-02**: Operator detects key change and re-derives dependent secrets within 60 seconds
 
 ## Out of Scope
 
-Explicitly excluded for v5.0. Documented to prevent scope creep and to make AIDP authoring expectations explicit.
-
 | Feature | Reason |
 |---------|--------|
-| Recursion into inline `component.values:` objects | At the wiring point the values block is already parsed YAML, not a raw string. Workaround: route substitution-bearing values through `valuesFiles:`. |
-| Templating of operator-control fields (`helmChart.*`, `releaseName`, `targetNamespace`, `readinessCheck.*`) | These are operator-control fields; templating invites surprising behavior. Add explicitly per-field if ever needed. |
-| Conditionals, loops, or full template engines (Jinja, Go templates, sprig) | Substitution-only is the entire point; richer templating belongs in a wrapper Helm chart. |
-| Cross-component variable references (one component's output → another's input) | Out of scope; users compose with shared stack-level variables instead. |
-| Variable resolution from external sources (Vault, AWS Secrets Manager, env vars) | Variables are static strings declared in the CR. |
-| Variables in `spec.appStack.components[].dependsOn` arrays | Hardcoded; templating component identity creates ordering ambiguity. |
-| Recursive variable resolution (`${a}` in the value of `${b}`) | `string.Template.substitute()` is single-pass. Variable values are taken literally. AIDP migration uses fully-resolved values. |
-| Resolved-variables map exposed in `status.appStackVariables` | Variables can be sensitive; status is broadly readable. Failure observability already lands in `componentStatus[].message`. |
-| Backward-incompatible changes to existing CRs | Hard gate: any CR without `variables:` must produce byte-identical Helm values, manifest tempfile content, and `kubectl apply` invocations as before. |
+| Distributing stored credentials into blueprint target namespaces | Follow-on work (DIST-01..02 in v2) |
+| Keycloak group-scoped credential access enforcement | Follow-on; CRD seam is designed here but not wired (KCLO-01..03 in v2) |
+| Managing database credentials (Neo4j, ArangoDB, MinIO) | Blueprint-internal, not platform-managed |
+| Secret rotation or expiry notifications | ROT-01..02 in v2 |
+| OpenAI API key management | Not needed by any shipped blueprint |
+| External secrets managers (Vault, AWS Secrets Manager) | `spec.secretRef` abstraction leaves the door open without requiring it now |
+| Real-time WEKA storage monitoring or alerting | Settings panel is on-demand, not a live dashboard |
 
 ## Traceability
 
-Mapping of requirements to roadmap phases. Populated by the roadmapper.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| OP-01 | Phase 16 | Pending |
-| OP-02 | Phase 16 | Pending |
-| OP-03 | Phase 16 | Pending |
-| OP-04 | Phase 16 | Pending |
-| OP-05 | Phase 16 | Pending |
-| OP-06 | Phase 18 | Pending |
-| OP-07 | Phase 18 | Pending |
-| OP-08 | Phase 18 | Pending |
-| OP-09 | Phase 18 | Pending |
-| OP-10 | Phase 18 | Pending |
-| OP-11 | Phase 18 | Pending |
-| OP-12 | Phase 18 | Pending |
-| CRD-01 | Phase 17 | Pending |
-| CRD-02 | Phase 17 | Pending |
-| CRD-03 | Phase 17 | Pending |
-| VAL-01 | Phase 19 | Pending |
-| VAL-02 | Phase 19 | Pending |
-| VAL-03 | Phase 19 | Pending |
-| VAL-04 | Phase 19 | Pending |
-| VAL-05 | Phase 19 | Pending |
-| TST-01 | Phase 16 | Pending |
-| TST-02 | Phase 18 | Pending |
-| TST-03 | Phase 18 | Pending |
-| TST-04 | Phase 19 | Pending |
-| TST-05 | Phase 18 | Pending |
-| DOC-01 | Phase 18 | Pending |
-| DOC-02 | Phase 18 | Pending |
-| DOC-03 | Phase 18 | Pending |
-| DOC-04 | Phase 18 | Pending |
-| DOC-05 | Phase 18 | Pending |
-| DOC-06 | Phase 18 | Pending |
-| MIG-01 | Phase 20 | Pending |
-| MIG-02 | Phase 20 | Pending |
-| MIG-03 | Phase 20 | Pending |
-| MIG-04 | Phase 20 | Pending |
-| MIG-05 | Phase 20 | Pending |
+| CRD-01 | Phase 21 | Pending |
+| CRD-02 | Phase 21 | Pending |
+| CRD-03 | Phase 21 | Pending |
+| CRD-04 | Phase 21 | Pending |
+| CRD-05 | Phase 21 | Pending |
+| CRD-06 | Phase 21 | Pending |
+| OPS-01 | Phase 22 | Pending |
+| OPS-02 | Phase 22 | Pending |
+| OPS-03 | Phase 22 | Pending |
+| OPS-04 | Phase 22 | Pending |
+| OPS-05 | Phase 22 | Pending |
+| OPS-06 | Phase 22 | Pending |
+| OPS-07 | Phase 22 | Pending |
+| OPS-08 | Phase 22 | Pending |
+| OPS-09 | Phase 22 | Pending |
+| GUI-01 | Phase 24 | Pending |
+| GUI-02 | Phase 24 | Pending |
+| GUI-03 | Phase 24 | Pending |
+| GUI-04 | Phase 24 | Pending |
+| GUI-05 | Phase 24 | Pending |
+| GUI-06 | Phase 24 | Pending |
+| GUI-07 | Phase 24 | Pending |
+| GUI-08 | Phase 24 | Pending |
+| GUI-09 | Phase 24 | Pending |
+| GUI-10 | Phase 24 | Pending |
+| GUI-11 | Phase 24 | Pending |
+| GUI-12 | Phase 24 | Pending |
+| GUI-13 | Phase 24 | Pending |
+| GUI-14 | Phase 24 | Pending |
+| GUI-15 | Phase 24 | Pending |
+| API-01 | Phase 23 | Pending |
+| API-02 | Phase 23 | Pending |
+| API-03 | Phase 23 | Pending |
+| API-04 | Phase 23 | Pending |
+| API-05 | Phase 23 | Pending |
+| API-06 | Phase 23 | Pending |
+| API-07 | Phase 23 | Pending |
+| API-08 | Phase 22 + 23 | Pending |
+| SDK-01 | Phase 25 | Pending |
+| SDK-02 | Phase 25 | Pending |
+| SDK-03 | Phase 25 | Pending |
+| SDK-04 | Phase 25 | Pending |
+| SDK-05 | Phase 25 | Pending |
 
 **Coverage:**
-- v1 requirements: 36 total
-- Mapped to phases: 36
+- v1 requirements: 38 total
+- Mapped to phases: 38
 - Unmapped: 0 ✓
 
 ---
-*Requirements defined: 2026-05-06*
-*Last updated: 2026-05-06 — traceability filled in by roadmapper (Phases 16-20)*
+*Requirements defined: 2026-06-11*
+*Last updated: 2026-06-11 after v6.0 milestone start*

@@ -7,6 +7,7 @@
 - 🔜 **v3.1 E2E Chat Validation** - Phase 14 deferred here along with 4 known issues from v3.0 retry (see `.planning/v3.0-KNOWN-ISSUES.md`)
 - ✅ **v4.0 App Categories on Home Screen** - Phase 15 (shipped 2026-04-21)
 - 🔜 **v5.0 AppStack Variable Substitution** - Phases 16-20
+- 🔜 **v6.0 Secret Management & WEKA Storage Integration** - Phases 21-25
 
 ## Phases
 
@@ -50,6 +51,16 @@ See MILESTONES.md for full v2.0 summary.
 - [x] **Phase 18: Operator Wiring and Docs** — Wire `render()` into `handle_appstack_deployment` and `load_values_from_reference`; key-name validation; fetch-error upgrade; `field='spec'` guard; user-facing README section (completed 2026-05-08)
 - [ ] **Phase 19: Validator Soft-Warning and Portable Fixture** — Validator accepts `variables:` block without error; soft-warns on hardcoded DNS / `namespace:` literals; `ai-research-portable.yaml` fixture
 - [ ] **Phase 20: AIDP Migration Smoke Test** — Follow-up PR in separate `aidp` repo; end-to-end cluster verification that feature works in production
+
+### v6.0 Secret Management & WEKA Storage Integration
+
+**Milestone Goal:** Give App Store administrators a first-class credential management system — named, multi-key storage for NGC/HuggingFace/WEKA credentials via a new `WarpCredential` CRD, automatic secret derivation by the operator, a blueprint Jinja2 macro SDK for credential selection, and live WEKA storage visibility on the Settings page.
+
+- [ ] **Phase 21: WarpCredential CRD and Helm RBAC** — `WarpCredential` CRD defined in Helm chart; operator service account has Secret CRUD permissions scoped to the App Store namespace
+- [ ] **Phase 22: Operator WarpCredential Reconciler** — Operator reconciles `WarpCredential` CRs, deriving correct secrets per type and maintaining `status` conditions; idempotent
+- [ ] **Phase 23: Backend Credentials API and WEKA Overview Proxy** — GUI backend exposes `/api/credentials` CRUD endpoints and `/api/weka/overview` proxy; old secret endpoints removed
+- [ ] **Phase 24: Settings GUI Overhaul** — Settings page restructured with Credential Management first, per-type credential lists with traffic-light states, inline add forms, and WEKA Storage Overview panel
+- [ ] **Phase 25: Blueprint Credential Selector SDK** — Blueprint install pages render credential dropdowns and WEKA endpoint fields using Jinja2 macros; `credentials_by_type` injected automatically into all blueprint template contexts
 
 ## Phase Details
 
@@ -189,10 +200,82 @@ Plans:
   5. No `rag` namespace literal remains in `weka-aidp-appstack.yaml` or `aidp-site-config.yaml` after migration (MIG-02..MIG-04 collectively verified)
 **Plans**: TBD
 
+---
+
+### Phase 21: WarpCredential CRD and Helm RBAC
+**Goal**: The `WarpCredential` CRD is defined in the Helm chart and the operator's service account has Secret CRUD permissions scoped to the App Store namespace
+**Depends on**: Nothing (independently deployable)
+**Requirements**: CRD-01, CRD-02, CRD-03, CRD-04, CRD-05, CRD-06
+**Success Criteria** (what must be TRUE):
+  1. `kubectl apply -f weka-app-store-operator-chart/templates/crd.yaml` succeeds; `kubectl get crd warpcredentials.warp.io` returns the CRD
+  2. A CR with `spec.type: invalid-type` is rejected at admission; a CR with valid type+secretRef is accepted
+  3. A `WarpCredential` CR with `spec.type: weka-storage` and `spec.endpoint: https://weka-cluster:14000` is accepted; same CR without `spec.endpoint` is also accepted (field is optional)
+  4. `kubectl explain warpcredential.status` shows `conditions`, `derivedSecrets`, `lastSyncTime`, and `wekaEndpoint` fields
+  5. Helm chart deploys the new `Role` + `RoleBinding` granting operator Secret CRUD in the App Store namespace; `helm lint` and `helm template` pass without error
+**Plans**: TBD
+
+### Phase 22: Operator WarpCredential Reconciler
+**Goal**: The operator reconciles `WarpCredential` CRs, deriving the correct secrets for each credential type and maintaining `status` conditions; derived secrets are idempotent
+**Depends on**: Phase 21 (CRD must exist before handler can be registered)
+**Requirements**: OPS-01, OPS-02, OPS-03, OPS-04, OPS-05, OPS-06, OPS-07, OPS-08, OPS-09, API-08
+**Success Criteria** (what must be TRUE):
+  1. Creating a `WarpCredential` of type `nvidia-ngc` results in both `warp-<name>-apikey` (Opaque, key `NGC_API_KEY`) and `warp-<name>-docker` (type `kubernetes.io/dockerconfigjson`) in the App Store namespace within the kopf retry window
+  2. Creating a `WarpCredential` of type `huggingface` results in `warp-<name>-token` (Opaque, key `HF_API_KEY`)
+  3. Creating a `WarpCredential` of type `weka-storage` results in `warp-<name>-token` (Opaque, keys `WEKA_API_USERNAME`, `WEKA_API_TOKEN`, `WEKA_API_ENDPOINT`); `status.wekaEndpoint` is set to `spec.endpoint`
+  4. Manually deleting a derived secret and triggering a reconcile restores it (idempotency)
+  5. A `WarpCredential` whose referenced Secret does not exist results in `kopf.TemporaryError` (not a crash); `status.conditions[KeyReady].status = "False"` with reason `KeyMissing`
+  6. Deleting a `WarpCredential` CR leaves all `warp-<name>-*` secrets intact; operator logs a warning
+  7. No key values appear in operator logs at any log level (`pytest operator_module/tests/test_warp_credential.py` verifies derivation logic without network access)
+**Plans**: TBD
+
+### Phase 23: Backend Credentials API and WEKA Overview Proxy
+**Goal**: The GUI backend exposes the `/api/credentials` CRUD endpoints and `/api/weka/overview` proxy; old secret endpoints removed
+**Depends on**: Phase 22 (operator must be able to reconcile before the GUI API is useful; independently codeable but depends on CRD+operator for live testing)
+**Requirements**: API-01, API-02, API-03, API-04, API-05, API-06, API-07, API-08
+**Success Criteria** (what must be TRUE):
+  1. `GET /api/credentials` returns a JSON array with correct shape for each WarpCredential CR in the namespace (name, displayName, type, ready, optional fields per type)
+  2. `POST /api/credentials` with valid body creates a `warp-cred-<slug>` Secret and a `WarpCredential` CR; slug collision is handled by appending a suffix
+  3. `DELETE /api/credentials/<name>` removes the CR and raw Secret; derived secrets remain
+  4. `GET /api/credentials?type=nvidia-ngc` returns only NGC-type credentials with `ready: true`
+  5. `GET /api/weka/overview?credential=<name>` returns the structured JSON schema (capacity, filesystems, backendNodes, fetchedAt); second request within 60 seconds returns cached data (same `fetchedAt`); `?bust=1` bypasses cache
+  6. `GET /api/secret/nvidia` and `GET /api/secret/huggingface` return 404
+  7. No token values appear in response bodies or server logs
+**Plans**: TBD
+
+### Phase 24: Settings GUI Overhaul
+**Goal**: The Settings page is restructured with Credential Management first, per-type credential lists with traffic-light states, inline add forms, and the WEKA Storage Overview panel
+**Depends on**: Phase 23 (needs the API endpoints to be functional for full interaction)
+**Requirements**: GUI-01, GUI-02, GUI-03, GUI-04, GUI-05, GUI-06, GUI-07, GUI-08, GUI-09, GUI-10, GUI-11, GUI-12, GUI-13, GUI-14, GUI-15
+**Success Criteria** (what must be TRUE):
+  1. On page load, Credential Management section appears above all other Settings sections; three type sub-sections (NGC, HuggingFace, WEKA) each show stored credentials or "(none stored)"
+  2. Clicking `[+ Add]` on NGC type expands an inline form with Name and Key fields; clicking `[+ Add]` on WEKA expands a 4-field form (Name, Username, API Token, Endpoint); only one form open per type at a time
+  3. After saving a new credential, the row enters amber "Verifying..." state; polls every 2 seconds; transitions to green when operator sets `KeyReady=True` (or shows red with error message if operator reports failure)
+  4. In green state the row shows display name + Ready badge + Delete button only — no key input visible
+  5. Clicking Delete removes the row; derived secrets remain in cluster
+  6. With one WEKA Storage credential registered, the WEKA Storage Overview panel appears below Credential Management showing a capacity bar, filesystem table (human names, utilisation bars, >=90% amber), and backend IP grid
+  7. With zero WEKA credentials, the panel is replaced by a "No WEKA Storage credential configured" hint
+  8. `[Refresh]` button triggers a fresh WEKA API call (bypasses 60s cache); "Last updated" shows actual data age
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 25: Blueprint Credential Selector SDK
+**Goal**: Blueprint install pages can render credential dropdowns and WEKA endpoint fields using Jinja2 macros; `credentials_by_type` is injected automatically into all blueprint template contexts
+**Depends on**: Phase 23 (needs credentials API); can be developed in parallel with Phase 24
+**Requirements**: SDK-01, SDK-02, SDK-03, SDK-04, SDK-05
+**Success Criteria** (what must be TRUE):
+  1. A blueprint template using `{% from "_credential_macros.html" import credential_select %}` and `{{ credential_select(type="nvidia-ngc", field_name="ngc_credential") }}` renders a `<select>` populated with all ready NGC credentials
+  2. When no credentials of the requested type are ready, `credential_select` renders a hint paragraph with a link to `/settings#credentials`
+  3. `{{ weka_storage_select() }}` renders a credential dropdown + endpoint `<input>` pair; each option has a `data-endpoint` attribute; changing selection updates the endpoint field via `warpSyncEndpoint` JavaScript
+  4. All blueprint install page route handlers inject `credentials_by_type` dict into their template context; the tokenvisor and glocomp blueprint templates serve as reference examples updated to use the macro
+  5. If the Kubernetes API is unreachable when fetching credentials, `credentials_by_type` is an empty dict and macros degrade to hint mode — no 500 error on blueprint page load
+**Plans**: TBD
+
 ## Progress
 
 **Execution Order:** 11 → 12 → 13 → 14 → 15 → 16 → 17 → 18 → 19 → 20
 (Phase 17 can be deployed in parallel with Phase 16; Phase 19 can be worked in parallel with Phases 17-18; Phase 20 requires Phases 16-18 deployed)
+
+v6.0 Execution Order: 21 → 22 → 23 → 24/25 (Phases 24 and 25 can be developed in parallel after Phase 23)
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -211,3 +294,8 @@ Plans:
 | 18. Operator Wiring and Docs | v5.0 | 5/5 | Complete   | 2026-05-08 |
 | 19. Validator Soft-Warning and Portable Fixture | v5.0 | 0/TBD | Not started | - |
 | 20. AIDP Migration Smoke Test | v5.0 | 0/TBD | Not started | - |
+| 21. WarpCredential CRD and Helm RBAC | v6.0 | 0/TBD | Not started | - |
+| 22. Operator WarpCredential Reconciler | v6.0 | 0/TBD | Not started | - |
+| 23. Backend Credentials API and WEKA Overview Proxy | v6.0 | 0/TBD | Not started | - |
+| 24. Settings GUI Overhaul | v6.0 | 0/TBD | Not started | - |
+| 25. Blueprint Credential Selector SDK | v6.0 | 0/TBD | Not started | - |
