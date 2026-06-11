@@ -1455,9 +1455,9 @@ def _weka_get_json(url: str, headers: Dict[str, str], timeout: float = 15.0) -> 
         with urllib.request.urlopen(req, timeout=timeout, context=_weka_ssl_context()) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"WEKA API call failed: {url} -> {exc.code}") from exc
+        raise RuntimeError(f"WEKA API call failed: HTTP {exc.code}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"WEKA API call failed: {url} -> {exc.reason}") from exc
+        raise RuntimeError(f"WEKA API call failed: connection error") from exc
 
 
 def _weka_post_json(url: str, payload: Dict[str, Any], timeout: float = 15.0) -> Dict[str, Any]:
