@@ -8,6 +8,8 @@ import os
 import string
 import re
 import time
+import base64
+import json
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from functools import lru_cache
@@ -306,6 +308,121 @@ def _render_or_raise(
         return render(text, variables)
     except (KeyError, ValueError) as e:
         raise kopf.PermanentError(f"{source_desc}: {e}") from e
+
+
+# ===================== WarpCredential Pure Helpers =====================
+# Decision-citing docstrings per Pattern S-3 from 22-PATTERNS.md.
+# Helpers are placed in the "pure helper" zone immediately after _render_or_raise
+# to mirror the _render_or_raise pattern established in Phase 18.
+
+# Valid WarpCredential spec.type values — used by reconcile_warpcredential (Plan 02)
+# for OPS-01 belt-and-suspenders type check (CRD admission already blocks unknown types).
+_VALID_WARPCRED_TYPES = {'nvidia-ngc', 'huggingface', 'weka-storage'}
+
+
+def _b64(s: str) -> str:
+    """Standard base64 encode a UTF-8 string, returning ASCII-decoded str.
+
+    Uses standard base64 WITH padding (not URL-safe, not stripped).
+    Locked: D-12 — Docker and Kubernetes Secret APIs require standard padded base64.
+    Do NOT switch to base64.urlsafe_b64encode or strip trailing '=' characters.
+    """
+    return base64.b64encode(s.encode('utf-8')).decode('ascii')
+
+
+def _now_iso() -> str:
+    """Return the current UTC time as an ISO 8601 string with a trailing 'Z'.
+
+    Match project pattern at main.py:727, 939, 972, 1109 — DO NOT migrate to
+    datetime.now(timezone.utc) per RESEARCH.md Pitfall 5.  The project uses
+    datetime.utcnow() throughout for consistency; a migration to the non-deprecated
+    form is a separate project-wide refactor.
+    """
+    return datetime.utcnow().isoformat() + 'Z'
+
+
+def _build_condition(type_: str, status: str, reason: str, message: str) -> dict:
+    """Build a Kubernetes-style status condition dict.
+
+    Output shape matches crd.yaml:330-358 for WarpCredential status.conditions[]:
+      type (required), status (required, enum True/False/Unknown),
+      reason (optional), message (optional), lastTransitionTime (optional ISO 8601).
+
+    Locked: D-14; CRD lines 330-358.
+    """
+    return {
+        'type': type_,
+        'status': status,
+        'reason': reason,
+        'message': message,
+        'lastTransitionTime': _now_iso(),
+    }
+
+
+def _derive_ngc_payloads(key: str) -> tuple[dict, dict]:
+    """Return (apikey_data, docker_data) for the nvidia-ngc credential type.
+
+    Both dicts contain already-base64-encoded values (D-13) ready to drop into
+    the 'data' field of a kr8s Secret object.
+
+    apikey_data  = {'NGC_API_KEY': _b64(key)}  (Opaque secret, OPS-04)
+    docker_data  = {'.dockerconfigjson': _b64(json.dumps(...))}  (dockerconfigjson secret, OPS-04)
+
+    The dockerconfigjson payload uses the nvcr.io convention:
+      username = literal '$oauthtoken'
+      auth     = base64('$oauthtoken:<key>') using standard padding (D-12)
+
+    Locked: D-11 (per-type helper signature), D-12 (standard base64 with padding),
+    D-13 (return already-encoded data), OPS-04 (NGC apikey + docker secrets).
+    NEVER log or reference the `key` parameter value in any log call or docstring.
+    """
+    apikey_data = {'NGC_API_KEY': _b64(key)}
+    docker_auth_b64 = _b64(f'$oauthtoken:{key}')
+    docker_config = {
+        'auths': {
+            'nvcr.io': {
+                'username': '$oauthtoken',
+                'password': key,
+                'auth': docker_auth_b64,
+            }
+        }
+    }
+    docker_data = {'.dockerconfigjson': _b64(json.dumps(docker_config))}
+    return apikey_data, docker_data
+
+
+def _derive_hf_payload(key: str) -> dict:
+    """Return the data dict for the huggingface credential type.
+
+    Returns {'HF_API_KEY': _b64(key)} — a single-key Opaque Secret (OPS-05).
+    Values are already base64-encoded (D-13); caller builds kr8s Secret directly.
+
+    Locked: D-11 (per-type helper), D-13 (pre-encoded), OPS-05.
+    NEVER log or reference the `key` parameter value.
+    """
+    return {'HF_API_KEY': _b64(key)}
+
+
+def _derive_weka_payload(username: str, token: str, endpoint: str) -> dict:
+    """Return the data dict for the weka-storage credential type.
+
+    Returns exactly three keys, all base64-encoded (D-13):
+      WEKA_API_USERNAME, WEKA_API_TOKEN, WEKA_API_ENDPOINT
+
+    The caller has already extracted these values from the source Secret using the
+    hard-coded key names resolved in RESEARCH.md §5: the source Secret for
+    weka-storage contains all three keys with those literal names.  This helper
+    assumes the caller has already selected and validated them.
+
+    Locked: D-11 (per-type helper), D-13 (pre-encoded), OPS-06,
+    RESEARCH.md §5 (resolution — source Secret carries all three hard-coded keys).
+    NEVER log or reference the `username`, `token`, or `endpoint` parameter values.
+    """
+    return {
+        'WEKA_API_USERNAME': _b64(username),
+        'WEKA_API_TOKEN': _b64(token),
+        'WEKA_API_ENDPOINT': _b64(endpoint),
+    }
 
 
 # ===================== CRD Strategy Helpers =====================
