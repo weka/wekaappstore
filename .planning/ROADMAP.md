@@ -298,7 +298,7 @@ v6.0 Execution Order: 21 → 22 → 23 → 24/25 (Phases 24 and 25 can be develo
 | 18. Operator Wiring and Docs | v5.0 | 5/5 | Complete   | 2026-05-08 |
 | 19. Validator Soft-Warning and Portable Fixture | v5.0 | 0/TBD | Not started | - |
 | 20. AIDP Migration Smoke Test | v5.0 | 0/TBD | Not started | - |
-| 21. WarpCredential CRD and Helm RBAC | v6.0 | 2/2 | Complete   | 2026-06-11 |
+| 21. WarpCredential CRD and Helm RBAC | v6.0 | 2/2 | Complete    | 2026-06-11 |
 | 22. Operator WarpCredential Reconciler | v6.0 | 0/TBD | Not started | - |
 | 23. Backend Credentials API and WEKA Overview Proxy | v6.0 | 0/TBD | Not started | - |
 | 24. Settings GUI Overhaul | v6.0 | 0/TBD | Not started | - |

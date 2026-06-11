@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: Secret Management & WEKA Storage Integration
-status: executing
+status: ready_to_plan
 stopped_at: Phase 18 planned (5 plans, 2 waves)
 last_updated: "2026-06-11T04:55:21.612Z"
 last_activity: 2026-06-11 -- Phase 21 execution started
 progress:
   total_phases: 14
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 9
   completed_plans: 7
-  percent: 78
+  percent: 29
 ---
 
 # Project State
@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-06 — milestone v5.0 started)
 
 ## Current Position
 
-Phase: 21 (warpcredential-crd-and-helm-rbac) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 21
-Last activity: 2026-06-11 -- Phase 21 execution started
+Phase: 22
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-06-11
 
 ## Accumulated Context
 

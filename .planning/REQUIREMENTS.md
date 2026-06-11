@@ -9,12 +9,12 @@
 
 ### CRD
 
-- [ ] **CRD-01**: `WarpCredential` CRD (`warp.io/v1alpha1`, kind `WarpCredential`) added to `weka-app-store-operator-chart/templates/crd.yaml`; multi-instance (one CR per named credential, multiple CRs of same type allowed)
-- [ ] **CRD-02**: CRD schema validates `spec.type` as an enum (`nvidia-ngc`, `huggingface`, `weka-storage`); invalid values rejected at admission
-- [ ] **CRD-03**: CRD schema requires `spec.displayName` (string), `spec.secretRef.name` (string), and `spec.secretRef.key` (string)
-- [ ] **CRD-04**: CRD schema accepts optional `spec.endpoint` field (string, URL) used only for `weka-storage` type; silently ignored for other types
-- [ ] **CRD-05**: CRD defines `status` subresource with `conditions` array (`KeyReady`, `DockerSecretReady` for nvidia-ngc), `derivedSecrets` list, `lastSyncTime`, and optional `wekaEndpoint` string
-- [ ] **CRD-06**: Helm chart RBAC adds a `Role` + `RoleBinding` granting the operator's service account create/patch/get/delete on Secrets, scoped to the App Store namespace only (not cluster-wide)
+- [x] **CRD-01**: `WarpCredential` CRD (`warp.io/v1alpha1`, kind `WarpCredential`) added to `weka-app-store-operator-chart/templates/crd.yaml`; multi-instance (one CR per named credential, multiple CRs of same type allowed)
+- [x] **CRD-02**: CRD schema validates `spec.type` as an enum (`nvidia-ngc`, `huggingface`, `weka-storage`); invalid values rejected at admission
+- [x] **CRD-03**: CRD schema requires `spec.displayName` (string), `spec.secretRef.name` (string), and `spec.secretRef.key` (string)
+- [x] **CRD-04**: CRD schema accepts optional `spec.endpoint` field (string, URL) used only for `weka-storage` type; silently ignored for other types
+- [x] **CRD-05**: CRD defines `status` subresource with `conditions` array (`KeyReady`, `DockerSecretReady` for nvidia-ngc), `derivedSecrets` list, `lastSyncTime`, and optional `wekaEndpoint` string
+- [x] **CRD-06**: Helm chart RBAC adds a `Role` + `RoleBinding` granting the operator's service account create/patch/get/delete on Secrets, scoped to the App Store namespace only (not cluster-wide)
 
 ### OPS (Operator)
 
@@ -99,12 +99,12 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CRD-01 | Phase 21 | Pending |
-| CRD-02 | Phase 21 | Pending |
-| CRD-03 | Phase 21 | Pending |
-| CRD-04 | Phase 21 | Pending |
-| CRD-05 | Phase 21 | Pending |
-| CRD-06 | Phase 21 | Pending |
+| CRD-01 | Phase 21 | Complete |
+| CRD-02 | Phase 21 | Complete |
+| CRD-03 | Phase 21 | Complete |
+| CRD-04 | Phase 21 | Complete |
+| CRD-05 | Phase 21 | Complete |
+| CRD-06 | Phase 21 | Complete |
 | OPS-01 | Phase 22 | Pending |
 | OPS-02 | Phase 22 | Pending |
 | OPS-03 | Phase 22 | Pending |
