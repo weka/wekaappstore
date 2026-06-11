@@ -48,13 +48,13 @@
 
 ### API
 
-- [ ] **API-01**: `GET /api/credentials` returns JSON array of all `WarpCredential` CRs; each entry: `name`, `displayName`, `type`, `ready` (bool), `lastSyncTime`; nginx-ngc adds `dockerSecretReady`; weka-storage adds `endpoint` (from `status.wekaEndpoint`, never from raw Secret); error state adds `error` string
-- [ ] **API-02**: `GET /api/credentials?type=<t>` returns only credentials of the requested type with `ready: true` (used by blueprint SDK to populate dropdowns)
-- [ ] **API-03**: `POST /api/credentials` body: `type`, `displayName`, `key`, optional `username` (weka-storage), optional `endpoint` (weka-storage); backend slugifies `displayName` to create `metadata.name`, creates raw `warp-cred-<slug>` Secret first, then creates `WarpCredential` CR pointing to it; slug collision appends short suffix
-- [ ] **API-04**: `DELETE /api/credentials/<name>` deletes the `WarpCredential` CR and the raw `warp-cred-<slug>` Secret; derived `warp-<name>-*` secrets are left intact
-- [ ] **API-05**: `GET /api/weka/overview?credential=<name>` proxies the WEKA REST API: resolves credential, reads raw Secret, exchanges for Bearer token via `POST /api/v2/login`, makes three parallel calls (`fileSystems`, `cluster`, `containers`), assembles and returns structured JSON; 60s server-side cache keyed by credential name; `?bust=1` query param bypasses cache (used by Refresh button)
-- [ ] **API-06**: `/api/weka/overview` response schema: `capacity` object (totalBytes, usedBytes, availableBytes, usedPercent), `filesystems` array (name, totalBytes, usedBytes, usedPercent — no uid), `backendNodes` array (ip string only), `fetchedAt` ISO timestamp
-- [ ] **API-07**: Remove `/api/secret/nvidia` and `/api/secret/huggingface` endpoints; update the old settings page JavaScript that called them
+- [x] **API-01**: `GET /api/credentials` returns JSON array of all `WarpCredential` CRs; each entry: `name`, `displayName`, `type`, `ready` (bool), `lastSyncTime`; nginx-ngc adds `dockerSecretReady`; weka-storage adds `endpoint` (from `status.wekaEndpoint`, never from raw Secret); error state adds `error` string
+- [x] **API-02**: `GET /api/credentials?type=<t>` returns only credentials of the requested type with `ready: true` (used by blueprint SDK to populate dropdowns)
+- [x] **API-03**: `POST /api/credentials` body: `type`, `displayName`, `key`, optional `username` (weka-storage), optional `endpoint` (weka-storage); backend slugifies `displayName` to create `metadata.name`, creates raw `warp-cred-<slug>` Secret first, then creates `WarpCredential` CR pointing to it; slug collision appends short suffix
+- [x] **API-04**: `DELETE /api/credentials/<name>` deletes the `WarpCredential` CR and the raw `warp-cred-<slug>` Secret; derived `warp-<name>-*` secrets are left intact
+- [x] **API-05**: `GET /api/weka/overview?credential=<name>` proxies the WEKA REST API: resolves credential, reads raw Secret, exchanges for Bearer token via `POST /api/v2/login`, makes three parallel calls (`fileSystems`, `cluster`, `containers`), assembles and returns structured JSON; 60s server-side cache keyed by credential name; `?bust=1` query param bypasses cache (used by Refresh button)
+- [x] **API-06**: `/api/weka/overview` response schema: `capacity` object (totalBytes, usedBytes, availableBytes, usedPercent), `filesystems` array (name, totalBytes, usedBytes, usedPercent — no uid), `backendNodes` array (ip string only), `fetchedAt` ISO timestamp
+- [x] **API-07**: Remove `/api/secret/nvidia` and `/api/secret/huggingface` endpoints; update the old settings page JavaScript that called them
 - [x] **API-08**: No raw key values or token values are logged at any log level by the GUI backend or the operator at any point in the credential lifecycle
 
 ### SDK
@@ -129,13 +129,13 @@
 | GUI-13 | Phase 24 | Pending |
 | GUI-14 | Phase 24 | Pending |
 | GUI-15 | Phase 24 | Pending |
-| API-01 | Phase 23 | Pending |
-| API-02 | Phase 23 | Pending |
-| API-03 | Phase 23 | Pending |
-| API-04 | Phase 23 | Pending |
-| API-05 | Phase 23 | Pending |
-| API-06 | Phase 23 | Pending |
-| API-07 | Phase 23 | Pending |
+| API-01 | Phase 23 | Complete |
+| API-02 | Phase 23 | Complete |
+| API-03 | Phase 23 | Complete |
+| API-04 | Phase 23 | Complete |
+| API-05 | Phase 23 | Complete |
+| API-06 | Phase 23 | Complete |
+| API-07 | Phase 23 | Complete |
 | API-08 | Phase 22 + 23 | Complete |
 | SDK-01 | Phase 25 | Pending |
 | SDK-02 | Phase 25 | Pending |
