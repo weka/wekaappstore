@@ -342,6 +342,10 @@ spec:
                     status:
                       type: string
                       description: "Condition status: True, False, or Unknown."
+                      enum:
+                        - "True"
+                        - "False"
+                        - "Unknown"
                     reason:
                       type: string
                       description: "Machine-readable reason code (e.g. KeyPresent, KeyMissing, DerivationFailed)."
