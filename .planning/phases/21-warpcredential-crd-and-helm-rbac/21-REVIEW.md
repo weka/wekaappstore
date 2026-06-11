@@ -8,11 +8,11 @@ files_reviewed_list:
   - weka-app-store-operator-chart/templates/rbac.yaml
   - weka-app-store-operator-chart/Chart.yaml
 findings:
-  critical: 1
-  warning: 2
+  critical: 0
+  warning: 0
   info: 1
   total: 4
-status: issues_found
+status: fixed
 ---
 
 # Phase 21: Code Review Report
