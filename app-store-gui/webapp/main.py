@@ -962,6 +962,99 @@ async def delete_credential(
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+@app.get("/api/weka/overview")
+async def get_weka_overview(
+    credential: str = Query(...),
+    namespace: str = Query("default", description="Namespace of the WarpCredential CR"),
+    bust: int = Query(0, description="Set bust=1 to bypass the 60s cache and refetch"),
+):
+    """Proxy WEKA REST API overview data for a named weka-storage credential.
+
+    Exchanges WEKA_API_USERNAME + WEKA_API_TOKEN for a Bearer token, then calls
+    fileSystems, cluster, and containers endpoints in parallel.
+    Results are cached per credential for 60 seconds; ?bust=1 bypasses the cache.
+    API-05, API-06, API-08.
+    """
+    # Step 1: Validate credential name (T-23-03-03 — DNS-1123, no path traversal)
+    if not _CREDENTIAL_NAME_RE.match(credential):
+        return JSONResponse({"ok": False, "error": "invalid credential name"}, status_code=400)
+
+    # Step 2: Normalize namespace
+    ns = namespace.strip() or "default"
+
+    # Step 3: Namespace-scoped cache key (T-23-03-04 — prevents cross-namespace cache reads)
+    cache_key = f"{ns}/{credential}"
+
+    # Step 4: Cache check (skip when bust=1)
+    if bust != 1:
+        entry = _weka_overview_cache.get(cache_key)
+        if entry and (time.time() - entry["ts"]) < _WEKA_CACHE_TTL_SECONDS:
+            logger.info("weka overview: credential=%s namespace=%s cache_hit=True", credential, ns)
+            return JSONResponse({"ok": True, "data": entry["data"], "cached": True})
+
+    # Step 5: Cache miss or bust=1 — fetch from WEKA
+    try:
+        load_kube_config()
+
+        # 5b: Resolve credential Secret
+        try:
+            endpoint, username, token = await asyncio.to_thread(
+                _resolve_weka_credential_secret, credential, ns
+            )
+        except ApiException as ae:
+            status_code = ae.status if ae.status in (400, 401, 403, 404) else 500
+            return JSONResponse(
+                {"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"},
+                status_code=status_code,
+            )
+        except RuntimeError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+        # 5c: Login exchange — WEKA auth failures surface as 502 (Claude's Discretion, CONTEXT.md)
+        try:
+            access_token = await asyncio.to_thread(_weka_login, endpoint, username, token)
+        except RuntimeError:
+            return JSONResponse({"ok": False, "error": "WEKA login failed"}, status_code=502)
+
+        # 5d-e: Build request headers; access_token is never logged
+        headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
+        base = endpoint.rstrip("/")
+
+        # 5f: Three parallel WEKA data calls (D-05)
+        fs_resp, cluster_resp, containers_resp = await asyncio.gather(
+            asyncio.to_thread(_weka_get_json, f"{base}/api/v2/fileSystems", headers),
+            asyncio.to_thread(_weka_get_json, f"{base}/api/v2/cluster", headers),
+            asyncio.to_thread(_weka_get_json, f"{base}/api/v2/containers", headers),
+            return_exceptions=False,
+        )
+
+        # 5g-h: Assemble response
+        fetched_at_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        data = _assemble_weka_overview(fs_resp, cluster_resp, containers_resp, fetched_at_iso)
+
+        # 5i: Update cache (D-06)
+        _weka_overview_cache[cache_key] = {"ts": time.time(), "data": data}
+
+        logger.info("weka overview: credential=%s namespace=%s cache_hit=False", credential, ns)
+
+        # 5j: Return response
+        return JSONResponse({"ok": True, "data": data, "cached": False})
+
+    except ApiException as ae:
+        status_code = ae.status if ae.status in (400, 401, 403, 404) else 500
+        return JSONResponse(
+            {"ok": False, "error": f"Kubernetes API error: {ae.status} {ae.reason}"},
+            status_code=status_code,
+        )
+    except Exception as e:
+        # WEKA-side failures (helpers raise RuntimeError with "WEKA " prefix) → 502
+        # Other unexpected errors → 500
+        err_str = str(e)
+        if err_str.startswith("WEKA "):
+            return JSONResponse({"ok": False, "error": err_str}, status_code=502)
+        return JSONResponse({"ok": False, "error": err_str}, status_code=500)
+
+
 @app.get("/api/namespaces")
 async def list_namespaces():
     """Return a simple list of namespace names available in the cluster.
