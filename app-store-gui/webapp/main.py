@@ -759,7 +759,7 @@ def _build_credential_response_item(cr: Dict[str, Any]) -> Dict[str, Any]:
 @app.get("/api/credentials")
 async def list_credentials(
     namespace: str = Query("default", description="Namespace to list WarpCredential CRs from; use 'all' for cluster-wide"),
-    type: Optional[str] = Query(None, description="Filter by credential type; if set, only items of this type with ready=true are returned"),
+    cred_type: Optional[str] = Query(None, alias="type", description="Filter by credential type; if set, only items of this type with ready=true are returned"),
 ):
     """List WarpCredential CRs with safe status shape.
 
@@ -792,8 +792,8 @@ async def list_credentials(
         ]
 
         # Apply type filter: only ready items of the requested type (API-02)
-        if type is not None:
-            items = [it for it in items if it["type"] == type and it["ready"] is True]
+        if cred_type is not None:
+            items = [it for it in items if it["type"] == cred_type and it["ready"] is True]
 
         return JSONResponse({"ok": True, "items": items})
     except ApiException as ae:
@@ -805,7 +805,7 @@ async def list_credentials(
 @app.post("/api/credentials")
 async def create_credential(
     display_name: str = Form(...),
-    type: str = Form(...),
+    cred_type: str = Form(..., alias="type"),
     namespace: str = Form("default"),
     key: str = Form(...),
     username: Optional[str] = Form(None),
@@ -821,13 +821,13 @@ async def create_credential(
         if not display_name.strip():
             return JSONResponse({"ok": False, "error": "displayName is required"}, status_code=400)
 
-        if type not in _VALID_CREDENTIAL_TYPES:
+        if cred_type not in _VALID_CREDENTIAL_TYPES:
             return JSONResponse(
-                {"ok": False, "error": f"invalid credential type: {type}; must be one of {list(_VALID_CREDENTIAL_TYPES)}"},
+                {"ok": False, "error": f"invalid credential type: {cred_type}; must be one of {list(_VALID_CREDENTIAL_TYPES)}"},
                 status_code=400,
             )
 
-        if type == "weka-storage":
+        if cred_type == "weka-storage":
             if not username or not username.strip():
                 return JSONResponse({"ok": False, "error": "username is required for weka-storage credentials"}, status_code=400)
             if not endpoint or not endpoint.strip():
@@ -845,9 +845,9 @@ async def create_credential(
         slug = await asyncio.to_thread(_allocate_unique_credential_slug, co_api, ns, base_slug)
 
         # Build string_data for the raw Secret per D-08/D-09/D-10
-        if type == "nvidia-ngc":
+        if cred_type == "nvidia-ngc":
             string_data = {"NGC_API_KEY": key}
-        elif type == "huggingface":
+        elif cred_type == "huggingface":
             string_data = {"HF_API_KEY": key}
         else:  # weka-storage
             string_data = {
@@ -865,15 +865,15 @@ async def create_credential(
             "kind": "WarpCredential",
             "metadata": {"name": slug, "namespace": ns},
             "spec": {
-                "type": type,
+                "type": cred_type,
                 "displayName": display_name.strip(),
                 "secretRef": {
                     "name": f"warp-cred-{slug}",
-                    "key": _CREDENTIAL_TYPE_KEYS[type]["secret_ref_key"],
+                    "key": _CREDENTIAL_TYPE_KEYS[cred_type]["secret_ref_key"],
                 },
             },
         }
-        if type == "weka-storage":
+        if cred_type == "weka-storage":
             body["spec"]["endpoint"] = endpoint.strip()
 
         # Create the WarpCredential CR
@@ -900,14 +900,14 @@ async def create_credential(
                 return JSONResponse({"ok": False, "error": f"slug {slug} already taken; retry"}, status_code=409)
             raise
 
-        logger.info("Created WarpCredential: name=%s namespace=%s type=%s", slug, ns, type)
+        logger.info("Created WarpCredential: name=%s namespace=%s type=%s", slug, ns, cred_type)
 
         # Return metadata only — never echo key, username, or endpoint values (API-08)
         return JSONResponse({
             "ok": True,
             "name": slug,
             "namespace": ns,
-            "type": type,
+            "type": cred_type,
             "displayName": display_name.strip(),
         })
     except ApiException as ae:
