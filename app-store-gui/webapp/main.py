@@ -21,6 +21,7 @@ import ssl
 import datetime
 import urllib.request
 import urllib.error
+import urllib.parse
 
 from kubernetes import client, config, utils
 from kubernetes.client.rest import ApiException
@@ -1019,6 +1020,12 @@ async def get_weka_overview(
         except RuntimeError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+        # Validate endpoint before using it (SSRF guard)
+        try:
+            _validate_weka_endpoint(endpoint)
+        except RuntimeError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
         # 5c: Login exchange — WEKA auth failures surface as 502 (Claude's Discretion, CONTEXT.md)
         try:
             access_token = await asyncio.to_thread(_weka_login, endpoint, username, token)
@@ -1425,6 +1432,17 @@ def _weka_ssl_context() -> ssl.SSLContext:
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
     return ctx
+
+
+def _validate_weka_endpoint(endpoint: str) -> None:
+    """Raise RuntimeError if endpoint is not a safe https:// or http:// URL."""
+    parsed = urllib.parse.urlparse(endpoint)
+    if parsed.scheme not in ("https", "http"):
+        raise RuntimeError(f"WEKA endpoint must use https:// or http:// scheme, got: {parsed.scheme!r}")
+    host = parsed.hostname or ""
+    forbidden_prefixes = ("127.", "169.254.", "0.", "::1")
+    if any(host.startswith(p) for p in forbidden_prefixes) or host in ("localhost",):
+        raise RuntimeError(f"WEKA endpoint resolves to a forbidden host: {host!r}")
 
 
 def _weka_get_json(url: str, headers: Dict[str, str], timeout: float = 15.0) -> Dict[str, Any]:
