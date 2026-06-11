@@ -881,6 +881,15 @@ async def create_credential(
             )
         except ApiException as ae:
             if ae.status == 409:
+                # Roll back the Secret we just created
+                try:
+                    await asyncio.to_thread(
+                        client.CoreV1Api().delete_namespaced_secret,
+                        name=f"warp-cred-{slug}",
+                        namespace=ns,
+                    )
+                except Exception:
+                    pass
                 return JSONResponse({"ok": False, "error": f"slug {slug} already taken; retry"}, status_code=409)
             raise
 
