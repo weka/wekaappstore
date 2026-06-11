@@ -49,68 +49,6 @@
   <main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
     <h2 class="text-xl font-semibold">Settings</h2>
 
-    <!-- Section 1: HuggingFace API Key -->
-    <section class="card rounded-lg p-5">
-      <div class="flex items-center justify-between mb-4">
-        <div>
-          <h3 class="font-semibold">HuggingFace API Key</h3>
-          <p class="muted text-sm">Store your HuggingFace API key as a Kubernetes Secret for use in blueprints.</p>
-        </div>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-        <div class="md:col-span-2">
-          <label class="block text-xs muted mb-1">API Key</label>
-          <input id="hf-api-key" type="password" class="w-full px-3 py-2 rounded-md bg-gray-800/70 border border-white/10 focus:outline-none focus:ring-2 focus:ring-purple-600" placeholder="hf_..." />
-        </div>
-        <div>
-          <label class="block text-xs muted mb-1">Namespace</label>
-          <input id="hf-namespace" type="text" value="{{ detected_namespace }}" readonly class="w-full px-3 py-2 rounded-md bg-gray-800/70 border border-white/10 focus:outline-none focus:ring-2 focus:ring-purple-600 cursor-not-allowed opacity-80" title="Namespace is managed from the main page" />
-        </div>
-        <div>
-          <button id="hf-save" class="btn-purple px-4 py-2 rounded-md text-sm font-medium w-full">Save</button>
-        </div>
-      </div>
-      <div id="hf-result" class="text-xs mt-3 text-white/80"></div>
-      <div class="mt-4">
-        <div class="flex items-center justify-between mb-2">
-          <div class="text-sm font-medium">Kubernetes Secrets</div>
-          <div class="text-xs muted">Listing scope: <span id="hf-listing-scope" class="font-mono">-</span></div>
-        </div>
-        <div id="hf-secrets-list" class="text-xs text-white/80"></div>
-      </div>
-    </section>
-
-    <!-- Section 2: NVIDIA API Key -->
-    <section class="card rounded-lg p-5">
-      <div class="flex items-center justify-between mb-4">
-        <div>
-          <h3 class="font-semibold">NVIDIA API Key</h3>
-          <p class="muted text-sm">Store your NVIDIA API key as a Kubernetes Secret for use in blueprints.</p>
-        </div>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-        <div class="md:col-span-2">
-          <label class="block text-xs muted mb-1">API Key</label>
-          <input id="nvidia-api-key" type="password" class="w-full px-3 py-2 rounded-md bg-gray-800/70 border border-white/10 focus:outline-none focus:ring-2 focus:ring-purple-600" placeholder="nvapi_..." />
-        </div>
-        <div>
-          <label class="block text-xs muted mb-1">Namespace</label>
-          <input id="nvidia-namespace" type="text" value="{{ detected_namespace }}" readonly class="w-full px-3 py-2 rounded-md bg-gray-800/70 border border-white/10 focus:outline-none focus:ring-2 focus:ring-purple-600 cursor-not-allowed opacity-80" title="Namespace is managed from the main page" />
-        </div>
-        <div>
-          <button id="nvidia-save" class="btn-purple px-4 py-2 rounded-md text-sm font-medium w-full">Save</button>
-        </div>
-      </div>
-      <div id="nvidia-result" class="text-xs mt-3 text-white/80"></div>
-      <div class="mt-4">
-        <div class="flex items-center justify-between mb-2">
-          <div class="text-sm font-medium">Kubernetes Secrets</div>
-          <div class="text-xs muted">Listing scope: <span id="nvidia-listing-scope" class="font-mono">-</span></div>
-        </div>
-        <div id="nvidia-secrets-list" class="text-xs text-white/80"></div>
-      </div>
-    </section>
-
     <!-- Section 3: Kubernetes Auth Status (moved here) -->
     <section class="card rounded-lg p-5">
       <div class="flex items-center justify-between mb-4">
@@ -318,127 +256,6 @@
       return res.json();
     }
 
-    function getSettingsNamespace() {
-      const saved = localStorage.getItem('selectedNamespace');
-      const hfEl = document.getElementById('hf-namespace');
-      const nvEl = document.getElementById('nvidia-namespace');
-      const fromField = (hfEl && hfEl.value.trim()) || (nvEl && nvEl.value.trim()) || '';
-      // Prefer saved selection from the main page; fall back to current field value, then default
-      return (saved || fromField || 'default');
-    }
-
-    function setSettingsNamespace(ns) {
-      const v = ns && ns.trim() ? ns.trim() : 'default';
-      const hfEl = document.getElementById('hf-namespace');
-      const nvEl = document.getElementById('nvidia-namespace');
-      if (hfEl) hfEl.value = v;
-      if (nvEl) nvEl.value = v;
-      localStorage.setItem('selectedNamespace', v);
-      const hfScope = document.getElementById('hf-listing-scope');
-      const nvScope = document.getElementById('nvidia-listing-scope');
-      if (hfScope) hfScope.textContent = v;
-      if (nvScope) nvScope.textContent = v;
-    }
-
-    // Render secrets list grouped by namespace (single namespace list)
-    function renderSecrets(containerId, items) {
-      const el = document.getElementById(containerId);
-      if (!el) return;
-      if (!items || !Array.isArray(items) || items.length === 0) {
-        el.innerHTML = '<div class="muted">No secrets found or insufficient RBAC.</div>';
-        return;
-      }
-      // Flat list since all belong to one namespace
-      const list = items.slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
-      let html = '<ul class="list-disc list-inside space-y-0.5">';
-      for (const s of list) {
-        const t = s.type || 'Opaque';
-        html += `<li><span class="font-mono">${s.name}</span> <span class="muted">(${t})</span></li>`;
-      }
-      html += '</ul>';
-      el.innerHTML = html;
-    }
-
-    async function loadSecrets(ns) {
-      const namespace = (ns && ns.trim()) || getSettingsNamespace();
-      setSettingsNamespace(namespace);
-      try {
-        const data = await get(`/api/secrets?namespace=${encodeURIComponent(namespace)}`);
-        if (data && data.ok) {
-          renderSecrets('hf-secrets-list', data.items);
-          renderSecrets('nvidia-secrets-list', data.items);
-        } else {
-          const msg = (data && data.error) ? data.error : 'Unknown error';
-          renderSecrets('hf-secrets-list', []);
-          renderSecrets('nvidia-secrets-list', []);
-          const hfOut = document.getElementById('hf-result');
-          const nvOut = document.getElementById('nvidia-result');
-          if (hfOut) hfOut.textContent = `Could not list secrets: ${msg}`;
-          if (nvOut) nvOut.textContent = `Could not list secrets: ${msg}`;
-        }
-      } catch (e) {
-        renderSecrets('hf-secrets-list', []);
-        renderSecrets('nvidia-secrets-list', []);
-      }
-    }
-
-
-    // Save HF key
-    const hfBtn = document.getElementById('hf-save');
-    if (hfBtn) {
-      hfBtn.addEventListener('click', async () => {
-        const out = document.getElementById('hf-result');
-        const key = document.getElementById('hf-api-key').value.trim();
-        const ns = document.getElementById('hf-namespace').value.trim() || 'default';
-        if (!key) { out.textContent = 'Please enter an API key.'; return; }
-        out.textContent = 'Saving...';
-        try {
-          const fd = new FormData();
-          fd.append('api_key', key);
-          fd.append('namespace', ns);
-          // Persist selected namespace for cross-page usage
-          setSettingsNamespace(ns);
-          const data = await post('/api/secret/huggingface', fd);
-          if (data.ok) {
-            out.innerHTML = `Saved. Secret name: <span class="text-blue-400 font-mono">${data.secret_name}</span> (namespace: <span class="font-mono">${data.namespace}</span>).`;
-            await loadSecrets(ns);
-          } else {
-            out.textContent = 'Error: ' + (data.error || 'Unknown error');
-          }
-        } catch (e) {
-          out.textContent = 'Request failed: ' + e;
-        }
-      });
-    }
-
-    // Save NVIDIA key
-    const nvBtn = document.getElementById('nvidia-save');
-    if (nvBtn) {
-      nvBtn.addEventListener('click', async () => {
-        const out = document.getElementById('nvidia-result');
-        const key = document.getElementById('nvidia-api-key').value.trim();
-        const ns = document.getElementById('nvidia-namespace').value.trim() || 'default';
-        if (!key) { out.textContent = 'Please enter an API key.'; return; }
-        out.textContent = 'Saving...';
-        try {
-          const fd = new FormData();
-          fd.append('api_key', key);
-          fd.append('namespace', ns);
-          // Persist selected namespace for cross-page usage
-          setSettingsNamespace(ns);
-          const data = await post('/api/secret/nvidia', fd);
-          if (data.ok) {
-            out.innerHTML = `Saved. Secret name: <span class="text-blue-400 font-mono">${data.secret_name}</span> (namespace: <span class="font-mono">${data.namespace}</span>).`;
-            await loadSecrets(ns);
-          } else {
-            out.textContent = 'Error: ' + (data.error || 'Unknown error');
-          }
-        } catch (e) {
-          out.textContent = 'Request failed: ' + e;
-        }
-      });
-    }
-
     // Auth status polling
     async function refreshAuthStatus() {
       try {
@@ -482,7 +299,6 @@
       }
     }
     // Initial loads
-    loadSecrets();
     refreshAuthStatus();
     setInterval(refreshAuthStatus, 10000);
 
@@ -543,7 +359,7 @@
     async function loadBlueprints() {
       const scopeSel = document.getElementById('bp-scope');
       const scope = scopeSel ? scopeSel.value : 'all';
-      const namespace = (scope === 'current') ? getSettingsNamespace() : 'all';
+      const namespace = (scope === 'current') ? (localStorage.getItem('selectedNamespace') || 'default') : 'all';
       const emptyEl = document.getElementById('bp-empty');
       if (emptyEl) emptyEl.textContent = 'Loading...';
       try {
