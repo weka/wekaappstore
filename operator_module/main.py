@@ -1674,6 +1674,7 @@ def reconcile_warpcredential(body, spec, name, namespace, patch, logger, **kwarg
                 'Failed to write derived Secret(s) to the API server (see operator logs)')]
             raise
         derived_secrets_list = [{'name': f'warp-{name}-token', 'type': 'Opaque'}]
+        patch.status['wekaEndpoint'] = endpoint  # resolved value (spec.endpoint or source Secret)
 
     # OPS-07 (D-14) — success status write; all failure paths above already patched status
     conditions = [_build_condition('KeyReady', 'True', 'KeyPresent', 'Derived secrets reconciled')]
@@ -1684,8 +1685,6 @@ def reconcile_warpcredential(body, spec, name, namespace, patch, logger, **kwarg
     patch.status['conditions'] = conditions
     patch.status['derivedSecrets'] = derived_secrets_list
     patch.status['lastSyncTime'] = _now_iso()
-    if cred_type == 'weka-storage':
-        patch.status['wekaEndpoint'] = spec.get('endpoint', '')
 
     # Log metadata only — key values, token values, username, endpoint are NEVER included (API-08, D-03)
     logger.info(f'{ctx}: reconciled {len(derived_secrets_list)} derived Secret(s)')
