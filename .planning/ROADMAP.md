@@ -282,11 +282,11 @@ Plans:
   6. With one WEKA Storage credential registered, the WEKA Storage Overview panel appears below Credential Management showing a capacity bar, filesystem table (human names, utilisation bars, >=90% amber), and backend IP grid
   7. With zero WEKA credentials, the panel is replaced by a "No WEKA Storage credential configured" hint
   8. `[Refresh]` button triggers a fresh WEKA API call (bypasses 60s cache); "Last updated" shows actual data age
-**Plans:** 3 plans
+**Plans:** 1/3 plans executed
 
 Plans:
 **Wave 1**
-- [ ] 24-01-PLAN.md — Extend /settings route with credentials_by_type context; restructure settings.html section order with Credential Management and WEKA Storage Overview shells (Wave 1)
+- [x] 24-01-PLAN.md — Extend /settings route with credentials_by_type context; restructure settings.html section order with Credential Management and WEKA Storage Overview shells (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 24-02-PLAN.md — Credential Management JS: inline forms, traffic-light state machine, 2-s polling with 30-s timeout, browser-confirm delete (Wave 2)
@@ -334,5 +334,5 @@ v6.0 Execution Order: 21 → 22 → 23 → 24/25 (Phases 24 and 25 can be develo
 | 21. WarpCredential CRD and Helm RBAC | v6.0 | 2/2 | Complete    | 2026-06-11 |
 | 22. Operator WarpCredential Reconciler | v6.0 | 3/3 | Complete    | 2026-06-11 |
 | 23. Backend Credentials API and WEKA Overview Proxy | v6.0 | 4/4 | Complete    | 2026-06-11 |
-| 24. Settings GUI Overhaul | v6.0 | 0/TBD | Not started | - |
+| 24. Settings GUI Overhaul | v6.0 | 1/3 | In Progress|  |
 | 25. Blueprint Credential Selector SDK | v6.0 | 0/TBD | Not started | - |
