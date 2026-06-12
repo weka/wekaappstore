@@ -305,7 +305,15 @@ Plans:
   3. `{{ weka_storage_select() }}` renders a credential dropdown + endpoint `<input>` pair; each option has a `data-endpoint` attribute; changing selection updates the endpoint field via `warpSyncEndpoint` JavaScript
   4. All blueprint install page route handlers inject `credentials_by_type` dict into their template context; the NeuralMesh AIDP blueprint template (`blueprint_neuralmesh-aidp.html`) serves as the reference example updated to use the macro
   5. If the Kubernetes API is unreachable when fetching credentials, `credentials_by_type` is an empty dict and macros degrade to hint mode — no 500 error on blueprint page load
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+**Wave 1**
+- [ ] 25-01-PLAN.md — Extract `_get_credentials_by_type(ns)` helper from `settings_page`; wire into `blueprint_detail` with `get_auth_status` namespace resolution; refactor `settings_page` to call the helper (SDK-04, SDK-05)
+- [ ] 25-02-PLAN.md — New `_credential_macros.html` Jinja2 macro file (`credential_select` + `weka_storage_select` with inline `warpSyncEndpoint` script); update `blueprint_neuralmesh-aidp.html` Configure card to import and call both macros (SDK-01, SDK-02, SDK-03, SDK-04)
+
+**Wave 2** *(depends on Plans 25-01 and 25-02)*
+- [ ] 25-03-PLAN.md — `test_credential_macros.py`: helper grouping/dropping/error-fallback tests (`ApiException`/`ConnectionError`/`TimeoutError`) + `blueprint_detail` context injection + namespace fallback tests (SDK-04, SDK-05 validation)
 
 ## Progress
 
@@ -335,4 +343,4 @@ v6.0 Execution Order: 21 → 22 → 23 → 24/25 (Phases 24 and 25 can be develo
 | 22. Operator WarpCredential Reconciler | v6.0 | 3/3 | Complete    | 2026-06-11 |
 | 23. Backend Credentials API and WEKA Overview Proxy | v6.0 | 4/4 | Complete    | 2026-06-11 |
 | 24. Settings GUI Overhaul | v6.0 | 3/3 | Complete    | 2026-06-12 |
-| 25. Blueprint Credential Selector SDK | v6.0 | 0/TBD | Not started | - |
+| 25. Blueprint Credential Selector SDK | v6.0 | 0/3 | Planned     | - |
