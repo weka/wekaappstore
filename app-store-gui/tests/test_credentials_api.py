@@ -605,3 +605,101 @@ def test_resolve_weka_credential_secret_missing_key_raises_runtime(monkeypatch):
 
     with pytest.raises(RuntimeError, match="WEKA_API_USERNAME"):
         main._resolve_weka_credential_secret("primary", "default")
+
+
+# ---------------------------------------------------------------------------
+# _get_credentials_by_type helper tests (Plan 25-01, Task 1)
+# ---------------------------------------------------------------------------
+
+def _patch_get_credentials_by_type(monkeypatch, items: list) -> None:
+    """Patch client and load_kube_config for _get_credentials_by_type tests."""
+    class CoApiStub:
+        def list_namespaced_custom_object(self, **kwargs):
+            return {"items": items}
+
+    monkeypatch.setattr(main.client, "CustomObjectsApi", lambda: CoApiStub())
+    monkeypatch.setattr(main, "load_kube_config", lambda: None)
+
+
+def test_get_credentials_by_type_returns_known_keys(monkeypatch):
+    """Test 1: Returns dict with exactly the three known credential type keys."""
+    _patch_get_credentials_by_type(monkeypatch, [])
+    result = asyncio.run(main._get_credentials_by_type("default"))
+    assert set(result.keys()) == {"nvidia-ngc", "huggingface", "weka-storage"}
+
+
+def test_get_credentials_by_type_groups_ready_items(monkeypatch):
+    """Test 2: Groups ready CRs by type correctly, empty list for missing types."""
+    _patch_get_credentials_by_type(monkeypatch, [
+        make_warpcred_cr_nvidia_ready("ngc1"),
+        make_warpcred_cr_weka_ready("weka1"),
+    ])
+    result = asyncio.run(main._get_credentials_by_type("default"))
+    assert len(result["nvidia-ngc"]) == 1
+    assert len(result["weka-storage"]) == 1
+    assert len(result["huggingface"]) == 0
+
+
+def test_get_credentials_by_type_returns_empty_on_api_exception(monkeypatch):
+    """Test 3a: Falls back to empty dict-of-lists on ApiException without re-raising."""
+    from kubernetes.client.exceptions import ApiException
+
+    class RaisingCoApiStub:
+        def list_namespaced_custom_object(self, **kwargs):
+            raise ApiException(status=500, reason="Internal Error")
+
+    monkeypatch.setattr(main.client, "CustomObjectsApi", lambda: RaisingCoApiStub())
+    monkeypatch.setattr(main, "load_kube_config", lambda: None)
+    result = asyncio.run(main._get_credentials_by_type("default"))
+    assert result == {"nvidia-ngc": [], "huggingface": [], "weka-storage": []}
+
+
+def test_get_credentials_by_type_returns_empty_on_connection_error(monkeypatch):
+    """Test 3b: Falls back to empty dict-of-lists on ConnectionError without re-raising."""
+    class RaisingCoApiStub:
+        def list_namespaced_custom_object(self, **kwargs):
+            raise ConnectionError("refused")
+
+    monkeypatch.setattr(main.client, "CustomObjectsApi", lambda: RaisingCoApiStub())
+    monkeypatch.setattr(main, "load_kube_config", lambda: None)
+    result = asyncio.run(main._get_credentials_by_type("default"))
+    assert result == {"nvidia-ngc": [], "huggingface": [], "weka-storage": []}
+
+
+def test_get_credentials_by_type_returns_empty_on_timeout_error(monkeypatch):
+    """Test 3c: Falls back to empty dict-of-lists on TimeoutError without re-raising."""
+    class RaisingCoApiStub:
+        def list_namespaced_custom_object(self, **kwargs):
+            raise TimeoutError("timed out")
+
+    monkeypatch.setattr(main.client, "CustomObjectsApi", lambda: RaisingCoApiStub())
+    monkeypatch.setattr(main, "load_kube_config", lambda: None)
+    result = asyncio.run(main._get_credentials_by_type("default"))
+    assert result == {"nvidia-ngc": [], "huggingface": [], "weka-storage": []}
+
+
+def test_get_credentials_by_type_drops_unknown_type(monkeypatch):
+    """Test 4: CRs with unknown spec.type are silently dropped."""
+    unknown_cr = {
+        "apiVersion": "warp.io/v1alpha1",
+        "kind": "WarpCredential",
+        "metadata": {"name": "mystery", "namespace": "default"},
+        "spec": {"type": "unknown-type", "displayName": "Mystery"},
+        "status": {"conditions": [{"type": "KeyReady", "status": "True"}]},
+    }
+    _patch_get_credentials_by_type(monkeypatch, [unknown_cr])
+    result = asyncio.run(main._get_credentials_by_type("default"))
+    assert result["nvidia-ngc"] == []
+    assert result["huggingface"] == []
+    assert result["weka-storage"] == []
+
+
+def test_get_credentials_by_type_filters_non_ready(monkeypatch):
+    """Test 6: Non-ready CRs are filtered out by the helper (ready-filter at helper level)."""
+    _patch_get_credentials_by_type(monkeypatch, [
+        make_warpcred_cr_weka_ready("weka-ok"),
+        make_warpcred_cr_nvidia_not_ready("ngc-bad"),
+    ])
+    result = asyncio.run(main._get_credentials_by_type("default"))
+    assert len(result["weka-storage"]) == 1
+    assert len(result["nvidia-ngc"]) == 0
