@@ -88,8 +88,8 @@ def make_warpcred_cr_weka_ready(name="primary", ns="default", endpoint="https://
 def test_make_credential_slug_normalizes_and_truncates():
     assert main._make_credential_slug("My NGC Key #1") == "my-ngc-key-1"
     long_slug = main._make_credential_slug("a" * 60)
-    assert long_slug.startswith("a" * 52)
-    assert len(long_slug) == 52
+    assert long_slug.startswith("a" * 48)
+    assert len(long_slug) == 48
     with pytest.raises(ValueError):
         main._make_credential_slug("---")
 
