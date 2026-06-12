@@ -59,11 +59,11 @@
 
 ### SDK
 
-- [ ] **SDK-01**: New file `app-store-gui/webapp/templates/_credential_macros.html` containing Jinja2 macros `credential_select` and `weka_storage_select`
-- [ ] **SDK-02**: `credential_select(type, field_name, label=None, required=True)` renders a `<select>` populated from `credentials_by_type[type]`; when no credentials of the requested type are ready, renders a hint paragraph with a link to `/settings#credentials` instead of an empty select
-- [ ] **SDK-03**: `weka_storage_select(credential_field, endpoint_field, label)` renders a credential dropdown where each `<option>` carries a `data-endpoint` attribute; an endpoint `<input type="url">` is pre-populated from the selected credential's endpoint; an inline `warpSyncEndpoint` JavaScript function updates the endpoint input when the selection changes
-- [ ] **SDK-04**: All blueprint install page route handlers in `app-store-gui/webapp/main.py` inject `credentials_by_type` (dict keyed by credential type, values are lists of ready credential objects) into the Jinja2 template context
-- [ ] **SDK-05**: `credentials_by_type` data is fetched from live `WarpCredential` CRs at route-render time via a shared helper; empty dict is used as fallback if the Kubernetes API is unreachable (macros degrade gracefully to hint mode)
+- [x] **SDK-01**: New file `app-store-gui/webapp/templates/_credential_macros.html` containing Jinja2 macros `credential_select` and `weka_storage_select`
+- [x] **SDK-02**: `credential_select(type, field_name, label=None, required=True)` renders a `<select>` populated from `credentials_by_type[type]`; when no credentials of the requested type are ready, renders a hint paragraph with a link to `/settings#credentials` instead of an empty select
+- [x] **SDK-03**: `weka_storage_select(credential_field, endpoint_field, label)` renders a credential dropdown where each `<option>` carries a `data-endpoint` attribute; an endpoint `<input type="url">` is pre-populated from the selected credential's endpoint; an inline `warpSyncEndpoint` JavaScript function updates the endpoint input when the selection changes
+- [x] **SDK-04**: All blueprint install page route handlers in `app-store-gui/webapp/main.py` inject `credentials_by_type` (dict keyed by credential type, values are lists of ready credential objects) into the Jinja2 template context
+- [x] **SDK-05**: `credentials_by_type` data is fetched from live `WarpCredential` CRs at route-render time via a shared helper; empty dict is used as fallback if the Kubernetes API is unreachable (macros degrade gracefully to hint mode)
 
 ## v2 Requirements
 
@@ -137,11 +137,11 @@
 | API-06 | Phase 23 | Complete |
 | API-07 | Phase 23 | Complete |
 | API-08 | Phase 22 + 23 | Complete |
-| SDK-01 | Phase 25 | Pending |
-| SDK-02 | Phase 25 | Pending |
-| SDK-03 | Phase 25 | Pending |
-| SDK-04 | Phase 25 | Pending |
-| SDK-05 | Phase 25 | Pending |
+| SDK-01 | Phase 25 | Complete |
+| SDK-02 | Phase 25 | Complete |
+| SDK-03 | Phase 25 | Complete |
+| SDK-04 | Phase 25 | Complete |
+| SDK-05 | Phase 25 | Complete |
 
 **Coverage:**
 - v1 requirements: 38 total

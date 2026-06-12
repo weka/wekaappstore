@@ -343,4 +343,4 @@ v6.0 Execution Order: 21 → 22 → 23 → 24/25 (Phases 24 and 25 can be develo
 | 22. Operator WarpCredential Reconciler | v6.0 | 3/3 | Complete    | 2026-06-11 |
 | 23. Backend Credentials API and WEKA Overview Proxy | v6.0 | 4/4 | Complete    | 2026-06-11 |
 | 24. Settings GUI Overhaul | v6.0 | 3/3 | Complete    | 2026-06-12 |
-| 25. Blueprint Credential Selector SDK | v6.0 | 3/3 | Complete   | 2026-06-12 |
+| 25. Blueprint Credential Selector SDK | v6.0 | 3/3 | Complete    | 2026-06-12 |

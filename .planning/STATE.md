@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: Secret Management & WEKA Storage Integration
-status: executing
+status: milestone_complete
 stopped_at: Phase 25 UI-SPEC approved
 last_updated: "2026-06-12T04:32:59.657Z"
 last_activity: 2026-06-12 -- Phase 25 execution started
 progress:
   total_phases: 14
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 22
   completed_plans: 19
-  percent: 86
+  percent: 57
 ---
 
 # Project State
@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-06 — milestone v5.0 started)
 
 ## Current Position
 
-Phase: 25 (blueprint-credential-selector-sdk) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 25
-Last activity: 2026-06-12 -- Phase 25 execution started
+Phase: 25
+Plan: Not started
+Status: Milestone complete
+Last activity: 2026-06-12
 
 ## Accumulated Context
 
