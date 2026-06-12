@@ -524,6 +524,32 @@ async def settings_page(request: Request):
     status = await asyncio.to_thread(get_cluster_status)
     # Use detected namespace if available, else default
     detected_ns = (auth.get("details", {}) or {}).get("namespace") if isinstance(auth, dict) else None
+    ns = detected_ns or "default"
+
+    async def _fetch_credentials() -> list:
+        def _list():
+            return client.CustomObjectsApi().list_namespaced_custom_object(
+                group="warp.io", version="v1alpha1",
+                plural="warpcredentials", namespace=ns,
+            )
+        try:
+            load_kube_config()
+            resp = await asyncio.to_thread(_list)
+            return [_build_credential_response_item(cr) for cr in (resp or {}).get("items", []) or []]
+        except ApiException:
+            return []
+        except Exception:
+            return []
+
+    cred_items = await _fetch_credentials()
+
+    credentials_by_type: dict = {"nvidia-ngc": [], "huggingface": [], "weka-storage": []}
+    for it in cred_items:
+        t = it.get("type")
+        if t in credentials_by_type:
+            credentials_by_type[t].append(it)
+    weka_storage_credentials = [c for c in credentials_by_type["weka-storage"] if c.get("ready")]
+
     return templates.TemplateResponse(
         request,
         "settings.html",
@@ -533,6 +559,8 @@ async def settings_page(request: Request):
             "status": status,
             "detected_namespace": detected_ns or "default",
             "logo_b64": LOGO_B64,
+            "credentials_by_type": credentials_by_type,
+            "weka_storage_credentials": weka_storage_credentials,
         },
     )
 
