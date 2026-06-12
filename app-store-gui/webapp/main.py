@@ -537,9 +537,7 @@ async def settings_page(request: Request):
             load_kube_config()
             resp = await asyncio.to_thread(_list)
             return [_build_credential_response_item(cr) for cr in (resp or {}).get("items", []) or []]
-        except ApiException:
-            return []
-        except Exception:
+        except (ApiException, ConnectionError, TimeoutError):
             return []
 
     cred_items = await _fetch_credentials()
