@@ -49,7 +49,98 @@
   <main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
     <h2 class="text-xl font-semibold">Settings</h2>
 
-    <!-- Section 3: Kubernetes Auth Status (moved here) -->
+    <!-- Section 1: Credential Management -->
+    <section class="card rounded-lg p-5" id="credentials-section">
+      <div class="mb-4">
+        <h3 class="font-semibold text-xl">Credential Management</h3>
+        <p class="muted text-sm">Stored credentials used by blueprints and by the WEKA Storage Overview below.</p>
+      </div>
+      <div class="space-y-6">
+        {# Sub-section: NVIDIA NGC API Keys (GUI-02 fixed order) #}
+        <div class="card rounded-lg p-5" id="ngc-credentials">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h4 class="font-semibold">NVIDIA NGC API Keys</h4>
+              <p class="muted text-sm">API keys used to pull NIM and NeMo images and download models from NGC.</p>
+            </div>
+            <button type="button" class="btn-purple px-3 py-1.5 rounded-md text-sm font-medium" data-add-form="nvidia-ngc">+ Add</button>
+          </div>
+          <ul role="list" class="text-sm" data-credential-list="nvidia-ngc">
+            {% for cred in credentials_by_type['nvidia-ngc'] %}
+              {# Plan 02 renders rows server-side; placeholder for now #}
+              <li data-cred-name="{{ cred.name }}" data-cred-ready="{{ cred.ready|lower }}" class="py-2 border-b border-white/5 last:border-b-0">{{ cred.displayName }}</li>
+            {% else %}
+              <li class="muted text-sm py-2" data-empty-state="nvidia-ngc">(none stored)</li>
+            {% endfor %}
+          </ul>
+          <div hidden data-add-form-container="nvidia-ngc"></div>
+        </div>
+
+        {# Sub-section: HuggingFace Tokens #}
+        <div class="card rounded-lg p-5" id="hf-credentials">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h4 class="font-semibold">HuggingFace Tokens</h4>
+              <p class="muted text-sm">Tokens used to download gated models from HuggingFace Hub.</p>
+            </div>
+            <button type="button" class="btn-purple px-3 py-1.5 rounded-md text-sm font-medium" data-add-form="huggingface">+ Add</button>
+          </div>
+          <ul role="list" class="text-sm" data-credential-list="huggingface">
+            {% for cred in credentials_by_type['huggingface'] %}
+              <li data-cred-name="{{ cred.name }}" data-cred-ready="{{ cred.ready|lower }}" class="py-2 border-b border-white/5 last:border-b-0">{{ cred.displayName }}</li>
+            {% else %}
+              <li class="muted text-sm py-2" data-empty-state="huggingface">(none stored)</li>
+            {% endfor %}
+          </ul>
+          <div hidden data-add-form-container="huggingface"></div>
+        </div>
+
+        {# Sub-section: WEKA Storage API Tokens #}
+        <div class="card rounded-lg p-5" id="weka-credentials">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h4 class="font-semibold">WEKA Storage API Tokens</h4>
+              <p class="muted text-sm">API credentials used by blueprints that need WEKA storage and by the live overview below.</p>
+            </div>
+            <button type="button" class="btn-purple px-3 py-1.5 rounded-md text-sm font-medium" data-add-form="weka-storage">+ Add</button>
+          </div>
+          <ul role="list" class="text-sm" data-credential-list="weka-storage">
+            {% for cred in credentials_by_type['weka-storage'] %}
+              <li data-cred-name="{{ cred.name }}" data-cred-ready="{{ cred.ready|lower }}" class="py-2 border-b border-white/5 last:border-b-0">{{ cred.displayName }}</li>
+            {% else %}
+              <li class="muted text-sm py-2" data-empty-state="weka-storage">(none stored)</li>
+            {% endfor %}
+          </ul>
+          <div hidden data-add-form-container="weka-storage"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 2: WEKA Storage Overview -->
+    <section class="card rounded-lg p-5" id="weka-overview-section">
+      {% if weka_storage_credentials and weka_storage_credentials|length > 0 %}
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="font-semibold">WEKA Storage Overview</h3>
+            <p class="muted text-sm">Live capacity, filesystem, and backend-node summary for the selected WEKA cluster.</p>
+          </div>
+          {# Plan 03 will inject the credential dropdown / static label, Refresh button, and Last updated timestamp here #}
+          <div id="weka-overview-controls"></div>
+        </div>
+        {# Plan 03 fills these three state-machine containers (loading / error / success) #}
+        <div id="weka-overview-loading" class="muted text-sm">Loading WEKA cluster…</div>
+        <div id="weka-overview-error" hidden></div>
+        <div id="weka-overview-success" hidden></div>
+      {% else %}
+        <h3 class="font-semibold mb-2">WEKA Storage Overview</h3>
+        <p class="muted text-sm">
+          No WEKA Storage credential configured.
+          <a href="#weka-credentials" class="text-[var(--weka-purple)] underline hover:text-white">Add one above.</a>
+        </p>
+      {% endif %}
+    </section>
+
+    <!-- Section 3: Kubernetes Auth Status -->
     <section class="card rounded-lg p-5">
       <div class="flex items-center justify-between mb-4">
         <div>
@@ -94,7 +185,7 @@
       </div>
     </section>
 
-    <!-- Section 4: Cluster Status (moved from Home) -->
+    <!-- Section 4: Cluster Status -->
     <section class="card rounded-lg p-5">
       <div class="flex items-end justify-between mb-4">
         <div>
@@ -185,7 +276,7 @@
       </div>
     </section>
 
-    <!-- Section 5: WEKA CSI Driver Placeholder -->
+    <!-- Section 5: Blueprint Uninstall -->
     <section class="card rounded-lg p-5">
       <div class="flex items-center justify-between mb-4">
         <div>
