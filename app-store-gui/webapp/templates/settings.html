@@ -560,7 +560,7 @@
       btn.addEventListener('click', async () => {
         if (!confirm(`Delete credential "${displayName}"? Derived secrets in the cluster will remain — you can delete them manually with kubectl if needed.`)) return;
         try {
-          const data = await del(`/api/credentials/${encodeURIComponent(name)}`);
+          const data = await del(`/api/credentials/${encodeURIComponent(name)}?namespace=${encodeURIComponent(DETECTED_NAMESPACE)}`);
           if (data && data.ok) {
             const li = btn.closest('li');
             if (li) {
