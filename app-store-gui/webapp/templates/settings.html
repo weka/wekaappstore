@@ -807,7 +807,7 @@
 
       try {
         const data = await post('/api/credentials', formData);
-        if (data && data.ok && data.item && data.item.name) {
+        if (data && data.ok && data.name) {
           closeAllAddForms();
 
           const ul = document.querySelector(`[data-credential-list="${type}"]`);
@@ -817,15 +817,15 @@
             if (emptyLi) emptyLi.remove();
 
             // Find or create the <li> for this credential
-            let li = ul.querySelector(`[data-cred-name="${CSS.escape(data.item.name)}"]`);
+            let li = ul.querySelector(`[data-cred-name="${CSS.escape(data.name)}"]`);
             if (!li) {
               li = document.createElement('li');
-              li.setAttribute('data-cred-name', data.item.name);
+              li.setAttribute('data-cred-name', data.name);
               ul.appendChild(li);
             }
 
-            renderCredentialRow(li, data.item);
-            startCredentialPoll(data.item.name);
+            renderCredentialRow(li, data);
+            startCredentialPoll(data.name);
           }
         } else {
           if (formErrEl) {
