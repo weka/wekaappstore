@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: Secret Management & WEKA Storage Integration
 status: planning
-stopped_at: Phase 25 context gathered (assumptions mode)
-last_updated: "2026-06-12T02:10:38.382Z"
+stopped_at: Phase 25 UI-SPEC approved
+last_updated: "2026-06-12T02:27:50.448Z"
 last_activity: 2026-06-12
 progress:
   total_phases: 14
@@ -56,6 +56,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-12T02:10:38.371Z
-Stopped at: Phase 25 context gathered (assumptions mode)
-Resume file: .planning/phases/25-blueprint-credential-selector-sdk/25-CONTEXT.md
+Last session: 2026-06-12T02:27:50.434Z
+Stopped at: Phase 25 UI-SPEC approved
+Resume file: .planning/phases/25-blueprint-credential-selector-sdk/25-UI-SPEC.md
