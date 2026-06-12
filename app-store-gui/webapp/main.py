@@ -2236,7 +2236,7 @@ def get_blueprint_components(file_path: str) -> List[str]:
 @app.get("/deploy-stream")
 async def deploy_stream(
     request: Request,
-    app_name: str,
+    app_name: Optional[str] = None,
     namespace: str = "default",
     storage_class: Optional[str] = None,
     vllm_chat_model: Optional[str] = None,
