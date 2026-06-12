@@ -59,7 +59,7 @@ See MILESTONES.md for full v2.0 summary.
 - [x] **Phase 21: WarpCredential CRD and Helm RBAC** — `WarpCredential` CRD defined in Helm chart; operator service account has Secret CRUD permissions scoped to the App Store namespace (completed 2026-06-11)
 - [x] **Phase 22: Operator WarpCredential Reconciler** — Operator reconciles `WarpCredential` CRs, deriving correct secrets per type and maintaining `status` conditions; idempotent (completed 2026-06-11)
 - [x] **Phase 23: Backend Credentials API and WEKA Overview Proxy** — GUI backend exposes `/api/credentials` CRUD endpoints and `/api/weka/overview` proxy; old secret endpoints removed (completed 2026-06-11)
-- [ ] **Phase 24: Settings GUI Overhaul** — Settings page restructured with Credential Management first, per-type credential lists with traffic-light states, inline add forms, and WEKA Storage Overview panel
+- [x] **Phase 24: Settings GUI Overhaul** — Settings page restructured with Credential Management first, per-type credential lists with traffic-light states, inline add forms, and WEKA Storage Overview panel (completed 2026-06-12)
 - [ ] **Phase 25: Blueprint Credential Selector SDK** — Blueprint install pages render credential dropdowns and WEKA endpoint fields using Jinja2 macros; `credentials_by_type` injected automatically into all blueprint template contexts
 
 ## Phase Details
@@ -282,7 +282,7 @@ Plans:
   6. With one WEKA Storage credential registered, the WEKA Storage Overview panel appears below Credential Management showing a capacity bar, filesystem table (human names, utilisation bars, >=90% amber), and backend IP grid
   7. With zero WEKA credentials, the panel is replaced by a "No WEKA Storage credential configured" hint
   8. `[Refresh]` button triggers a fresh WEKA API call (bypasses 60s cache); "Last updated" shows actual data age
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 **Wave 1**
@@ -292,7 +292,7 @@ Plans:
 - [x] 24-02-PLAN.md — Credential Management JS: inline forms, traffic-light state machine, 2-s polling with 30-s timeout, browser-confirm delete (Wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 24-03-PLAN.md — WEKA Storage Overview JS: header controls, four-state machine, humanBytes capacity row, filesystem table with sort and Show-all toggle, backend node grid (Wave 3)
+- [x] 24-03-PLAN.md — WEKA Storage Overview JS: header controls, four-state machine, humanBytes capacity row, filesystem table with sort and Show-all toggle, backend node grid (Wave 3)
 **UI hint**: yes
 
 ### Phase 25: Blueprint Credential Selector SDK
@@ -334,5 +334,5 @@ v6.0 Execution Order: 21 → 22 → 23 → 24/25 (Phases 24 and 25 can be develo
 | 21. WarpCredential CRD and Helm RBAC | v6.0 | 2/2 | Complete    | 2026-06-11 |
 | 22. Operator WarpCredential Reconciler | v6.0 | 3/3 | Complete    | 2026-06-11 |
 | 23. Backend Credentials API and WEKA Overview Proxy | v6.0 | 4/4 | Complete    | 2026-06-11 |
-| 24. Settings GUI Overhaul | v6.0 | 2/3 | In Progress|  |
+| 24. Settings GUI Overhaul | v6.0 | 3/3 | Complete   | 2026-06-12 |
 | 25. Blueprint Credential Selector SDK | v6.0 | 0/TBD | Not started | - |
