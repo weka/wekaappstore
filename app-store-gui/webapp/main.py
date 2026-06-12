@@ -527,26 +527,7 @@ async def settings_page(request: Request):
     detected_ns = (auth.get("details", {}) or {}).get("namespace") if isinstance(auth, dict) else None
     ns = detected_ns or "default"
 
-    async def _fetch_credentials() -> list:
-        def _list():
-            return client.CustomObjectsApi().list_namespaced_custom_object(
-                group="warp.io", version="v1alpha1",
-                plural="warpcredentials", namespace=ns,
-            )
-        try:
-            load_kube_config()
-            resp = await asyncio.to_thread(_list)
-            return [_build_credential_response_item(cr) for cr in (resp or {}).get("items", []) or []]
-        except (ApiException, ConnectionError, TimeoutError):
-            return []
-
-    cred_items = await _fetch_credentials()
-
-    credentials_by_type: dict = {"nvidia-ngc": [], "huggingface": [], "weka-storage": []}
-    for it in cred_items:
-        t = it.get("type")
-        if t in credentials_by_type:
-            credentials_by_type[t].append(it)
+    credentials_by_type = await _get_credentials_by_type(ns)
     weka_storage_credentials = [c for c in credentials_by_type["weka-storage"] if c.get("ready")]
 
     return templates.TemplateResponse(
@@ -781,6 +762,34 @@ def _build_credential_response_item(cr: Dict[str, Any]) -> Dict[str, Any]:
         item["endpoint"] = status.get("wekaEndpoint")
 
     return item
+
+
+async def _get_credentials_by_type(ns: str) -> dict:
+    """Return ready credentials grouped by type for a namespace.
+
+    Returns {"nvidia-ngc": [...], "huggingface": [...], "weka-storage": [...]}.
+    Falls back to empty dict-of-lists on ApiException | ConnectionError | TimeoutError.
+    Only credentials with ready=True are included (single source of truth for SDK-02's
+    ready contract — macros can use simple truthiness checks with no selectattr needed).
+    """
+    credentials_by_type: dict = {"nvidia-ngc": [], "huggingface": [], "weka-storage": []}
+
+    def _list():
+        return client.CustomObjectsApi().list_namespaced_custom_object(
+            group="warp.io", version="v1alpha1",
+            plural="warpcredentials", namespace=ns,
+        )
+    try:
+        load_kube_config()
+        resp = await asyncio.to_thread(_list)
+        for cr in (resp or {}).get("items", []) or []:
+            item = _build_credential_response_item(cr)
+            t = item.get("type")
+            if t in credentials_by_type and item.get("ready"):
+                credentials_by_type[t].append(item)
+    except (ApiException, ConnectionError, TimeoutError):
+        pass
+    return credentials_by_type
 
 
 @app.get("/api/credentials")
