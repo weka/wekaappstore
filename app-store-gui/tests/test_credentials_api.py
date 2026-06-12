@@ -605,3 +605,167 @@ def test_resolve_weka_credential_secret_missing_key_raises_runtime(monkeypatch):
 
     with pytest.raises(RuntimeError, match="WEKA_API_USERNAME"):
         main._resolve_weka_credential_secret("primary", "default")
+
+
+# ---------------------------------------------------------------------------
+# _get_credentials_by_type helper tests (Plan 25-01, Task 1)
+# ---------------------------------------------------------------------------
+
+def _patch_get_credentials_by_type(monkeypatch, items: list) -> None:
+    """Patch client and load_kube_config for _get_credentials_by_type tests."""
+    class CoApiStub:
+        def list_namespaced_custom_object(self, **kwargs):
+            return {"items": items}
+
+    monkeypatch.setattr(main.client, "CustomObjectsApi", lambda: CoApiStub())
+    monkeypatch.setattr(main, "load_kube_config", lambda: None)
+
+
+def test_get_credentials_by_type_returns_known_keys(monkeypatch):
+    """Test 1: Returns dict with exactly the three known credential type keys."""
+    _patch_get_credentials_by_type(monkeypatch, [])
+    result = asyncio.run(main._get_credentials_by_type("default"))
+    assert set(result.keys()) == {"nvidia-ngc", "huggingface", "weka-storage"}
+
+
+def test_get_credentials_by_type_groups_ready_items(monkeypatch):
+    """Test 2: Groups ready CRs by type correctly, empty list for missing types."""
+    _patch_get_credentials_by_type(monkeypatch, [
+        make_warpcred_cr_nvidia_ready("ngc1"),
+        make_warpcred_cr_weka_ready("weka1"),
+    ])
+    result = asyncio.run(main._get_credentials_by_type("default"))
+    assert len(result["nvidia-ngc"]) == 1
+    assert len(result["weka-storage"]) == 1
+    assert len(result["huggingface"]) == 0
+
+
+def test_get_credentials_by_type_returns_empty_on_api_exception(monkeypatch):
+    """Test 3a: Falls back to empty dict-of-lists on ApiException without re-raising."""
+    from kubernetes.client.exceptions import ApiException
+
+    class RaisingCoApiStub:
+        def list_namespaced_custom_object(self, **kwargs):
+            raise ApiException(status=500, reason="Internal Error")
+
+    monkeypatch.setattr(main.client, "CustomObjectsApi", lambda: RaisingCoApiStub())
+    monkeypatch.setattr(main, "load_kube_config", lambda: None)
+    result = asyncio.run(main._get_credentials_by_type("default"))
+    assert result == {"nvidia-ngc": [], "huggingface": [], "weka-storage": []}
+
+
+def test_get_credentials_by_type_returns_empty_on_connection_error(monkeypatch):
+    """Test 3b: Falls back to empty dict-of-lists on ConnectionError without re-raising."""
+    class RaisingCoApiStub:
+        def list_namespaced_custom_object(self, **kwargs):
+            raise ConnectionError("refused")
+
+    monkeypatch.setattr(main.client, "CustomObjectsApi", lambda: RaisingCoApiStub())
+    monkeypatch.setattr(main, "load_kube_config", lambda: None)
+    result = asyncio.run(main._get_credentials_by_type("default"))
+    assert result == {"nvidia-ngc": [], "huggingface": [], "weka-storage": []}
+
+
+def test_get_credentials_by_type_returns_empty_on_timeout_error(monkeypatch):
+    """Test 3c: Falls back to empty dict-of-lists on TimeoutError without re-raising."""
+    class RaisingCoApiStub:
+        def list_namespaced_custom_object(self, **kwargs):
+            raise TimeoutError("timed out")
+
+    monkeypatch.setattr(main.client, "CustomObjectsApi", lambda: RaisingCoApiStub())
+    monkeypatch.setattr(main, "load_kube_config", lambda: None)
+    result = asyncio.run(main._get_credentials_by_type("default"))
+    assert result == {"nvidia-ngc": [], "huggingface": [], "weka-storage": []}
+
+
+def test_get_credentials_by_type_drops_unknown_type(monkeypatch):
+    """Test 4: CRs with unknown spec.type are silently dropped."""
+    unknown_cr = {
+        "apiVersion": "warp.io/v1alpha1",
+        "kind": "WarpCredential",
+        "metadata": {"name": "mystery", "namespace": "default"},
+        "spec": {"type": "unknown-type", "displayName": "Mystery"},
+        "status": {"conditions": [{"type": "KeyReady", "status": "True"}]},
+    }
+    _patch_get_credentials_by_type(monkeypatch, [unknown_cr])
+    result = asyncio.run(main._get_credentials_by_type("default"))
+    assert result["nvidia-ngc"] == []
+    assert result["huggingface"] == []
+    assert result["weka-storage"] == []
+
+
+def test_get_credentials_by_type_filters_non_ready(monkeypatch):
+    """Test 6: Non-ready CRs are filtered out by the helper (ready-filter at helper level)."""
+    _patch_get_credentials_by_type(monkeypatch, [
+        make_warpcred_cr_weka_ready("weka-ok"),
+        make_warpcred_cr_nvidia_not_ready("ngc-bad"),
+    ])
+    result = asyncio.run(main._get_credentials_by_type("default"))
+    assert len(result["weka-storage"]) == 1
+    assert len(result["nvidia-ngc"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# blueprint_detail context injection tests (Plan 25-01, Task 2)
+# ---------------------------------------------------------------------------
+
+def _make_blueprint_detail_stubs(monkeypatch):
+    """Patch all external calls needed for blueprint_detail route tests."""
+    sentinel = {"nvidia-ngc": [{"name": "test-ngc"}], "huggingface": [], "weka-storage": []}
+
+    monkeypatch.setattr(main, "get_auth_status", lambda: {"details": {"namespace": "test-ns"}})
+    monkeypatch.setattr(main, "get_cluster_status", lambda: {"cpu_nodes": 1, "gpu_nodes": 0})
+
+    async def _cred_stub(ns):
+        return sentinel
+
+    monkeypatch.setattr(main, "_get_credentials_by_type", _cred_stub)
+    return sentinel
+
+
+def test_blueprint_detail_injects_credentials_by_type(monkeypatch):
+    """Test 2: blueprint_detail template context contains credentials_by_type key."""
+    sentinel = _make_blueprint_detail_stubs(monkeypatch)
+    request_stub = SimpleNamespace(
+        headers={}, cookies={}, query_params={}, url=SimpleNamespace(path="/blueprint/openfold"),
+        scope={"type": "http"},
+    )
+    response = asyncio.run(main.blueprint_detail(request_stub, name="openfold"))
+    assert hasattr(response, "context"), "TemplateResponse should have .context attribute"
+    assert "credentials_by_type" in response.context
+    assert response.context["credentials_by_type"] is sentinel
+
+
+def test_blueprint_detail_falls_back_to_default_namespace(monkeypatch):
+    """Test 4: When get_auth_status returns {}, _get_credentials_by_type is called with 'default'."""
+    called_with = []
+
+    async def capture_ns(ns):
+        called_with.append(ns)
+        return {"nvidia-ngc": [], "huggingface": [], "weka-storage": []}
+
+    monkeypatch.setattr(main, "get_auth_status", lambda: {})
+    monkeypatch.setattr(main, "get_cluster_status", lambda: {"cpu_nodes": 1, "gpu_nodes": 0})
+    monkeypatch.setattr(main, "_get_credentials_by_type", capture_ns)
+
+    request_stub = SimpleNamespace(
+        headers={}, cookies={}, query_params={}, url=SimpleNamespace(path="/blueprint/openfold"),
+        scope={"type": "http"},
+    )
+    asyncio.run(main.blueprint_detail(request_stub, name="openfold"))
+    assert called_with == ["default"], f"Expected ['default'], got {called_with}"
+
+
+def test_blueprint_detail_preserves_existing_context_keys(monkeypatch):
+    """Test 5: All pre-existing context keys remain present after adding credentials_by_type."""
+    sentinel = _make_blueprint_detail_stubs(monkeypatch)
+    request_stub = SimpleNamespace(
+        headers={}, cookies={}, query_params={}, url=SimpleNamespace(path="/blueprint/openfold"),
+        scope={"type": "http"},
+    )
+    response = asyncio.run(main.blueprint_detail(request_stub, name="openfold"))
+    ctx = response.context
+    for key in ("request", "name", "yaml_path", "status", "requirements", "meets",
+                "oss_img_b64", "aidp_img_b64", "logo_b64", "glocomp_logo_b64",
+                "tokenvisor_logo_b64", "tokenvisor_arch_b64"):
+        assert key in ctx, f"Missing expected context key: {key}"
