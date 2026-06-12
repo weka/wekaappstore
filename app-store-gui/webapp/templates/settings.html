@@ -929,9 +929,13 @@
     // Page Visibility API — pause/resume polling (UI-SPEC line 267)
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        pollIntervals.forEach(clearInterval);
+        pollIntervals.forEach((id, name) => {
+          clearInterval(id);
+          pollIntervals.set(name, null);  // null = paused, preserves name for resume
+        });
       } else {
         Array.from(pollIntervals.keys()).forEach(name => {
+          if (pollIntervals.get(name) !== null) return;  // already running
           const id = setInterval(() => pollCredentialOnce(name), POLL_MS);
           pollIntervals.set(name, id);
         });
@@ -939,7 +943,7 @@
     });
 
     // Clear all intervals on page unload (UI-SPEC line 346)
-    window.addEventListener('beforeunload', () => { pollIntervals.forEach(clearInterval); });
+    window.addEventListener('beforeunload', () => { pollIntervals.forEach(id => { if (id) clearInterval(id); }); });
 
     // ---- Wire-up on DOMContentLoaded ----
     document.addEventListener('DOMContentLoaded', () => {
