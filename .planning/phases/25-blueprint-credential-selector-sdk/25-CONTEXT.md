@@ -35,7 +35,12 @@ No new sub-packages, no new modules. All changes in `main.py` and `templates/`.
 
 ### Scope of Template Macro Usage
 - **D-08:** SDK-04 requires context injection in **all** blueprint install route handlers — `blueprint_detail` is the only such route (handles all `/blueprint/{name}` pages). After this phase, all blueprint pages have `credentials_by_type` available in their template context.
-- **D-09:** Whether existing blueprint templates (`blueprint_nvidia-vss.html`, `blueprint_neuralmesh-aidp.html`, `blueprint_openfold.html`, etc.) call the macros is deferred — this phase delivers the SDK (macro library + context injection). The template `{% from ... import %}` calls are added by whoever next modifies a specific blueprint's install form.
+- **D-09:** The NeuralMesh AIDP blueprint template (`blueprint_neuralmesh-aidp.html`) is the in-scope reference example. The plan must update its deploy form (currently `<input type="hidden" id="namespace">` + submit only, at `templates/blueprint_neuralmesh-aidp.html:310-316`) to demonstrate both macros:
+  - `{{ weka_storage_select(credential_field="weka_credential", endpoint_field="weka_endpoint", label="WEKA NeuralMesh") }}` — AIDP processes data on NeuralMesh storage
+  - `{{ credential_select(type="nvidia-ngc", field_name="ngc_credential", label="NVIDIA NGC API Key") }}` — AIDP runs NVIDIA Triton from nvcr.io
+  
+  The other blueprint templates (`blueprint_nvidia-vss.html`, `blueprint_openfold.html`, `blueprint_glocomp-aurora.html`, `blueprint_tokenvisor-enterprise.html`) are NOT updated in this phase — they remain SDK consumers for future phases.
+- **D-10:** AIDP's form submit handler (`form.addEventListener('submit', ...)` at `blueprint_neuralmesh-aidp.html:342-380`) currently POSTs to `/deploy-stream/{{ name }}?namespace=...`. This phase only adds the form fields — wiring the new credential field values into the deploy-stream backend is **out of scope** (the existing deploy path stays unchanged; the new fields are inert in the backend until follow-on work). This is acceptable because Phase 25 is the SDK delivery, not the AIDP install workflow.
 
 ### Claude's Discretion
 - Exact placement of `_get_credentials_by_type` in `main.py` — near the existing `_fetch_credentials` usage site (above `settings_page`) or near other module-level helpers
@@ -99,10 +104,9 @@ No new sub-packages, no new modules. All changes in `main.py` and `templates/`.
 <deferred>
 ## Deferred Ideas
 
-- Adding `{% from '_credential_macros.html' import ... %}` calls to existing blueprint templates (`blueprint_nvidia-vss.html`, `blueprint_neuralmesh-aidp.html`, `blueprint_openfold.html`) — this is future template authoring work, not a Phase 25 deliverable
+- Adding `{% from '_credential_macros.html' import ... %}` calls to `blueprint_nvidia-vss.html`, `blueprint_openfold.html`, `blueprint_glocomp-aurora.html`, and `blueprint_tokenvisor-enterprise.html` — only `blueprint_neuralmesh-aidp.html` is the in-scope reference example per D-09; the rest are future template authoring work
 - `credentials_by_type` injection for routes other than `blueprint_detail` — no other blueprint install routes exist currently
-
-None — analysis stayed within phase scope.
+- The `WEKA storage credential` macro (`weka_storage_select`) is still part of the SDK build per SDK-03, but no existing blueprint template calls it yet — the macro is delivered, template wiring is future work
 </deferred>
 
 ---

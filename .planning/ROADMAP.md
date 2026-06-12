@@ -303,7 +303,7 @@ Plans:
   1. A blueprint template using `{% from "_credential_macros.html" import credential_select %}` and `{{ credential_select(type="nvidia-ngc", field_name="ngc_credential") }}` renders a `<select>` populated with all ready NGC credentials
   2. When no credentials of the requested type are ready, `credential_select` renders a hint paragraph with a link to `/settings#credentials`
   3. `{{ weka_storage_select() }}` renders a credential dropdown + endpoint `<input>` pair; each option has a `data-endpoint` attribute; changing selection updates the endpoint field via `warpSyncEndpoint` JavaScript
-  4. All blueprint install page route handlers inject `credentials_by_type` dict into their template context; the tokenvisor and glocomp blueprint templates serve as reference examples updated to use the macro
+  4. All blueprint install page route handlers inject `credentials_by_type` dict into their template context; the NeuralMesh AIDP blueprint template (`blueprint_neuralmesh-aidp.html`) serves as the reference example updated to use the macro
   5. If the Kubernetes API is unreachable when fetching credentials, `credentials_by_type` is an empty dict and macros degrade to hint mode — no 500 error on blueprint page load
 **Plans**: TBD
 
