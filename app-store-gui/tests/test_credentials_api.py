@@ -715,7 +715,11 @@ def _make_blueprint_detail_stubs(monkeypatch):
 
     monkeypatch.setattr(main, "get_auth_status", lambda: {"details": {"namespace": "test-ns"}})
     monkeypatch.setattr(main, "get_cluster_status", lambda: {"cpu_nodes": 1, "gpu_nodes": 0})
-    monkeypatch.setattr(main, "_get_credentials_by_type", lambda ns: sentinel)
+
+    async def _cred_stub(ns):
+        return sentinel
+
+    monkeypatch.setattr(main, "_get_credentials_by_type", _cred_stub)
     return sentinel
 
 
@@ -736,7 +740,7 @@ def test_blueprint_detail_falls_back_to_default_namespace(monkeypatch):
     """Test 4: When get_auth_status returns {}, _get_credentials_by_type is called with 'default'."""
     called_with = []
 
-    def capture_ns(ns):
+    async def capture_ns(ns):
         called_with.append(ns)
         return {"nvidia-ngc": [], "huggingface": [], "weka-storage": []}
 

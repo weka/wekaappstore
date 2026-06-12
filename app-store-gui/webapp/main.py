@@ -1314,6 +1314,12 @@ async def blueprint_detail(request: Request, name: str):
     except Exception:
         use_template = "blueprint.html"
 
+    # Resolve namespace for credential lookup (same pattern as settings_page:524-528)
+    auth = await asyncio.to_thread(get_auth_status)
+    detected_ns = (auth.get("details", {}) or {}).get("namespace") if isinstance(auth, dict) else None
+    ns = detected_ns or "default"
+    credentials_by_type = await _get_credentials_by_type(ns)
+
     return templates.TemplateResponse(
         request,
         use_template,
@@ -1330,6 +1336,7 @@ async def blueprint_detail(request: Request, name: str):
             "glocomp_logo_b64": GLOCOMP_LOGO_B64,
             "tokenvisor_logo_b64": TOKENVISOR_LOGO_B64,
             "tokenvisor_arch_b64": TOKENVISOR_ARCH_B64,
+            "credentials_by_type": credentials_by_type,
         },
     )
 
