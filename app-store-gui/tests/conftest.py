@@ -14,6 +14,76 @@ if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 
 
+# ---------------------------------------------------------------------------
+# Shared WarpCredential CR factory functions
+# Used by test_credentials_api.py and test_credential_macros.py
+# ---------------------------------------------------------------------------
+
+def make_warpcred_cr_nvidia_ready(name="my-ngc", ns="default") -> dict:
+    return {
+        "apiVersion": "warp.io/v1alpha1",
+        "kind": "WarpCredential",
+        "metadata": {"name": name, "namespace": ns},
+        "spec": {
+            "type": "nvidia-ngc",
+            "displayName": "My NGC",
+            "secretRef": {"name": f"warp-cred-{name}", "key": "NGC_API_KEY"},
+        },
+        "status": {
+            "conditions": [
+                {"type": "KeyReady", "status": "True"},
+                {"type": "DockerSecretReady", "status": "True"},
+            ],
+            "derivedSecrets": [
+                {"name": f"warp-{name}-apikey", "type": "Opaque"},
+                {"name": f"warp-{name}-docker", "type": "kubernetes.io/dockerconfigjson"},
+            ],
+            "lastSyncTime": "2026-06-11T00:00:00Z",
+        },
+    }
+
+
+def make_warpcred_cr_nvidia_not_ready(name="bad-ngc", ns="default") -> dict:
+    return {
+        "apiVersion": "warp.io/v1alpha1",
+        "kind": "WarpCredential",
+        "metadata": {"name": name, "namespace": ns},
+        "spec": {
+            "type": "nvidia-ngc",
+            "displayName": "Bad NGC",
+            "secretRef": {"name": f"warp-cred-{name}", "key": "NGC_API_KEY"},
+        },
+        "status": {
+            "conditions": [
+                {"type": "KeyReady", "status": "False", "reason": "InvalidKey", "message": "Key validation failed"},
+                {"type": "DockerSecretReady", "status": "False"},
+            ],
+            "derivedSecrets": [],
+            "lastSyncTime": "2026-06-11T00:00:00Z",
+        },
+    }
+
+
+def make_warpcred_cr_weka_ready(name="primary", ns="default", endpoint="https://weka:14000") -> dict:
+    return {
+        "apiVersion": "warp.io/v1alpha1",
+        "kind": "WarpCredential",
+        "metadata": {"name": name, "namespace": ns},
+        "spec": {
+            "type": "weka-storage",
+            "displayName": "WEKA Primary",
+            "secretRef": {"name": f"warp-cred-{name}", "key": "WEKA_API_TOKEN"},
+            "endpoint": endpoint,
+        },
+        "status": {
+            "conditions": [{"type": "KeyReady", "status": "True"}],
+            "derivedSecrets": [{"name": f"warp-{name}-token", "type": "Opaque"}],
+            "lastSyncTime": "2026-06-11T00:00:00Z",
+            "wekaEndpoint": endpoint,
+        },
+    }
+
+
 def _base_valid_plan() -> dict:
     return {
         "request_summary": "Deploy the enterprise research stack into the ai-platform namespace.",

@@ -11,74 +11,11 @@ os.environ.setdefault("BLUEPRINTS_DIR", "/tmp")
 
 import webapp.main as main
 
-
-# ---------------------------------------------------------------------------
-# CR fixture factories
-# ---------------------------------------------------------------------------
-
-def make_warpcred_cr_nvidia_ready(name="my-ngc", ns="default") -> dict:
-    return {
-        "apiVersion": "warp.io/v1alpha1",
-        "kind": "WarpCredential",
-        "metadata": {"name": name, "namespace": ns},
-        "spec": {
-            "type": "nvidia-ngc",
-            "displayName": "My NGC",
-            "secretRef": {"name": f"warp-cred-{name}", "key": "NGC_API_KEY"},
-        },
-        "status": {
-            "conditions": [
-                {"type": "KeyReady", "status": "True"},
-                {"type": "DockerSecretReady", "status": "True"},
-            ],
-            "derivedSecrets": [
-                {"name": f"warp-{name}-apikey", "type": "Opaque"},
-                {"name": f"warp-{name}-docker", "type": "kubernetes.io/dockerconfigjson"},
-            ],
-            "lastSyncTime": "2026-06-11T00:00:00Z",
-        },
-    }
-
-
-def make_warpcred_cr_nvidia_not_ready(name="bad-ngc", ns="default") -> dict:
-    return {
-        "apiVersion": "warp.io/v1alpha1",
-        "kind": "WarpCredential",
-        "metadata": {"name": name, "namespace": ns},
-        "spec": {
-            "type": "nvidia-ngc",
-            "displayName": "Bad NGC",
-            "secretRef": {"name": f"warp-cred-{name}", "key": "NGC_API_KEY"},
-        },
-        "status": {
-            "conditions": [
-                {"type": "KeyReady", "status": "False", "reason": "InvalidKey", "message": "Key validation failed"},
-                {"type": "DockerSecretReady", "status": "False"},
-            ],
-            "derivedSecrets": [],
-            "lastSyncTime": "2026-06-11T00:00:00Z",
-        },
-    }
-
-
-def make_warpcred_cr_weka_ready(name="primary", ns="default", endpoint="https://weka:14000") -> dict:
-    return {
-        "apiVersion": "warp.io/v1alpha1",
-        "kind": "WarpCredential",
-        "metadata": {"name": name, "namespace": ns},
-        "spec": {
-            "type": "weka-storage",
-            "displayName": "WEKA Primary",
-            "secretRef": {"name": f"warp-cred-{name}", "key": "WEKA_API_TOKEN"},
-            "endpoint": endpoint,
-        },
-        "status": {
-            "conditions": [{"type": "KeyReady", "status": "True"}],
-            "derivedSecrets": [{"name": f"warp-{name}-token", "type": "Opaque"}],
-            "lastSyncTime": "2026-06-11T00:00:00Z",
-            "wekaEndpoint": endpoint,
-        },
-    }
+from .conftest import (
+    make_warpcred_cr_nvidia_ready,
+    make_warpcred_cr_nvidia_not_ready,
+    make_warpcred_cr_weka_ready,
+)
 
 
 # ---------------------------------------------------------------------------
