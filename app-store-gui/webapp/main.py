@@ -1495,7 +1495,7 @@ def _validate_weka_endpoint(endpoint: str) -> None:
     host = parsed.hostname or ""
     try:
         addr = ipaddress.ip_address(host)
-        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+        if addr.is_loopback or addr.is_link_local or addr.is_reserved:
             raise RuntimeError(f"WEKA endpoint resolves to a forbidden address: {host!r}")
     except ValueError:
         pass  # hostname (not a bare IP) — prefix check still applies

@@ -42,6 +42,10 @@ spec:
                   - /bin/sh
                   - -c
                   - |
+                    if [ ! -S /host/run/spectro/containerd/containerd.sock ]; then
+                      echo "Not a Spectro Cloud node (socket not found at /run/spectro/containerd/containerd.sock). Skipping."
+                      exit 0
+                    fi
                     mkdir -p /host/run/containerd
                     ln -sf /run/spectro/containerd/containerd.sock /host/run/containerd/containerd.sock
                     echo "Symlink: $(ls -la /host/run/containerd/containerd.sock)"

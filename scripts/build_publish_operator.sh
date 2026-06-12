@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Build and optionally push the weka-app-store-gui Docker image to Docker Hub.
+# Build and optionally push the weka-app-store-operator Docker image to Docker Hub.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-IMAGE="${IMAGE:-wekachrisjen/weka-app-store-gui}"
-DOCKERFILE="${REPO_ROOT}/app-store-gui/Dockerfile"
+IMAGE="${IMAGE:-wekachrisjen/weka-app-store-multi-arch}"
+DOCKERFILE="${REPO_ROOT}/operator_module/Dockerfile"
 GIT_SHA="${GIT_SHA:-$(git -C "${REPO_ROOT}" rev-parse --short=12 HEAD)}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
 
@@ -15,7 +15,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") (--version X.Y.Z | --branch NAME) [--push] [--dry-run] [-h]
 
-Builds the weka-app-store-gui Docker image.
+Builds the weka-app-store-operator Docker image.
 
 Options:
   --version X.Y.Z   Release build: tags as vX.Y.Z and latest
@@ -26,7 +26,7 @@ Options:
   -h, --help        Show this help
 
 Environment overrides:
-  IMAGE             Full image name  (default: wekachrisjen/weka-app-store-gui)
+  IMAGE             Full image name  (default: wekachrisjen/weka-app-store-multi-arch)
   GIT_SHA           Git SHA for branch tags (default: git rev-parse --short HEAD)
   DEFAULT_BRANCH    Default branch name for latest tag logic (default: main)
 EOF
@@ -66,7 +66,7 @@ declare -a TAGS=()
 IMMUTABLE_TAG=""
 
 if [[ -n "$VERSION" ]]; then
-  version_ok "$VERSION" || { echo "invalid --version: $VERSION (want e.g. 0.42 or 1.2.3)" >&2; exit 2; }
+  version_ok "$VERSION" || { echo "invalid --version: $VERSION (want e.g. 0.10 or 1.2.3)" >&2; exit 2; }
   IMMUTABLE_TAG="v${VERSION#v}"
   TAGS=("$IMMUTABLE_TAG" "latest")
 else

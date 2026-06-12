@@ -4,9 +4,9 @@
   "commit_docs": true,
   "model_profile": "inherit",
   "workflow": {
-    "research": true,
+    "research": false,
     "plan_check": false,
-    "verifier": false,
+    "verifier": true,
     "nyquist_validation": false,
     "_auto_chain_active": false,
     "discuss_mode": "assumptions",

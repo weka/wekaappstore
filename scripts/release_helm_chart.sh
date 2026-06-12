@@ -14,25 +14,26 @@ HELM_REPO_URL="${HELM_REPO_URL:-https://weka.github.io/wekaappstore}"
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--version X.Y.Z] [--gui-tag TAG] [--dry-run] [-h]
+Usage: $(basename "$0") [--version X.Y.Z] [--operator-tag TAG] [--gui-tag TAG] [--dry-run] [-h]
 
 Packages weka-app-store-operator-chart and publishes it to docs/ (GitHub Pages).
 
 Options:
-  --version X.Y.Z   Bump Chart.yaml version before packaging
-  --gui-tag TAG      Update the GUI container image tag in the Helm template (e.g. v0.42)
-  --dry-run          Lint and package only; do not commit or push
-  -h, --help         Show this help
+  --version X.Y.Z      Bump Chart.yaml version before packaging
+  --operator-tag TAG   Update the operator image tag in values.yaml (e.g. v0.10)
+  --gui-tag TAG        Update the GUI container image tag in the Helm template (e.g. v0.42)
+  --dry-run            Lint and package only; do not commit or push
+  -h, --help           Show this help
 
 Environment overrides:
-  HELM_REPO_URL      Public chart repo URL (default: https://weka.github.io/wekaappstore)
+  HELM_REPO_URL        Public chart repo URL (default: https://weka.github.io/wekaappstore)
 
 Examples:
-  # Bump chart version and update GUI image tag, then publish
-  $(basename "$0") --version 0.1.65 --gui-tag v0.42
+  # Full release: bump chart, update both image tags
+  $(basename "$0") --version 0.1.65 --operator-tag v0.10 --gui-tag v0.42
 
-  # Only bump chart version (GUI tag unchanged)
-  $(basename "$0") --version 0.1.65
+  # Only update operator image (e.g. operator-only change)
+  $(basename "$0") --version 0.1.65 --operator-tag v0.10
 
   # Lint and package without committing
   $(basename "$0") --version 0.1.65 --dry-run
@@ -40,15 +41,17 @@ EOF
 }
 
 VERSION=""
+OPERATOR_TAG=""
 GUI_TAG=""
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --version) VERSION="${2:-}"; shift 2 ;;
-    --gui-tag) GUI_TAG="${2:-}"; shift 2 ;;
-    --dry-run) DRY_RUN=true; shift ;;
-    -h|--help) usage; exit 0 ;;
+    --version)      VERSION="${2:-}";      shift 2 ;;
+    --operator-tag) OPERATOR_TAG="${2:-}"; shift 2 ;;
+    --gui-tag)      GUI_TAG="${2:-}";      shift 2 ;;
+    --dry-run)      DRY_RUN=true;          shift ;;
+    -h|--help)      usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; usage; exit 2 ;;
   esac
 done
@@ -65,8 +68,9 @@ if [[ -n "$VERSION" ]]; then
 fi
 
 if $DRY_RUN; then
-  [[ -n "$VERSION" ]] && echo "==> dry-run: would bump Chart.yaml version to ${VERSION}"
-  [[ -n "$GUI_TAG" ]] && echo "==> dry-run: would update GUI image tag to ${GUI_TAG}"
+  [[ -n "$VERSION" ]]      && echo "==> dry-run: would bump Chart.yaml version to ${VERSION}"
+  [[ -n "$OPERATOR_TAG" ]] && echo "==> dry-run: would update operator image tag to ${OPERATOR_TAG}"
+  [[ -n "$GUI_TAG" ]]      && echo "==> dry-run: would update GUI image tag to ${GUI_TAG}"
 else
   # --- optional version bump ---
   if [[ -n "$VERSION" ]]; then
@@ -75,7 +79,14 @@ else
     rm -f "${CHART_DIR}/Chart.yaml.bak"
   fi
 
-  # --- optional GUI image tag update ---
+  # --- optional operator image tag update (values.yaml) ---
+  if [[ -n "$OPERATOR_TAG" ]]; then
+    echo "==> Updating operator image tag to ${OPERATOR_TAG}"
+    sed -i.bak "s/^  tag: .*/  tag: \"${OPERATOR_TAG}\"/" "${CHART_DIR}/values.yaml"
+    rm -f "${CHART_DIR}/values.yaml.bak"
+  fi
+
+  # --- optional GUI image tag update (hardcoded in template) ---
   if [[ -n "$GUI_TAG" ]]; then
     echo "==> Updating GUI image tag to ${GUI_TAG}"
     sed -i.bak "s|wekachrisjen/weka-app-store-gui:[^ ]*|wekachrisjen/weka-app-store-gui:${GUI_TAG}|" \
@@ -132,11 +143,13 @@ declare -a COMMIT_FILES=(
   "${DOCS_DIR}/index.yaml"
   "${DOCS_DIR}/${TGZ_NAME}"
 )
-[[ -n "$VERSION" ]] && COMMIT_FILES+=("${CHART_DIR}/Chart.yaml")
-[[ -n "$GUI_TAG" ]] && COMMIT_FILES+=("${GUI_TEMPLATE}")
+[[ -n "$VERSION" ]]      && COMMIT_FILES+=("${CHART_DIR}/Chart.yaml")
+[[ -n "$OPERATOR_TAG" ]] && COMMIT_FILES+=("${CHART_DIR}/values.yaml")
+[[ -n "$GUI_TAG" ]]      && COMMIT_FILES+=("${GUI_TEMPLATE}")
 
 COMMIT_MSG="chore: publish ${CHART_NAME}@${CHART_VERSION}"
-[[ -n "$GUI_TAG" ]] && COMMIT_MSG+=" (gui=${GUI_TAG})"
+[[ -n "$OPERATOR_TAG" ]] && COMMIT_MSG+=" (operator=${OPERATOR_TAG})"
+[[ -n "$GUI_TAG" ]]      && COMMIT_MSG+=" (gui=${GUI_TAG})"
 
 CURRENT_BRANCH="$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD)"
 
