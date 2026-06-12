@@ -886,6 +886,7 @@ async def create_credential(
             }
 
         # Create the raw Secret (warp-cred-<slug>)
+        core = client.CoreV1Api()
         await asyncio.to_thread(create_or_update_secret, f"warp-cred-{slug}", ns, string_data)
 
         # Build the WarpCredential CR body
@@ -920,7 +921,7 @@ async def create_credential(
                 # Roll back the Secret we just created
                 try:
                     await asyncio.to_thread(
-                        client.CoreV1Api().delete_namespaced_secret,
+                        core.delete_namespaced_secret,
                         name=f"warp-cred-{slug}",
                         namespace=ns,
                     )
