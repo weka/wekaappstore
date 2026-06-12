@@ -147,7 +147,11 @@ def test_blueprint_detail_injects_credentials_by_type_into_context(monkeypatch):
 
     monkeypatch.setattr(main, "_get_credentials_by_type", _stub_helper)
 
-    request = SimpleNamespace()
+    request = SimpleNamespace(
+        headers={}, cookies={}, query_params={},
+        url=SimpleNamespace(path="/blueprint/neuralmesh-aidp"),
+        scope={"type": "http"},
+    )
     response = asyncio.run(main.blueprint_detail(request, name="neuralmesh-aidp"))
     assert response.context["credentials_by_type"]["nvidia-ngc"][0]["name"] == "sentinel-cred"
 
@@ -164,5 +168,10 @@ def test_blueprint_detail_falls_back_to_default_namespace(monkeypatch):
 
     monkeypatch.setattr(main, "_get_credentials_by_type", _stub_helper)
 
-    asyncio.run(main.blueprint_detail(SimpleNamespace(), name="neuralmesh-aidp"))
+    request = SimpleNamespace(
+        headers={}, cookies={}, query_params={},
+        url=SimpleNamespace(path="/blueprint/neuralmesh-aidp"),
+        scope={"type": "http"},
+    )
+    asyncio.run(main.blueprint_detail(request, name="neuralmesh-aidp"))
     assert captured_ns == ["default"]
