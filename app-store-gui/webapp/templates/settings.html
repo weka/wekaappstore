@@ -950,6 +950,273 @@
 
       // Hydrate server-rendered rows and start polling for amber rows
       hydrateInitialRows();
+
+      // ---- WEKA Storage Overview DOMContentLoaded wire-up ----
+      if (WEKA_CREDENTIALS.length === 0) {
+        // no-cred path: server already rendered the hint; the four containers do not exist
+      } else {
+        renderWekaControls();
+        loadWekaOverview(false);
+      }
+    });
+
+    // -------- WEKA Storage Overview --------
+    const WEKA_CREDENTIALS = {{ weka_storage_credentials | tojson }};
+    let currentWekaCredentialName = WEKA_CREDENTIALS.length > 0 ? WEKA_CREDENTIALS[0].name : null;
+    let lastFetchedAt = null;
+    let lastUpdatedTimerId = null;
+
+    // ---- setWekaState ----
+    // Toggles visibility of the four state containers: 'no-cred' | 'loading' | 'error' | 'success'
+    function setWekaState(state) {
+      const loading = document.getElementById('weka-overview-loading');
+      const error   = document.getElementById('weka-overview-error');
+      const success = document.getElementById('weka-overview-success');
+      if (!loading || !error || !success) return; // no-cred path; nothing to do
+      loading.hidden = state !== 'loading';
+      error.hidden   = state !== 'error';
+      success.hidden = state !== 'success';
+    }
+
+    // ---- renderWekaControls ----
+    // Populates the #weka-overview-controls div with credential selector (or static label),
+    // the Refresh button, and the Last updated timestamp.
+    function renderWekaControls() {
+      const controls = document.getElementById('weka-overview-controls');
+      if (!controls) return;
+
+      let selectorHtml = '';
+      if (WEKA_CREDENTIALS.length > 1) {
+        const options = WEKA_CREDENTIALS.map(c =>
+          `<option value="${esc(c.name)}" data-endpoint="${esc(c.endpoint || '')}"${c.name === currentWekaCredentialName ? ' selected' : ''}>${esc(c.displayName)}</option>`
+        ).join('');
+        selectorHtml = `<select id="weka-credential-select" class="px-2 py-1 rounded-md bg-gray-800/70 border border-white/10 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--weka-purple)]">${options}</select>`;
+      } else if (WEKA_CREDENTIALS.length === 1) {
+        selectorHtml = `<span class="text-sm muted">${esc(WEKA_CREDENTIALS[0].displayName)}</span>`;
+      }
+
+      controls.innerHTML = `
+        <div class="flex items-center gap-3">
+          ${selectorHtml}
+          <button type="button" id="weka-refresh" class="px-3 py-1.5 rounded-md text-sm font-medium border border-[var(--weka-purple)]/60 text-[var(--weka-purple)] hover:bg-[var(--weka-purple)]/10 focus:outline-none focus:ring-2 focus:ring-[var(--weka-purple)]">↺ Refresh</button>
+          <span id="weka-last-updated" class="text-xs muted">Last updated &#x2014;</span>
+        </div>`;
+
+      // Wire select change event
+      const selectEl = document.getElementById('weka-credential-select');
+      if (selectEl) {
+        selectEl.addEventListener('change', (e) => {
+          currentWekaCredentialName = e.target.value;
+          loadWekaOverview(false);
+        });
+      }
+
+      // Wire Refresh button click
+      const refreshBtn = document.getElementById('weka-refresh');
+      if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => loadWekaOverview(true));
+      }
+    }
+
+    // ---- formatRelativeTime ----
+    // Locked formatter per UI-SPEC line 286.
+    function formatRelativeTime(iso) {
+      if (!iso) return '—'; // em-dash
+      const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+      if (seconds < 60) return 'Just now';
+      if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      return `${h}h ${m}m ago`;
+    }
+
+    // ---- renderWekaError ----
+    // Fills #weka-overview-error with the locked red banner copy (UI-SPEC line 281).
+    function renderWekaError(message) {
+      const banner = document.getElementById('weka-overview-error');
+      if (!banner) return;
+      banner.innerHTML = `<div class="rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-300">WEKA API unreachable: ${esc(message)}. Check that the endpoint is correct and the cluster is reachable from this pod.</div>`;
+    }
+
+    // ---- humanBytes ----
+    // UI-SPEC line 220 formatter. n is non-negative bytes.
+    function humanBytes(n) {
+      if (!Number.isFinite(n) || n < 0) return '—';
+      const TiB = 2 ** 40, GiB = 2 ** 30, MiB = 2 ** 20;
+      if (n >= TiB) return `${(n / TiB).toFixed(1)} TiB`;
+      if (n >= GiB) return `${(n / GiB).toFixed(1)} GiB`;
+      if (n >= MiB) return `${(n / MiB).toFixed(1)} MiB`;
+      return `${n} B`;
+    }
+
+    // ---- renderWekaSuccess ----
+    // Builds the success div innerHTML in one pass, using esc() for all API-returned strings.
+    function renderWekaSuccess(data) {
+      const successDiv = document.getElementById('weka-overview-success');
+      if (!successDiv) return;
+
+      const capacity = data.capacity || {};
+      const pctStr = Number(capacity.usedPercent || 0).toFixed(1);
+      const barClass = capacity.usedPercent >= 90 ? 'bg-amber-500' : 'bg-[var(--weka-purple)]';
+
+      // Capacity cards
+      const capacityHtml = `
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div class="card rounded-lg p-5"><div class="muted text-xs">Total</div><div class="text-2xl font-semibold">${humanBytes(capacity.totalBytes)}</div></div>
+          <div class="card rounded-lg p-5"><div class="muted text-xs">Used</div><div class="text-2xl font-semibold">${humanBytes(capacity.usedBytes)}</div></div>
+          <div class="card rounded-lg p-5"><div class="muted text-xs">Available</div><div class="text-2xl font-semibold">${humanBytes(capacity.availableBytes)}</div></div>
+        </div>
+        <div class="space-y-1 mb-6">
+          <div class="flex justify-between text-xs muted"><span>Utilisation</span><span>${pctStr}%</span></div>
+          <div class="w-full h-2 rounded-full bg-white/5 overflow-hidden">
+            <div class="h-full ${barClass}" style="width: ${pctStr}%"></div>
+          </div>
+        </div>`;
+
+      // Filesystem table
+      const sorted = (data.filesystems || []).slice().sort((a, b) => (b.usedPercent ?? 0) - (a.usedPercent ?? 0));
+      const initialRows = sorted.slice(0, 20);
+
+      function buildFsRows(rows) {
+        return rows.map(fs => {
+          const fsPct = Number(fs.usedPercent || 0).toFixed(1);
+          const fsMiniBar = fs.usedPercent >= 90 ? 'bg-amber-500' : 'bg-[var(--weka-purple)]';
+          return `<tr>
+            <td class="py-2 pr-4 text-sm">${esc(fs.name)}</td>
+            <td class="py-2 pr-4 text-sm">${humanBytes(fs.totalBytes)}</td>
+            <td class="py-2 pr-4 text-sm">${humanBytes(fs.usedBytes)}</td>
+            <td class="py-2 pr-4 text-sm">
+              <div class="flex items-center gap-2">
+                <div class="w-24 h-1.5 rounded-full bg-white/5 overflow-hidden">
+                  <div class="h-full ${fsMiniBar}" style="width: ${fsPct}%"></div>
+                </div>
+                <span class="muted text-xs w-12 text-right">${fsPct}%</span>
+              </div>
+            </td>
+          </tr>`;
+        }).join('');
+      }
+
+      let filesystemHtml = '';
+      if (sorted.length === 0) {
+        filesystemHtml = `<p class="muted text-sm">No filesystems found on this cluster.</p>`;
+      } else {
+        const toggleHtml = sorted.length > 20
+          ? `<button id="weka-fs-toggle" class="mt-3 text-sm muted hover:text-white underline" data-expanded="false">Show all (${sorted.length}) &#x25BE;</button>`
+          : '';
+        filesystemHtml = `
+          <div class="overflow-x-auto mb-2">
+            <table class="min-w-full">
+              <thead>
+                <tr class="text-left text-xs uppercase text-white/70">
+                  <th class="py-2 pr-4">Name</th>
+                  <th class="py-2 pr-4">Total</th>
+                  <th class="py-2 pr-4">Used</th>
+                  <th class="py-2 pr-4">Utilisation</th>
+                </tr>
+              </thead>
+              <tbody id="weka-fs-tbody">${buildFsRows(initialRows)}</tbody>
+            </table>
+          </div>
+          ${toggleHtml}`;
+      }
+
+      // Backend node grid
+      const backendNodes = data.backendNodes || [];
+      let backendHtml = '';
+      if (backendNodes.length === 0) {
+        backendHtml = `<p class="muted text-sm">No backend node IPs reported.</p>`;
+      } else {
+        const cells = backendNodes.map(node =>
+          `<div class="font-mono text-xs px-3 py-2 rounded-md bg-white/5 border border-white/10">${esc(node.ip)}</div>`
+        ).join('');
+        backendHtml = `
+          <div class="mt-4">
+            <h4 class="font-semibold text-sm mb-2">Backend Nodes (${backendNodes.length})</h4>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">${cells}</div>
+          </div>`;
+      }
+
+      successDiv.innerHTML = capacityHtml + filesystemHtml + backendHtml;
+
+      // Wire the Show all / Show top 20 toggle
+      const toggleBtn = document.getElementById('weka-fs-toggle');
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+          const tbody = document.getElementById('weka-fs-tbody');
+          if (!tbody) return;
+          const expanded = toggleBtn.getAttribute('data-expanded') === 'true';
+          if (expanded) {
+            tbody.innerHTML = buildFsRows(initialRows);
+            toggleBtn.setAttribute('data-expanded', 'false');
+            toggleBtn.innerHTML = `Show all (${sorted.length}) &#x25BE;`;
+          } else {
+            tbody.innerHTML = buildFsRows(sorted);
+            toggleBtn.setAttribute('data-expanded', 'true');
+            toggleBtn.innerHTML = `Show top 20 &#x25B4;`;
+          }
+        });
+      }
+
+      // Update "Last updated" timestamp
+      lastFetchedAt = data.fetchedAt;
+      const lastUpdatedEl = document.getElementById('weka-last-updated');
+      if (lastUpdatedEl) {
+        lastUpdatedEl.textContent = `Last updated ${formatRelativeTime(data.fetchedAt)}`;
+      }
+
+      // Start the relative-time refresh timer (guard against double-start)
+      if (lastUpdatedTimerId === null) {
+        lastUpdatedTimerId = setInterval(() => {
+          const el = document.getElementById('weka-last-updated');
+          if (el && lastFetchedAt) el.textContent = `Last updated ${formatRelativeTime(lastFetchedAt)}`;
+        }, 60000);
+      }
+    }
+
+    // ---- loadWekaOverview ----
+    // Orchestrator: fetches /api/weka/overview and drives the state machine.
+    async function loadWekaOverview(bust) {
+      if (!currentWekaCredentialName) return;
+      setWekaState('loading');
+      const params = new URLSearchParams({
+        credential: currentWekaCredentialName,
+        namespace: DETECTED_NAMESPACE,
+      });
+      if (bust) params.set('bust', '1'); // bust=1 bypasses the 60-s server cache
+      try {
+        const data = await get(`/api/weka/overview?${params.toString()}`);
+        if (data && data.ok && data.data) {
+          renderWekaSuccess(data.data);
+          setWekaState('success');
+        } else {
+          renderWekaError(data && data.error ? data.error : 'Unknown error');
+          setWekaState('error');
+        }
+      } catch (e) {
+        renderWekaError(String(e));
+        setWekaState('error');
+      }
+    }
+
+    // Visibility pause/resume for the Last updated timer (separate listener from Plan 02's)
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        if (lastUpdatedTimerId !== null) { clearInterval(lastUpdatedTimerId); lastUpdatedTimerId = null; }
+      } else if (lastFetchedAt && lastUpdatedTimerId === null) {
+        // Resume timer; also do an immediate refresh so the user sees current relative time on focus.
+        const el = document.getElementById('weka-last-updated');
+        if (el) el.textContent = `Last updated ${formatRelativeTime(lastFetchedAt)}`;
+        lastUpdatedTimerId = setInterval(() => {
+          const el2 = document.getElementById('weka-last-updated');
+          if (el2 && lastFetchedAt) el2.textContent = `Last updated ${formatRelativeTime(lastFetchedAt)}`;
+        }, 60000);
+      }
+    });
+
+    // Clear the Last updated timer on page unload (separate from Plan 02's beforeunload)
+    window.addEventListener('beforeunload', () => {
+      if (lastUpdatedTimerId !== null) { clearInterval(lastUpdatedTimerId); lastUpdatedTimerId = null; }
     });
   </script>
 </body>
