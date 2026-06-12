@@ -1887,7 +1887,10 @@ async def get_cluster_status_endpoint(namespace: str = "default"):
         # Also check for Error state in conditions
         if not has_failure:
             for cond in conditions:
-                if cond.get("type") in ["Error", "Failed"] or cond.get("status") == "False" and cond.get("type") in ["Ready", "Initialized"]:
+                if (
+                    cond.get("type") in ["Error", "Failed"]
+                    or (cond.get("status") == "False" and cond.get("type") in ["Ready", "Initialized"])
+                ):
                     if cond.get("reason") in ["Error", "Failed", "Degraded"]:
                          phase = "Failed"
                          message = f"Error: {cond.get('message', 'Initialization failed')}"
