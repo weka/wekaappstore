@@ -22,6 +22,7 @@ import datetime
 import urllib.request
 import urllib.error
 import urllib.parse
+import ipaddress
 
 from kubernetes import client, config, utils
 from kubernetes.client.rest import ApiException
@@ -1478,7 +1479,13 @@ def _validate_weka_endpoint(endpoint: str) -> None:
     if parsed.scheme not in ("https", "http"):
         raise RuntimeError(f"WEKA endpoint must use https:// or http:// scheme, got: {parsed.scheme!r}")
     host = parsed.hostname or ""
-    forbidden_prefixes = ("127.", "169.254.", "0.", "::1")
+    try:
+        addr = ipaddress.ip_address(host)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            raise RuntimeError(f"WEKA endpoint resolves to a forbidden address: {host!r}")
+    except ValueError:
+        pass  # hostname (not a bare IP) — prefix check still applies
+    forbidden_prefixes = ("127.", "169.254.", "0.", "::1", "fc", "fe80")
     if any(host.startswith(p) for p in forbidden_prefixes) or host in ("localhost",):
         raise RuntimeError(f"WEKA endpoint resolves to a forbidden host: {host!r}")
 
