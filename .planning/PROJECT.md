@@ -137,4 +137,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-12 — Phase 24 complete: Settings GUI overhauled — Credential Management section (inline add forms, traffic-light state machine, 2s polling, delete) and WEKA Storage Overview panel (capacity/filesystem/node renderers, 4-state machine, credential selector) delivered (GUI-01..15 all verified)*
+*Last updated: 2026-06-12
