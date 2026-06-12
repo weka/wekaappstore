@@ -967,12 +967,11 @@ async def delete_credential(
     Derived secrets (warp-<name>-*) are never touched (API-04, OPS-08).
     """
     try:
-        load_kube_config()
-
-        # Validate name against DNS-1123 subdomain pattern (T-23-02-04)
+        # Validate first — no I/O on invalid input (matches get_weka_overview pattern)
         if not _CREDENTIAL_NAME_RE.match(name):
             return JSONResponse({"ok": False, "error": "invalid credential name"}, status_code=400)
 
+        load_kube_config()
         ns = namespace.strip() or "default"
         co_api = client.CustomObjectsApi()
         core = client.CoreV1Api()
