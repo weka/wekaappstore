@@ -1,3 +1,4 @@
+{% from '_credential_macros.html' import credential_select, weka_storage_select %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -310,6 +311,9 @@
           <form id="deploy-form" class="space-y-4">
             {# Namespace is resolved from the Home page's selected namespace (localStorage) via syncNamespaceField() on DOMContentLoaded. Kept as a hidden input so the submit handler keeps working without a visible field. #}
             <input type="hidden" id="namespace" name="namespace" value="default" />
+
+            {{ weka_storage_select(credential_field="weka_credential", endpoint_field="weka_endpoint", label="WEKA NeuralMesh") }}
+            {{ credential_select(type="nvidia-ngc", field_name="ngc_credential", label="NVIDIA NGC API Key") }}
 
             <button type="submit" class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium">Deploy Blueprint</button>
             <div id="deploy-result" class="text-xs mt-2"></div>
