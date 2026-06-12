@@ -393,6 +393,9 @@
     refreshAuthStatus();
     setInterval(refreshAuthStatus, 10000);
 
+    // XSS mitigation (WR-04, commit c7ca314) — module-level so all sections can use it
+    const esc = s => (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
     // -------- Blueprint Uninstall --------
     function renderBlueprints(items) {
       const emptyEl = document.getElementById('bp-empty');
@@ -411,7 +414,6 @@
         if (nsA !== 0) return nsA;
         return (a.name||'').localeCompare(b.name||'');
       });
-      const esc = s => (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       for (const it of sorted) {
         const tr = document.createElement('tr');
         tr.innerHTML = `
@@ -487,6 +489,468 @@
         localStorage.setItem('debug.hidePlanningStudio', debugHidePlanningEl.checked ? 'true' : 'false');
       });
     }
+
+    // -------- Credential Management --------
+
+    // Constants (UI-SPEC §Component 6)
+    const DETECTED_NAMESPACE = {{ (detected_namespace or 'default') | tojson }};
+    const POLL_MS = 2000;
+    const POLL_TIMEOUT_MS = 30000;
+    const CREDENTIAL_TYPES = ['nvidia-ngc', 'huggingface', 'weka-storage'];
+
+    // Type metadata: drives inline add form field rendering
+    const TYPE_META = {
+      'nvidia-ngc':   { label: 'NGC',        fields: ['name', 'key'] },
+      'huggingface':  { label: 'HuggingFace', fields: ['name', 'key'] },
+      'weka-storage': { label: 'WEKA',        fields: ['name', 'username', 'key', 'endpoint'] },
+    };
+
+    // Polling state (UI-SPEC §Component 6, PATTERNS §Pattern 6)
+    const pollIntervals = new Map();  // name → intervalId
+    const pollStartedAt = new Map();  // name → ms epoch
+
+    // Tiny truncate helper for red-state error reasons
+    const truncate = (s, n) => (s && s.length > n) ? s.slice(0, n - 1) + '…' : (s || '');
+
+    // ---- renderCredentialRow ----
+    // Replaces the innerHTML of a <li data-cred-name> with the full traffic-light DOM.
+    // cred shape: { name, displayName, ready, error, type, ... }
+    function renderCredentialRow(li, cred) {
+      li.className = 'flex items-center justify-between py-2 border-b border-white/5 last:border-b-0';
+      li.setAttribute('aria-label', 'Credential ' + esc(cred.displayName));
+
+      if (cred.ready === true) {
+        // Green state (GUI-06 — no input fields)
+        li.innerHTML = `
+          <div class="flex items-center gap-2">
+            <span class="status-dot bg-green-500" aria-hidden="true"></span>
+            <span class="text-sm">${esc(cred.displayName)}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full border border-green-500/40 bg-green-500/10 text-green-400" aria-live="polite">Ready</span>
+          </div>
+          <button class="px-3 py-1 rounded-md text-sm border border-red-400/40 text-red-300 hover:bg-red-500/10 focus:outline-none focus:ring-2 focus:ring-[var(--weka-purple)]"
+                  data-cred="${esc(cred.name)}" aria-label="Delete credential ${esc(cred.displayName)}">Delete</button>`;
+        const btn = li.querySelector('button[data-cred]');
+        wireDeleteButton(btn, cred.name, cred.displayName);
+      } else if (cred.ready === false && cred.error) {
+        // Red state (GUI-08)
+        li.innerHTML = `
+          <div class="flex items-center gap-2">
+            <span class="status-dot bg-red-500" aria-hidden="true"></span>
+            <span class="text-sm">${esc(cred.displayName)}</span>
+            <span class="text-red-400 text-xs ml-2" title="${esc(cred.error)}">${esc(truncate(cred.error, 120))}</span>
+          </div>
+          <button class="px-3 py-1 rounded-md text-sm border border-red-400/40 text-red-300 hover:bg-red-500/10 focus:outline-none focus:ring-2 focus:ring-[var(--weka-purple)]"
+                  data-cred="${esc(cred.name)}" aria-label="Delete credential ${esc(cred.displayName)}">Delete</button>`;
+        const btn = li.querySelector('button[data-cred]');
+        wireDeleteButton(btn, cred.name, cred.displayName);
+      } else {
+        // Amber state — no Delete button (UI-SPEC line 156 / GUI-07)
+        li.innerHTML = `
+          <div class="flex items-center gap-2">
+            <span class="status-dot bg-amber-500 animate-pulse" aria-hidden="true"></span>
+            <span class="text-sm">${esc(cred.displayName)}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 text-amber-400" aria-live="polite">Verifying…</span>
+          </div>`;
+      }
+    }
+
+    // ---- wireDeleteButton ----
+    // Attaches the click handler with confirm() + DELETE + fade-out.
+    function wireDeleteButton(btn, name, displayName) {
+      btn.addEventListener('click', async () => {
+        if (!confirm(`Delete credential "${displayName}"? Derived secrets in the cluster will remain — you can delete them manually with kubectl if needed.`)) return;
+        try {
+          const data = await del(`/api/credentials/${encodeURIComponent(name)}`);
+          if (data && data.ok) {
+            const li = btn.closest('li');
+            if (li) {
+              li.style.transition = 'opacity 150ms';
+              li.style.opacity = '0';
+              setTimeout(() => {
+                const ul = li.parentElement;
+                li.remove();
+                // If the list is now empty, restore the empty-state placeholder
+                if (ul && !ul.querySelector('li')) {
+                  const emptyLi = document.createElement('li');
+                  emptyLi.className = 'muted text-sm py-2';
+                  emptyLi.textContent = '(none stored)';
+                  ul.appendChild(emptyLi);
+                }
+              }, 150);
+            }
+          } else {
+            const ul = btn.closest('ul');
+            if (ul) {
+              const errDiv = document.createElement('div');
+              errDiv.className = 'text-xs text-red-400 mt-2';
+              errDiv.textContent = 'Delete failed: ' + (data && data.error ? data.error : 'Unknown error');
+              ul.after(errDiv);
+              setTimeout(() => errDiv.remove(), 5000);
+            }
+          }
+        } catch (err) {
+          const ul = btn.closest('ul');
+          if (ul) {
+            const errDiv = document.createElement('div');
+            errDiv.className = 'text-xs text-red-400 mt-2';
+            errDiv.textContent = 'Delete request failed: ' + err;
+            ul.after(errDiv);
+            setTimeout(() => errDiv.remove(), 5000);
+          }
+        }
+      });
+    }
+
+    // ---- hydrateInitialRows ----
+    // On DOMContentLoaded: fetch all credentials once and reconcile server-rendered placeholders.
+    async function hydrateInitialRows() {
+      let items = [];
+      try {
+        const data = await get(`/api/credentials?namespace=${encodeURIComponent(DETECTED_NAMESPACE)}`);
+        items = (data && data.ok && Array.isArray(data.items)) ? data.items : [];
+      } catch (e) {
+        // Network error — leave server-rendered placeholder text as-is
+        return;
+      }
+
+      const itemByName = new Map(items.map(it => [it.name, it]));
+
+      CREDENTIAL_TYPES.forEach(type => {
+        const ul = document.querySelector(`[data-credential-list="${type}"]`);
+        if (!ul) return;
+
+        // Reconcile existing server-rendered placeholder <li> elements
+        const existingLis = Array.from(ul.querySelectorAll('li[data-cred-name]'));
+        const seenNames = new Set();
+
+        existingLis.forEach(li => {
+          const credName = li.getAttribute('data-cred-name');
+          seenNames.add(credName);
+          const item = itemByName.get(credName);
+          if (item) {
+            renderCredentialRow(li, item);
+          } else {
+            // Backend item no longer present (race: deleted between server-render and JS-load)
+            li.remove();
+          }
+        });
+
+        // Remove empty-state placeholder if we now have real rows
+        if (seenNames.size > 0) {
+          const emptyLi = ul.querySelector('[data-empty-state]');
+          if (emptyLi) emptyLi.remove();
+        }
+
+        // Add rows for items that had no server-rendered placeholder (race: created between render and load)
+        items.filter(it => it.type === type && !seenNames.has(it.name)).forEach(it => {
+          const emptyLi = ul.querySelector('[data-empty-state]');
+          if (emptyLi) emptyLi.remove();
+          const li = document.createElement('li');
+          li.setAttribute('data-cred-name', it.name);
+          ul.appendChild(li);
+          renderCredentialRow(li, it);
+        });
+      });
+
+      // Start polling for any amber rows (ready=false, no error)
+      document.querySelectorAll('li[data-cred-name]').forEach(li => {
+        const name = li.getAttribute('data-cred-name');
+        const item = itemByName.get(name);
+        if (item && item.ready === false && !item.error) {
+          startCredentialPoll(name);
+        }
+      });
+    }
+
+    // ---- closeAllAddForms ----
+    // Collapses any open inline add form across all credential types (single-open invariant).
+    function closeAllAddForms() {
+      document.querySelectorAll('[data-add-form-container]').forEach(container => {
+        container.setAttribute('hidden', '');
+        container.innerHTML = '';
+      });
+    }
+
+    // ---- openAddForm ----
+    // Renders and opens the inline add form for the given credential type.
+    function openAddForm(type) {
+      closeAllAddForms();
+
+      const container = document.querySelector(`[data-add-form-container="${type}"]`);
+      if (!container) return;
+
+      let fieldsHtml = '';
+      if (type === 'weka-storage') {
+        fieldsHtml = `
+          <div>
+            <label for="${type}-name" class="block text-xs font-medium text-white/70 mb-1">Name</label>
+            <input id="${type}-name" name="display_name" type="text" required
+              class="w-full px-3 py-2 rounded-md bg-gray-800/70 border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--weka-purple)] text-sm"
+              placeholder="e.g. weka-prod" />
+          </div>
+          <div>
+            <label for="${type}-username" class="block text-xs font-medium text-white/70 mb-1">Username</label>
+            <input id="${type}-username" name="username" type="text" required
+              class="w-full px-3 py-2 rounded-md bg-gray-800/70 border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--weka-purple)] text-sm"
+              placeholder="WEKA cluster username" />
+          </div>
+          <div>
+            <label for="${type}-key" class="block text-xs font-medium text-white/70 mb-1">API Token</label>
+            <input id="${type}-key" name="key" type="password" required
+              class="w-full px-3 py-2 rounded-md bg-gray-800/70 border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--weka-purple)] text-sm" />
+          </div>
+          <div>
+            <label for="${type}-endpoint" class="block text-xs font-medium text-white/70 mb-1">Endpoint</label>
+            <input id="${type}-endpoint" name="endpoint" type="url" required
+              class="w-full px-3 py-2 rounded-md bg-gray-800/70 border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--weka-purple)] text-sm"
+              placeholder="https://weka-cluster:14000" />
+          </div>`;
+      } else {
+        fieldsHtml = `
+          <div>
+            <label for="${type}-name" class="block text-xs font-medium text-white/70 mb-1">Name</label>
+            <input id="${type}-name" name="display_name" type="text" required
+              class="w-full px-3 py-2 rounded-md bg-gray-800/70 border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--weka-purple)] text-sm"
+              placeholder="e.g. ngc-prod" />
+          </div>
+          <div>
+            <label for="${type}-key" class="block text-xs font-medium text-white/70 mb-1">Key</label>
+            <input id="${type}-key" name="key" type="password" required
+              class="w-full px-3 py-2 rounded-md bg-gray-800/70 border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--weka-purple)] text-sm" />
+          </div>`;
+      }
+
+      container.innerHTML = `
+        <form class="mt-4 p-4 rounded-md bg-white/5 border border-white/10 space-y-3" data-type="${type}">
+          ${fieldsHtml}
+          <div class="flex items-center gap-2 pt-1">
+            <button type="submit"
+              class="btn-purple px-3 py-1.5 rounded-md text-sm font-medium opacity-50 cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[var(--weka-purple)]"
+              disabled>Save</button>
+            <button type="button" data-cancel
+              class="px-3 py-1.5 rounded-md text-sm font-medium border border-white/20 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--weka-purple)]">Cancel</button>
+          </div>
+          <div class="text-xs text-red-400 mt-2" data-form-error hidden></div>
+        </form>`;
+
+      container.removeAttribute('hidden');
+
+      const form = container.querySelector('form');
+
+      // Input validation on every keypress
+      form.querySelectorAll('input[required]').forEach(input => {
+        input.addEventListener('input', () => updateSaveState(form));
+      });
+
+      // Cancel button
+      form.querySelector('[data-cancel]').addEventListener('click', () => closeAllAddForms());
+
+      // Escape key closes form
+      form.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeAllAddForms();
+      });
+
+      // Submit
+      form.addEventListener('submit', e => submitAddForm(e, form, type));
+
+      // Focus first input
+      const firstInput = form.querySelector('input');
+      if (firstInput) firstInput.focus();
+    }
+
+    // ---- updateSaveState ----
+    // Enables/disables Save based on required-field and URL validity checks.
+    function updateSaveState(form) {
+      const saveBtn = form.querySelector('button[type="submit"]');
+      if (!saveBtn) return;
+
+      const inputs = Array.from(form.querySelectorAll('input[required]'));
+      const allFilled = inputs.every(inp => inp.value.trim() !== '');
+
+      const endpointInput = form.querySelector('input[type="url"]');
+      const urlValid = endpointInput ? endpointInput.checkValidity() : true;
+
+      const isDisabled = !allFilled || !urlValid;
+      saveBtn.disabled = isDisabled;
+      saveBtn.classList.toggle('opacity-50', isDisabled);
+      saveBtn.classList.toggle('cursor-not-allowed', isDisabled);
+
+      // Tooltip for WEKA endpoint-invalid sub-case
+      if (endpointInput && endpointInput.value.trim() !== '' && !endpointInput.checkValidity()) {
+        saveBtn.title = 'Endpoint must be a valid URL, e.g. https://weka-cluster:14000';
+      } else {
+        saveBtn.title = '';
+      }
+    }
+
+    // ---- submitAddForm ----
+    // Handles the inline add form submit event.
+    async function submitAddForm(event, form, type) {
+      event.preventDefault();
+      updateSaveState(form);
+      const saveBtn = form.querySelector('button[type="submit"]');
+      if (saveBtn && saveBtn.disabled) return;
+
+      const formData = new FormData(form);
+      formData.append('type', type);
+      formData.append('namespace', DETECTED_NAMESPACE);
+      // display_name comes from the input name="display_name" already in FormData
+
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+        saveBtn.classList.add('opacity-50', 'cursor-not-allowed');
+      }
+
+      const formErrEl = form.querySelector('[data-form-error]');
+      if (formErrEl) formErrEl.setAttribute('hidden', '');
+
+      try {
+        const data = await post('/api/credentials', formData);
+        if (data && data.ok && data.item && data.item.name) {
+          closeAllAddForms();
+
+          const ul = document.querySelector(`[data-credential-list="${type}"]`);
+          if (ul) {
+            // Remove empty-state placeholder if present
+            const emptyLi = ul.querySelector('[data-empty-state]');
+            if (emptyLi) emptyLi.remove();
+
+            // Find or create the <li> for this credential
+            let li = ul.querySelector(`[data-cred-name="${CSS.escape(data.item.name)}"]`);
+            if (!li) {
+              li = document.createElement('li');
+              li.setAttribute('data-cred-name', data.item.name);
+              ul.appendChild(li);
+            }
+
+            renderCredentialRow(li, data.item);
+            startCredentialPoll(data.item.name);
+          }
+        } else {
+          if (formErrEl) {
+            formErrEl.textContent = (data && data.error) ? data.error : 'Save failed. Please try again.';
+            formErrEl.removeAttribute('hidden');
+          }
+          if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save';
+            saveBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+          }
+        }
+      } catch (err) {
+        if (formErrEl) {
+          formErrEl.textContent = 'Request failed: ' + err;
+          formErrEl.removeAttribute('hidden');
+        }
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save';
+          saveBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+      }
+    }
+
+    // ---- startCredentialPoll / stopCredentialPoll / pollCredentialOnce ----
+    function startCredentialPoll(name) {
+      if (pollIntervals.has(name)) return;
+      pollStartedAt.set(name, Date.now());
+      const id = setInterval(() => pollCredentialOnce(name), POLL_MS);
+      pollIntervals.set(name, id);
+    }
+
+    function stopCredentialPoll(name) {
+      const id = pollIntervals.get(name);
+      if (id) clearInterval(id);
+      pollIntervals.delete(name);
+      pollStartedAt.delete(name);
+    }
+
+    async function pollCredentialOnce(name) {
+      const elapsed = Date.now() - (pollStartedAt.get(name) || 0);
+
+      if (elapsed >= POLL_TIMEOUT_MS) {
+        // Timeout — render red with locked copy (UI-SPEC line 279)
+        const li = document.querySelector(`li[data-cred-name="${CSS.escape(name)}"]`);
+        if (li) {
+          renderCredentialRow(li, {
+            name: name,
+            displayName: li.querySelector('.text-sm') ? li.querySelector('.text-sm').textContent : name,
+            ready: false,
+            error: 'Verification timed out. The operator may still be reconciling — refresh the page to recheck.',
+          });
+        }
+        stopCredentialPoll(name);
+        return;
+      }
+
+      try {
+        const data = await get(`/api/credentials?namespace=${encodeURIComponent(DETECTED_NAMESPACE)}`);
+        if (!data || !data.ok || !Array.isArray(data.items)) return;
+
+        const item = data.items.find(it => it.name === name);
+
+        if (!item) {
+          // Externally deleted
+          const li = document.querySelector(`li[data-cred-name="${CSS.escape(name)}"]`);
+          if (li) {
+            li.style.transition = 'opacity 150ms';
+            li.style.opacity = '0';
+            setTimeout(() => {
+              const ul = li.parentElement;
+              li.remove();
+              if (ul && !ul.querySelector('li[data-cred-name]')) {
+                const emptyLi = document.createElement('li');
+                emptyLi.className = 'muted text-sm py-2';
+                emptyLi.textContent = '(none stored)';
+                ul.appendChild(emptyLi);
+              }
+            }, 150);
+          }
+          stopCredentialPoll(name);
+          return;
+        }
+
+        if (item.ready === true) {
+          const li = document.querySelector(`li[data-cred-name="${CSS.escape(name)}"]`);
+          if (li) renderCredentialRow(li, item);
+          stopCredentialPoll(name);
+        } else if (item.error) {
+          const li = document.querySelector(`li[data-cred-name="${CSS.escape(name)}"]`);
+          if (li) renderCredentialRow(li, item);
+          stopCredentialPoll(name);
+        }
+        // else still amber — keep polling
+      } catch (e) {
+        // Network failure — keep amber, retry next tick (UI-SPEC line 261)
+      }
+    }
+
+    // Page Visibility API — pause/resume polling (UI-SPEC line 267)
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        pollIntervals.forEach(clearInterval);
+      } else {
+        Array.from(pollIntervals.keys()).forEach(name => {
+          const id = setInterval(() => pollCredentialOnce(name), POLL_MS);
+          pollIntervals.set(name, id);
+        });
+      }
+    });
+
+    // Clear all intervals on page unload (UI-SPEC line 346)
+    window.addEventListener('beforeunload', () => { pollIntervals.forEach(clearInterval); });
+
+    // ---- Wire-up on DOMContentLoaded ----
+    document.addEventListener('DOMContentLoaded', () => {
+      // Wire [+ Add] buttons
+      document.querySelectorAll('[data-add-form]').forEach(btn => {
+        btn.addEventListener('click', () => openAddForm(btn.getAttribute('data-add-form')));
+      });
+
+      // Hydrate server-rendered rows and start polling for amber rows
+      hydrateInitialRows();
+    });
   </script>
 </body>
 </html>
