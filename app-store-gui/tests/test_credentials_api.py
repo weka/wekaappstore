@@ -703,3 +703,65 @@ def test_get_credentials_by_type_filters_non_ready(monkeypatch):
     result = asyncio.run(main._get_credentials_by_type("default"))
     assert len(result["weka-storage"]) == 1
     assert len(result["nvidia-ngc"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# blueprint_detail context injection tests (Plan 25-01, Task 2)
+# ---------------------------------------------------------------------------
+
+def _make_blueprint_detail_stubs(monkeypatch):
+    """Patch all external calls needed for blueprint_detail route tests."""
+    sentinel = {"nvidia-ngc": [{"name": "test-ngc"}], "huggingface": [], "weka-storage": []}
+
+    monkeypatch.setattr(main, "get_auth_status", lambda: {"details": {"namespace": "test-ns"}})
+    monkeypatch.setattr(main, "get_cluster_status", lambda: {"cpu_nodes": 1, "gpu_nodes": 0})
+    monkeypatch.setattr(main, "_get_credentials_by_type", lambda ns: sentinel)
+    return sentinel
+
+
+def test_blueprint_detail_injects_credentials_by_type(monkeypatch):
+    """Test 2: blueprint_detail template context contains credentials_by_type key."""
+    sentinel = _make_blueprint_detail_stubs(monkeypatch)
+    request_stub = SimpleNamespace(
+        headers={}, cookies={}, query_params={}, url=SimpleNamespace(path="/blueprint/openfold"),
+        scope={"type": "http"},
+    )
+    response = asyncio.run(main.blueprint_detail(request_stub, name="openfold"))
+    assert hasattr(response, "context"), "TemplateResponse should have .context attribute"
+    assert "credentials_by_type" in response.context
+    assert response.context["credentials_by_type"] is sentinel
+
+
+def test_blueprint_detail_falls_back_to_default_namespace(monkeypatch):
+    """Test 4: When get_auth_status returns {}, _get_credentials_by_type is called with 'default'."""
+    called_with = []
+
+    def capture_ns(ns):
+        called_with.append(ns)
+        return {"nvidia-ngc": [], "huggingface": [], "weka-storage": []}
+
+    monkeypatch.setattr(main, "get_auth_status", lambda: {})
+    monkeypatch.setattr(main, "get_cluster_status", lambda: {"cpu_nodes": 1, "gpu_nodes": 0})
+    monkeypatch.setattr(main, "_get_credentials_by_type", capture_ns)
+
+    request_stub = SimpleNamespace(
+        headers={}, cookies={}, query_params={}, url=SimpleNamespace(path="/blueprint/openfold"),
+        scope={"type": "http"},
+    )
+    asyncio.run(main.blueprint_detail(request_stub, name="openfold"))
+    assert called_with == ["default"], f"Expected ['default'], got {called_with}"
+
+
+def test_blueprint_detail_preserves_existing_context_keys(monkeypatch):
+    """Test 5: All pre-existing context keys remain present after adding credentials_by_type."""
+    sentinel = _make_blueprint_detail_stubs(monkeypatch)
+    request_stub = SimpleNamespace(
+        headers={}, cookies={}, query_params={}, url=SimpleNamespace(path="/blueprint/openfold"),
+        scope={"type": "http"},
+    )
+    response = asyncio.run(main.blueprint_detail(request_stub, name="openfold"))
+    ctx = response.context
+    for key in ("request", "name", "yaml_path", "status", "requirements", "meets",
+                "oss_img_b64", "aidp_img_b64", "logo_b64", "glocomp_logo_b64",
+                "tokenvisor_logo_b64", "tokenvisor_arch_b64"):
+        assert key in ctx, f"Missing expected context key: {key}"
