@@ -315,7 +315,7 @@
             {{ weka_storage_select(credential_field="weka_credential", endpoint_field="weka_endpoint", label="WEKA NeuralMesh") }}
             {{ credential_select(type="nvidia-ngc", field_name="ngc_credential", label="NVIDIA NGC API Key") }}
 
-            <button type="submit" class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium">Deploy Blueprint</button>
+            <button type="submit" disabled class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium opacity-50 cursor-not-allowed">Deploy Blueprint (coming soon)</button>
             <div id="deploy-result" class="text-xs mt-2"></div>
           </form>
 
