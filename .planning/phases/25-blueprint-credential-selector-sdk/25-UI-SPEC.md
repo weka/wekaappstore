@@ -1,10 +1,11 @@
 ---
 phase: 25
 slug: blueprint-credential-selector-sdk
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-06-12
+reviewed_at: 2026-06-12
 ---
 
 # Phase 25 — UI Design Contract
