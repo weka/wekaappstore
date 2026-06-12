@@ -1276,7 +1276,7 @@ async def blueprint_detail(request: Request, name: str):
         # "neuralmesh-aidp": os.path.join("Production Deployments", "neuralmesh-aidp.yaml"),
     }
     yaml_path = app_map.get(name)
-    status = get_cluster_status()
+    status = await asyncio.to_thread(get_cluster_status)
     # If there is no YAML mapped for this blueprint, use safe defaults
     reqs = infer_requirements_from_yaml(yaml_path) if yaml_path else {"cpu_nodes": 1, "gpu_nodes": 0}
     meets = {
