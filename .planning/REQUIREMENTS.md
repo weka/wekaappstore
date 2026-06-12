@@ -30,21 +30,21 @@
 
 ### GUI
 
-- [ ] **GUI-01**: Settings page restructured so the Credential Management section appears first, above Kubernetes Auth Status, Cluster Status, Blueprint Management, and Debug sections
-- [ ] **GUI-02**: Credential Management section shows three sub-sections: NVIDIA NGC API Keys, HuggingFace Tokens, WEKA Storage API Tokens — each with a list of stored credentials and a `[+ Add]` button
-- [ ] **GUI-03**: `[+ Add]` expands an inline form at the bottom of that type's list; only one add-form is open at a time per credential type
-- [ ] **GUI-04**: Add form for NGC and HuggingFace: required `Name` (free-text display name) and required `Key` (password input, `type="password"`)
-- [ ] **GUI-05**: Add form for WEKA Storage: required `Name`, required `Username` (WEKA API user account), required `API Token` (`type="password"`), required `Endpoint` (URL input, client-side URL validation before Save is enabled)
-- [ ] **GUI-06**: Green state (operator confirmed ready): credential row shows display name + `[●] Ready` + `[Delete]` button — no input fields visible
-- [ ] **GUI-07**: Amber state (transitional): row shows `[◐] Verifying...` — polls every 2 seconds, times out after 30 seconds with inline error
-- [ ] **GUI-08**: Red state (operator reported error): row shows display name + error reason + `[Delete]` button
-- [ ] **GUI-09**: `[Delete]` button sends `DELETE /api/credentials/<name>`; row disappears from the list; derived secrets remain in cluster (not deleted)
-- [ ] **GUI-10**: WEKA Storage Overview panel appears below Credential Management when at least one `weka-storage` credential is registered; hidden with a "No WEKA credential configured" hint otherwise
-- [ ] **GUI-11**: Overview panel header: credential dropdown (if multiple WEKA credentials — replaced by static label if only one), `[↺ Refresh]` button, "Last updated" timestamp showing actual data age (not page-load time)
-- [ ] **GUI-12**: Overview panel capacity row: Total / Used / Available in human-readable TiB/GiB, with a percentage utilisation bar
-- [ ] **GUI-13**: Overview panel filesystem table: human-readable `name` only (no UUIDs), columns Total / Used / Utilisation, sorted descending by utilisation; filesystems ≥ 90% utilisation render bar in amber/orange; max 20 rows with "Show all" toggle if more exist
-- [ ] **GUI-14**: Overview panel backend node grid: count header, primary management IP per node in a wrapped grid (no hostname resolution, no loopback/link-local addresses)
-- [ ] **GUI-15**: Overview panel states: no credential → hint with link; loading → spinner; WEKA API error → error message only, no stale data; success → full panel
+- [x] **GUI-01**: Settings page restructured so the Credential Management section appears first, above Kubernetes Auth Status, Cluster Status, Blueprint Management, and Debug sections
+- [x] **GUI-02**: Credential Management section shows three sub-sections: NVIDIA NGC API Keys, HuggingFace Tokens, WEKA Storage API Tokens — each with a list of stored credentials and a `[+ Add]` button
+- [x] **GUI-03**: `[+ Add]` expands an inline form at the bottom of that type's list; only one add-form is open at a time per credential type
+- [x] **GUI-04**: Add form for NGC and HuggingFace: required `Name` (free-text display name) and required `Key` (password input, `type="password"`)
+- [x] **GUI-05**: Add form for WEKA Storage: required `Name`, required `Username` (WEKA API user account), required `API Token` (`type="password"`), required `Endpoint` (URL input, client-side URL validation before Save is enabled)
+- [x] **GUI-06**: Green state (operator confirmed ready): credential row shows display name + `[●] Ready` + `[Delete]` button — no input fields visible
+- [x] **GUI-07**: Amber state (transitional): row shows `[◐] Verifying...` — polls every 2 seconds, times out after 30 seconds with inline error
+- [x] **GUI-08**: Red state (operator reported error): row shows display name + error reason + `[Delete]` button
+- [x] **GUI-09**: `[Delete]` button sends `DELETE /api/credentials/<name>`; row disappears from the list; derived secrets remain in cluster (not deleted)
+- [x] **GUI-10**: WEKA Storage Overview panel appears below Credential Management when at least one `weka-storage` credential is registered; hidden with a "No WEKA credential configured" hint otherwise
+- [x] **GUI-11**: Overview panel header: credential dropdown (if multiple WEKA credentials — replaced by static label if only one), `[↺ Refresh]` button, "Last updated" timestamp showing actual data age (not page-load time)
+- [x] **GUI-12**: Overview panel capacity row: Total / Used / Available in human-readable TiB/GiB, with a percentage utilisation bar
+- [x] **GUI-13**: Overview panel filesystem table: human-readable `name` only (no UUIDs), columns Total / Used / Utilisation, sorted descending by utilisation; filesystems ≥ 90% utilisation render bar in amber/orange; max 20 rows with "Show all" toggle if more exist
+- [x] **GUI-14**: Overview panel backend node grid: count header, primary management IP per node in a wrapped grid (no hostname resolution, no loopback/link-local addresses)
+- [x] **GUI-15**: Overview panel states: no credential → hint with link; loading → spinner; WEKA API error → error message only, no stale data; success → full panel
 
 ### API
 
@@ -114,21 +114,21 @@
 | OPS-07 | Phase 22 | Complete |
 | OPS-08 | Phase 22 | Complete |
 | OPS-09 | Phase 22 | Complete |
-| GUI-01 | Phase 24 | Pending |
-| GUI-02 | Phase 24 | Pending |
-| GUI-03 | Phase 24 | Pending |
-| GUI-04 | Phase 24 | Pending |
-| GUI-05 | Phase 24 | Pending |
-| GUI-06 | Phase 24 | Pending |
-| GUI-07 | Phase 24 | Pending |
-| GUI-08 | Phase 24 | Pending |
-| GUI-09 | Phase 24 | Pending |
-| GUI-10 | Phase 24 | Pending |
-| GUI-11 | Phase 24 | Pending |
-| GUI-12 | Phase 24 | Pending |
-| GUI-13 | Phase 24 | Pending |
-| GUI-14 | Phase 24 | Pending |
-| GUI-15 | Phase 24 | Pending |
+| GUI-01 | Phase 24 | Complete |
+| GUI-02 | Phase 24 | Complete |
+| GUI-03 | Phase 24 | Complete |
+| GUI-04 | Phase 24 | Complete |
+| GUI-05 | Phase 24 | Complete |
+| GUI-06 | Phase 24 | Complete |
+| GUI-07 | Phase 24 | Complete |
+| GUI-08 | Phase 24 | Complete |
+| GUI-09 | Phase 24 | Complete |
+| GUI-10 | Phase 24 | Complete |
+| GUI-11 | Phase 24 | Complete |
+| GUI-12 | Phase 24 | Complete |
+| GUI-13 | Phase 24 | Complete |
+| GUI-14 | Phase 24 | Complete |
+| GUI-15 | Phase 24 | Complete |
 | API-01 | Phase 23 | Complete |
 | API-02 | Phase 23 | Complete |
 | API-03 | Phase 23 | Complete |

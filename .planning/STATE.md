@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: Secret Management & WEKA Storage Integration
-status: executing
+status: ready_to_plan
 stopped_at: Phase 24 UI-SPEC approved
 last_updated: "2026-06-12T01:08:01.375Z"
 last_activity: 2026-06-12 -- Phase 24 execution started
 progress:
   total_phases: 14
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 19
   completed_plans: 16
-  percent: 84
+  percent: 50
 ---
 
 # Project State
@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-05-06 — milestone v5.0 started)
 
 ## Current Position
 
-Phase: 24 (settings-gui-overhaul) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 24
-Last activity: 2026-06-12 -- Phase 24 execution started
+Phase: 25
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-06-12
 
 ## Accumulated Context
 
