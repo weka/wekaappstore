@@ -1262,20 +1262,57 @@ async def list_storage_classes():
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+def parse_x_variables(yaml_text: str) -> dict:
+    """Extract the x-variables schema block from raw blueprint YAML text. Returns {} on any parse failure."""
+    if not yaml_text:
+        return {}
+    try:
+        data = yaml.safe_load(yaml_text)
+        if not isinstance(data, dict):
+            return {}
+        x_vars = data.get("x-variables")
+        if not isinstance(x_vars, dict):
+            return {}
+        return x_vars
+    except Exception:
+        return {}
+
+
+def find_blueprint(app_name: str, blueprints_dir: str = None) -> Optional[str]:
+    """Scan BLUEPRINTS_DIR for a blueprint YAML file with an x-variables block matching app_name. Returns absolute path or None."""
+    if blueprints_dir is None:
+        blueprints_dir = BLUEPRINTS_DIR
+    # Special case: cluster-init always maps to its fixed path
+    if app_name == "cluster-init":
+        return os.path.join(blueprints_dir, "cluster_init", "app-store-cluster-init.yaml")
+    if not blueprints_dir or not os.path.isdir(blueprints_dir):
+        return None
+    try:
+        for root, _dirs, files in os.walk(blueprints_dir):
+            for filename in files:
+                if not (filename.endswith(".yaml") or filename.endswith(".yml")):
+                    continue
+                filepath = os.path.join(root, filename)
+                try:
+                    with open(filepath, "r") as f:
+                        text = f.read()
+                except Exception:
+                    continue
+                schema = parse_x_variables(text)
+                if not schema:
+                    continue
+                stem = os.path.splitext(filename)[0]
+                parent_dir = os.path.basename(root)
+                if stem == app_name or parent_dir == app_name:
+                    return os.path.abspath(filepath)
+    except Exception:
+        return None
+    return None
+
+
 @app.get("/blueprint/{name}", response_class=HTMLResponse)
 async def blueprint_detail(request: Request, name: str):
-    # Map known apps to their YAML manifests if available. Unknown names are allowed to render
-    # a template page (per-blueprint) even if there is no YAML yet.
-    app_map = {
-        "oss-rag": os.path.join(BLUEPRINTS_DIR, "oss-rag", "oss-rag-stack.yaml"),
-        "nvidia-rag": os.path.join("Production Deployments", "nvidia-rag.yaml"),
-        "nvidia-vss": os.path.join("Production Deployments", "nvidia-vss.yaml"),
-        "cluster-init": os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml"),
-        # Wire OpenFold to its blueprint manifest folder so Deploy works
-        "openfold": os.path.join(BLUEPRINTS_DIR, "openfold-protein", "openfold-stack.yaml"),
-        # "neuralmesh-aidp": os.path.join("Production Deployments", "neuralmesh-aidp.yaml"),
-    }
-    yaml_path = app_map.get(name)
+    yaml_path = find_blueprint(name)
     status = await asyncio.to_thread(get_cluster_status)
     # If there is no YAML mapped for this blueprint, use safe defaults
     reqs = infer_requirements_from_yaml(yaml_path) if yaml_path else {"cpu_nodes": 1, "gpu_nodes": 0}
@@ -1319,6 +1356,14 @@ async def blueprint_detail(request: Request, name: str):
     ns = detected_ns or "default"
     credentials_by_type = await _get_credentials_by_type(ns)
 
+    variable_schema: dict = {}
+    if yaml_path and os.path.isfile(yaml_path):
+        try:
+            with open(yaml_path, "r") as _f:
+                variable_schema = parse_x_variables(_f.read())
+        except Exception:
+            variable_schema = {}
+
     return templates.TemplateResponse(
         request,
         use_template,
@@ -1336,6 +1381,8 @@ async def blueprint_detail(request: Request, name: str):
             "tokenvisor_logo_b64": TOKENVISOR_LOGO_B64,
             "tokenvisor_arch_b64": TOKENVISOR_ARCH_B64,
             "credentials_by_type": credentials_by_type,
+            "variable_schema": variable_schema,
+            "available_creds": credentials_by_type,
         },
     )
 

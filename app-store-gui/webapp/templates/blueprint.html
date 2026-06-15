@@ -145,37 +145,77 @@
         <div class="card rounded-lg p-6">
           <h2 class="text-lg font-semibold mb-3">Configure</h2>
           <form id="deploy-form" class="space-y-4">
+            <!-- Namespace field (always present, read-only) -->
             <div>
-              <label class="block text-sm mb-1" for="namespace">Namespace</label>
-              <input id="namespace" name="namespace" placeholder="default" value="default" readonly
-                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400 cursor-not-allowed opacity-80" title="Namespace is managed from the main page" />
+              <label class="block text-sm mb-1" for="field-namespace">Namespace</label>
+              <input id="field-namespace" name="namespace" placeholder="default" value="default" readonly
+                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400 cursor-not-allowed opacity-80"
+                     title="Namespace is managed from the main page" />
               <div class="muted text-xs mt-1">Namespace is managed from the main page (Home).</div>
             </div>
 
-            <div>
-              <label class="block text-sm mb-1" for="storageClass">Storage Class</label>
-              <select id="storageClass" name="storageClass"
-                      class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400">
-                <option value="">Select a StorageClass...</option>
-              </select>
-              <div class="muted text-xs mt-1">Choose from available Kubernetes StorageClasses.</div>
-            </div>
+            <!-- Dynamic fields from x-variables schema -->
+            {% if variable_schema %}
+              {% set ns_creds_missing = [] %}
+              {% for var_name, var_meta in variable_schema.items() %}
+                {% if var_name == "namespace" %}
+                  {# namespace is always rendered above as a fixed field; skip here #}
+                {% elif var_meta.get("type") == "credential" %}
+                  {% set ctype = var_meta.get("credential_type", "") %}
+                  {% set creds = available_creds.get(ctype, []) %}
+                  {% if var_meta.get("required") and not creds %}
+                    {% set _ = ns_creds_missing.append(ctype) %}
+                  {% endif %}
+                  <div>
+                    <label class="block text-sm mb-1" for="field-{{ var_name }}">
+                      {{ var_meta.get("description") or (var_name | replace("_", " ") | title) }}
+                    </label>
+                    {% if creds %}
+                      <select id="field-{{ var_name }}" name="{{ var_name }}"
+                              {% if var_meta.get("required") %}required{% endif %}
+                              class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400">
+                        {% for cred in creds %}
+                          <option value="{{ cred.name }}">{{ cred.displayName }}</option>
+                        {% endfor %}
+                      </select>
+                    {% else %}
+                      <p class="text-sm muted">No {{ ctype | replace("-", " ") }} credential configured.
+                        <a href="/settings#credentials" class="text-yellow-400 underline hover:text-white">Add one in Settings.</a>
+                      </p>
+                    {% endif %}
+                    {% if var_meta.get("description") %}
+                      <div class="muted text-xs mt-1">{{ var_meta.get("description") }}</div>
+                    {% endif %}
+                  </div>
+                {% else %}
+                  <div>
+                    <label class="block text-sm mb-1" for="field-{{ var_name }}">
+                      {{ var_meta.get("description") or (var_name | replace("_", " ") | title) }}
+                    </label>
+                    <input id="field-{{ var_name }}" name="{{ var_name }}"
+                           placeholder="{{ var_meta.get('placeholder', '') }}"
+                           {% if var_meta.get("required") %}required{% endif %}
+                           class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                    {% if var_meta.get("description") %}
+                      <div class="muted text-xs mt-1">{{ var_meta.get("description") }}</div>
+                    {% endif %}
+                  </div>
+                {% endif %}
+              {% endfor %}
 
-            <div>
-              <label class="block text-sm mb-1" for="vllmChatModel">vLLM Chat Model</label>
-              <input id="vllmChatModel" name="vllmChatModel" placeholder="e.g. meta-llama/Meta-Llama-3-8B-Instruct" 
-                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-              <div class="muted text-xs mt-1">Enter the chat model identifier to use with vLLM.</div>
-            </div>
+              {% if ns_creds_missing %}
+                <div class="rounded-md p-3 text-sm" style="background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3);">
+                  Missing required credentials: {{ ns_creds_missing | join(", ") }}.
+                  <a href="/settings#credentials" class="text-yellow-400 underline hover:text-white">Add them in Settings</a> before deploying.
+                </div>
+              {% endif %}
+            {% endif %}
 
-            <div>
-              <label class="block text-sm mb-1" for="vllmEmbedModel">vLLM Embedding Model</label>
-              <input id="vllmEmbedModel" name="vllmEmbedModel" placeholder="e.g. intfloat/e5-mistral-7b-instruct" 
-                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-              <div class="muted text-xs mt-1">Enter the embedding model identifier to use with vLLM.</div>
-            </div>
-
-            <button type="submit" class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium">Deploy Blueprint</button>
+            <button type="submit" id="deploy-btn"
+                    {% if not variable_schema %}disabled title="Blueprint has no x-variables schema"{% endif %}
+                    class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+              Deploy Blueprint
+            </button>
             <div id="deploy-result" class="text-xs mt-2"></div>
           </form>
 
@@ -198,76 +238,65 @@
       return saved && saved.trim() ? saved.trim() : null;
     }
     async function syncNamespaceField() {
-      const nsInput = document.getElementById('namespace');
+      const nsInput = document.getElementById('field-namespace');
       if (!nsInput) return 'default';
-      // Try saved selection first
       let ns = resolveNamespaceSync();
       if (!ns) {
         try {
           const data = await get('/auth-status');
           ns = (data && data.details && data.details.namespace) ? String(data.details.namespace) : null;
-          if (ns) {
-            // If nothing saved, persist for cross-page usage
-            if (!localStorage.getItem('selectedNamespace')) {
-              localStorage.setItem('selectedNamespace', ns);
-            }
+          if (ns && !localStorage.getItem('selectedNamespace')) {
+            localStorage.setItem('selectedNamespace', ns);
           }
-        } catch (_) { /* ignore */ }
+        } catch (_) {}
       }
       if (!ns) ns = 'default';
       nsInput.value = ns;
       return ns;
     }
 
-    // Initialize namespace on load
     document.addEventListener('DOMContentLoaded', async () => {
-      const ns = await syncNamespaceField();
-      // Populate storage classes
-      try {
-        const data = await get('/storage-classes');
-        const sel = document.getElementById('storageClass');
-        if (sel && data && data.ok && Array.isArray(data.items)) {
-          sel.innerHTML = '<option value="">Select a StorageClass...</option>' +
-            data.items.map(n => `<option value="${n}">${n}</option>`).join('');
-          // Try to auto-select a previously chosen value
-          const saved = localStorage.getItem('selectedStorageClass');
-          if (saved && data.items.includes(saved)) sel.value = saved;
-        }
-      } catch (_) { /* ignore */ }
+      await syncNamespaceField();
+      // Disable deploy button if required credentials are missing
+      const missingCreds = {{ ns_creds_missing | tojson }};
+      if (missingCreds.length > 0) {
+        const btn = document.getElementById('deploy-btn');
+        if (btn) btn.disabled = true;
+      }
     });
 
     const form = document.getElementById('deploy-form');
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const ns = (document.getElementById('namespace').value || (await syncNamespaceField()) || 'default');
+      const ns = (document.getElementById('field-namespace').value || (await syncNamespaceField()) || 'default');
       const resEl = document.getElementById('deploy-result');
       const progressEl = document.getElementById('progress');
       const listEl = document.getElementById('progress-list');
 
-      // Reset UI
       resEl.textContent = 'Starting deployment...';
       listEl.innerHTML = '';
       progressEl.classList.remove('hidden');
 
-      const sc = (document.getElementById('storageClass').value || '').trim();
-      const chatModel = (document.getElementById('vllmChatModel').value || '').trim();
-      const embedModel = (document.getElementById('vllmEmbedModel').value || '').trim();
-      if (sc) localStorage.setItem('selectedStorageClass', sc);
-      const params = new URLSearchParams({ app_name: '{{ name }}', namespace: ns });
-      if (sc) params.append('storage_class', sc);
-      // Send new parameters (backend keeps backward-compatibility)
-      if (chatModel) params.append('vllm_chat_model', chatModel);
-      if (embedModel) params.append('vllm_embed_model', embedModel);
+      // Collect all named form inputs into a variables dict
+      const formData = new FormData(form);
+      const variables = {};
+      for (const [key, value] of formData.entries()) {
+        if (key !== 'namespace') variables[key] = value.trim();
+      }
+      variables['namespace'] = ns;
+
+      const params = new URLSearchParams({
+        app_name: '{{ name }}',
+        variables: JSON.stringify(variables),
+      });
       const url = `/deploy-stream?${params.toString()}`;
       const es = new EventSource(url);
 
       let currentIndex = -1;
-
       es.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
           if (msg.type === 'init') {
-            // Render items
             listEl.innerHTML = '';
             (msg.items || []).forEach((item, idx) => {
               const li = document.createElement('li');
@@ -278,7 +307,6 @@
             });
             resEl.textContent = 'Applying manifest to cluster...';
           } else if (msg.type === 'progress') {
-            // Update highlight
             if (currentIndex >= 0) {
               const prev = listEl.querySelector(`li[data-idx="${currentIndex}"]`);
               if (prev) prev.className = 'px-3 py-2 rounded border border-white/10 bg-gray-800/40';
@@ -287,7 +315,6 @@
             const cur = listEl.querySelector(`li[data-idx="${currentIndex}"]`);
             if (cur) cur.className = 'px-3 py-2 rounded border border-yellow-400 bg-yellow-500/10 text-yellow-300';
           } else if (msg.type === 'complete') {
-            // Mark all as done
             listEl.querySelectorAll('li').forEach(li => {
               li.className = 'px-3 py-2 rounded border border-green-500/60 bg-green-500/10 text-green-300';
             });
@@ -302,7 +329,6 @@
           es.close();
         }
       };
-
       es.onerror = () => {
         resEl.textContent = 'Stream connection error.';
         es.close();
