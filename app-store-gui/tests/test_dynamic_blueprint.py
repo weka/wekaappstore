@@ -388,3 +388,143 @@ def test_post_deploy_uses_find_blueprint():
     source = _inspect.getsource(main.deploy)
     assert "app_map" not in source, "POST /deploy must not contain a local app_map dict"
     assert "find_blueprint" in source, "POST /deploy must call find_blueprint"
+
+
+# ---------------------------------------------------------------------------
+# Integration tests for schema-validation flow (Task 2 — tests 11-15)
+# ---------------------------------------------------------------------------
+
+def test_deploy_stream_validates_required_variables(tmp_path, monkeypatch):
+    """Test 11: Required variable missing causes SSE error; apply not called."""
+    yaml_content = (
+        "x-variables:\n"
+        "  storage_class:\n"
+        "    type: string\n"
+        "    required: true\n"
+        '    description: "StorageClass name"\n'
+        "\n"
+        "apiVersion: warp.io/v1alpha1\n"
+        "kind: WekaAppStore\n"
+        "metadata:\n"
+        "  name: test-required\n"
+        "  namespace: default\n"
+        "spec:\n"
+        "  appStack:\n"
+        "    components: []\n"
+    )
+    bp_file = tmp_path / "test-required.yaml"
+    bp_file.write_text(yaml_content)
+
+    monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
+    apply_called = []
+    monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", lambda *a, **kw: apply_called.append(True) or {"applied": []})
+
+    async def run():
+        request = _make_request_stub()
+        resp = await main.deploy_stream(request, app_name="test-required", variables=_json.dumps({"storage_class": ""}))
+        events = await _collect_sse(resp)
+        error_events = [e for e in events if e.get("type") == "error"]
+        assert error_events, f"Expected error event, got: {events}"
+        assert "storage_class" in error_events[0]["message"]
+        assert "Required variable missing" in error_events[0]["message"]
+        assert not apply_called, "apply must NOT be called when required variable is empty"
+
+    asyncio.run(run())
+
+
+def test_deploy_stream_optional_variables_pass_validation(tmp_path, monkeypatch):
+    """Test 12: Optional variable missing does NOT cause error."""
+    yaml_content = (
+        "x-variables:\n"
+        "  namespace:\n"
+        "    type: string\n"
+        "    required: true\n"
+        "  storage_class:\n"
+        "    type: string\n"
+        "    required: false\n"
+        '    description: "Optional StorageClass"\n'
+        "\n"
+        "apiVersion: warp.io/v1alpha1\n"
+        "kind: WekaAppStore\n"
+        "metadata:\n"
+        "  name: test-optional\n"
+        "  namespace: [[namespace]]\n"
+        "spec:\n"
+        "  appStack:\n"
+        "    components: []\n"
+    )
+    bp_file = tmp_path / "test-optional.yaml"
+    bp_file.write_text(yaml_content)
+
+    monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
+    monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", lambda *a, **kw: {"applied": []})
+
+    async def run():
+        request = _make_request_stub()
+        # namespace provided, storage_class absent (optional)
+        resp = await main.deploy_stream(request, app_name="test-optional", variables=_json.dumps({"namespace": "test-ns"}))
+        events = await _collect_sse(resp)
+        req_errors = [e for e in events if e.get("type") == "error" and "Required variable missing" in e.get("message", "")]
+        assert not req_errors, f"Optional missing var must not cause error, got: {req_errors}"
+
+    asyncio.run(run())
+
+
+def test_deploy_stream_cluster_init_exemption(tmp_path, monkeypatch):
+    """Test 13: cluster-init bypasses required-field validation entirely."""
+    yaml_content = (
+        "x-variables:\n"
+        "  storage_class:\n"
+        "    type: string\n"
+        "    required: true\n"
+        "\n"
+        "apiVersion: warp.io/v1alpha1\n"
+        "kind: WekaAppStore\n"
+        "metadata:\n"
+        "  name: cluster-init\n"
+        "  namespace: default\n"
+        "spec:\n"
+        "  appStack:\n"
+        "    components: []\n"
+    )
+    bp_file = tmp_path / "app-store-cluster-init.yaml"
+    bp_file.write_text(yaml_content)
+
+    monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
+    monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", lambda *a, **kw: {"applied": []})
+
+    async def run():
+        request = _make_request_stub()
+        # storage_class is required in schema but cluster-init is exempt
+        resp = await main.deploy_stream(request, app_name="cluster-init", variables=_json.dumps({"namespace": "default"}))
+        events = await _collect_sse(resp)
+        req_errors = [e for e in events if e.get("type") == "error" and "Required variable missing" in e.get("message", "")]
+        assert not req_errors, f"cluster-init must bypass required-field validation, got: {req_errors}"
+
+    asyncio.run(run())
+
+
+def test_ai_research_fixture_has_x_variables():
+    """Test 14: parse_x_variables on ai-research.yaml returns non-empty dict."""
+    fixture_path = os.path.join(
+        os.path.dirname(__file__),
+        "../../mcp-server/tests/fixtures/sample_blueprints/ai-research.yaml"
+    )
+    with open(fixture_path, "r") as f:
+        content = f.read()
+    schema = main.parse_x_variables(content)
+    assert schema, f"ai-research.yaml must have a non-empty x-variables block, got: {schema}"
+    assert isinstance(schema, dict)
+
+
+def test_data_pipeline_fixture_has_x_variables():
+    """Test 15: parse_x_variables on data-pipeline.yaml returns non-empty dict."""
+    fixture_path = os.path.join(
+        os.path.dirname(__file__),
+        "../../mcp-server/tests/fixtures/sample_blueprints/data-pipeline.yaml"
+    )
+    with open(fixture_path, "r") as f:
+        content = f.read()
+    schema = main.parse_x_variables(content)
+    assert schema, f"data-pipeline.yaml must have a non-empty x-variables block, got: {schema}"
+    assert isinstance(schema, dict)
