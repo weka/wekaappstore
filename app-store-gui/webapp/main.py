@@ -1389,16 +1389,7 @@ async def blueprint_detail(request: Request, name: str):
 
 @app.post("/deploy")
 async def deploy(app_name: str = Form(...), namespace: str = Form("default")):
-    # Map app names to yaml paths
-    app_map = {
-        "oss-rag": os.path.join(BLUEPRINTS_DIR, "oss-rag", "oss-rag-stack.yaml"),
-        "nvidia-rag": os.path.join("Production Deployments", "nvidia-rag.yaml"),
-        "nvidia-vss": os.path.join("Production Deployments", "nvidia-vss.yaml"),
-        "cluster-init": os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml"),
-        # OpenFold deployment mapping
-        "openfold": os.path.join(BLUEPRINTS_DIR, "openfold-protein", "openfold-stack.yaml"),
-    }
-    yaml_path = app_map.get(app_name)
+    yaml_path = find_blueprint(app_name)
     if not yaml_path:
         return JSONResponse({"ok": False, "error": "Unknown app"}, status_code=400)
 
@@ -2300,16 +2291,7 @@ def get_blueprint_components(file_path: str) -> List[str]:
 async def deploy_stream(
     request: Request,
     app_name: Optional[str] = None,
-    namespace: str = "default",
-    storage_class: Optional[str] = None,
-    vllm_chat_model: Optional[str] = None,
-    vllm_embed_model: Optional[str] = None,
-    # Backward-compat param: previously used single vllm_model
-    vllm_model: Optional[str] = None,
-    # New OpenFold-specific configurable parameters
-    weka_cluster_filesystem: Optional[str] = None,
-    openfold_storage_capacity: Optional[str] = None,
-    deployment_name: Optional[str] = None,
+    variables: str = "{}",
 ):
     """Server-Sent Events stream that emits deployment progress for a blueprint.
 
@@ -2319,43 +2301,47 @@ async def deploy_stream(
     - {type: 'complete', ok: true, result: {...}}
     - {type: 'error', message: '...'}
     """
-    app_map = {
-        "oss-rag": os.path.join(BLUEPRINTS_DIR, "oss-rag", "oss-rag-stack.yaml"),
-        "nvidia-rag": os.path.join("Production Deployments", "nvidia-rag.yaml"),
-        "nvidia-vss": os.path.join("Production Deployments", "nvidia-vss.yaml"),
-        "cluster-init": os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml"),
-        # OpenFold deployment mapping
-        "openfold": os.path.join(BLUEPRINTS_DIR, "openfold-protein", "openfold-stack.yaml"),
-    }
-    yaml_path = app_map.get(app_name)
-
-    # For cluster-init, use provided namespace but default to "default" if empty
-    if app_name == "cluster-init" and not namespace:
-        namespace = "default"
-
     def sse_event(payload: Dict[str, Any]) -> str:
         return f"data: {json.dumps(payload)}\n\n"
 
     async def event_generator():
-        # Normalize incoming parameters: trim whitespace and convert empty strings to None
-        def _norm(val: Optional[str]) -> Optional[str]:
-            if isinstance(val, str):
-                v = val.strip()
-                return v if v else None
-            return val
+        # Parse variables JSON
+        try:
+            user_vars = json.loads(variables)
+        except (json.JSONDecodeError, ValueError):
+            yield sse_event({"type": "error", "message": "Invalid variables JSON"})
+            return
 
-        norm_storage_class = _norm(storage_class)
-        norm_chat_model = _norm(vllm_chat_model)
-        norm_embed_model = _norm(vllm_embed_model)
-        norm_legacy_model = _norm(vllm_model)
-        norm_weka_fs = _norm(weka_cluster_filesystem)
-        norm_of_capacity = _norm(openfold_storage_capacity)
-        norm_deploy_name = _norm(deployment_name)
-
-        # Validate app
+        # Locate blueprint via dynamic discovery
+        yaml_path = find_blueprint(app_name)
         if not yaml_path:
             yield sse_event({"type": "error", "message": "Unknown app"})
             return
+
+        # Extract namespace from variables dict; default to "default" if absent or empty
+        namespace = str(user_vars.get("namespace", "default") or "default").strip() or "default"
+
+        # For cluster-init, ensure namespace defaults to "default"
+        if app_name == "cluster-init" and not namespace:
+            namespace = "default"
+
+        # Required-field validation (cluster-init is exempt)
+        if app_name != "cluster-init":
+            if not os.path.isabs(yaml_path):
+                schema_path = os.path.join(PROJECT_ROOT, yaml_path)
+            else:
+                schema_path = yaml_path
+            try:
+                with open(schema_path, "r") as _sf:
+                    raw_schema_text = _sf.read()
+            except Exception:
+                raw_schema_text = ""
+            schema = parse_x_variables(raw_schema_text)
+            for var_name, meta in schema.items():
+                if meta.get("required") and not str(user_vars.get(var_name, "") or "").strip():
+                    yield sse_event({"type": "error", "message": f"Required variable missing: {var_name}"})
+                    return
+
         # Initial items
         items = get_blueprint_components(yaml_path)
         yield sse_event({
@@ -2391,33 +2377,14 @@ async def deploy_stream(
             else:
                 bp_path = yaml_path
 
-            with open(bp_path, 'r') as f:
+            with open(bp_path, "r") as f:
                 raw_tpl = f.read()
 
             # Use custom Jinja2 delimiters for variables to avoid clashing with Argo's {{ }} placeholders
             # Only change variable delimiters; keep block/comment delimiters default
-            env = Environment(variable_start_string='[[', variable_end_string=']]')
+            env = Environment(variable_start_string="[[", variable_end_string="]]")
             template = env.from_string(raw_tpl)
-            
-            # For cluster-init, we use the provided namespace (defaulting to 'default')
-            render_ns = namespace or "default"
-            
-            # Backward compatibility: if old vllm_model is provided but new chat model is empty,
-            # treat it as the chat model.
-            chat_model_var = norm_chat_model or norm_legacy_model or None
-            rendered = template.render(
-                namespace=render_ns,
-                storage_class=norm_storage_class,
-                # New variables
-                vllm_chat_model=chat_model_var,
-                vllm_embed_model=norm_embed_model,
-                # Legacy variable kept for existing templates
-                vllm_model=chat_model_var,
-                # OpenFold-specific variables
-                weka_cluster_filesystem=norm_weka_fs,
-                openfold_storage_capacity=norm_of_capacity,
-                deployment_name=norm_deploy_name,
-            )
+            rendered = template.render(**user_vars)
 
             # Apply manifest with namespace overrides using rendered content
             logger.info(
