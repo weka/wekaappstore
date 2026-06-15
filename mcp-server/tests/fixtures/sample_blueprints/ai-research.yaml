@@ -1,3 +1,14 @@
+x-variables:
+  namespace:
+    type: string
+    required: true
+    description: "Target Kubernetes namespace for the AI research stack"
+  storage_class:
+    type: string
+    required: false
+    description: "Kubernetes StorageClass for vector database volumes"
+    placeholder: "e.g. weka-storageclass"
+
 apiVersion: warp.io/v1alpha1
 kind: WekaAppStore
 metadata:
