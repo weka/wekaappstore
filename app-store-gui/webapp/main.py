@@ -1262,6 +1262,54 @@ async def list_storage_classes():
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+def parse_x_variables(yaml_text: str) -> dict:
+    """Extract the x-variables schema block from raw blueprint YAML text. Returns {} on any parse failure."""
+    if not yaml_text:
+        return {}
+    try:
+        data = yaml.safe_load(yaml_text)
+        if not isinstance(data, dict):
+            return {}
+        x_vars = data.get("x-variables")
+        if not isinstance(x_vars, dict):
+            return {}
+        return x_vars
+    except Exception:
+        return {}
+
+
+def find_blueprint(app_name: str, blueprints_dir: str = None) -> Optional[str]:
+    """Scan BLUEPRINTS_DIR for a blueprint YAML file with an x-variables block matching app_name. Returns absolute path or None."""
+    if blueprints_dir is None:
+        blueprints_dir = BLUEPRINTS_DIR
+    # Special case: cluster-init always maps to its fixed path
+    if app_name == "cluster-init":
+        return os.path.join(blueprints_dir, "cluster_init", "app-store-cluster-init.yaml")
+    if not blueprints_dir or not os.path.isdir(blueprints_dir):
+        return None
+    try:
+        for root, _dirs, files in os.walk(blueprints_dir):
+            for filename in files:
+                if not (filename.endswith(".yaml") or filename.endswith(".yml")):
+                    continue
+                filepath = os.path.join(root, filename)
+                try:
+                    with open(filepath, "r") as f:
+                        text = f.read()
+                except Exception:
+                    continue
+                schema = parse_x_variables(text)
+                if not schema:
+                    continue
+                stem = os.path.splitext(filename)[0]
+                parent_dir = os.path.basename(root)
+                if stem == app_name or parent_dir == app_name:
+                    return os.path.abspath(filepath)
+    except Exception:
+        return None
+    return None
+
+
 @app.get("/blueprint/{name}", response_class=HTMLResponse)
 async def blueprint_detail(request: Request, name: str):
     # Map known apps to their YAML manifests if available. Unknown names are allowed to render
