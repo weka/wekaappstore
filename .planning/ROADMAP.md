@@ -8,6 +8,7 @@
 - ✅ **v4.0 App Categories on Home Screen** - Phase 15 (shipped 2026-04-21)
 - 🔜 **v5.0 AppStack Variable Substitution** - Phases 16-20
 - 🔜 **v6.0 Secret Management & WEKA Storage Integration** - Phases 21-25
+- 🔜 **v7.0 Dynamic Blueprint System** - Phase 26
 
 ## Phases
 
@@ -51,6 +52,12 @@ See MILESTONES.md for full v2.0 summary.
 - [x] **Phase 18: Operator Wiring and Docs** — Wire `render()` into `handle_appstack_deployment` and `load_values_from_reference`; key-name validation; fetch-error upgrade; `field='spec'` guard; user-facing README section (completed 2026-05-08)
 - [ ] **Phase 19: Validator Soft-Warning and Portable Fixture** — Validator accepts `variables:` block without error; soft-warns on hardcoded DNS / `namespace:` literals; `ai-research-portable.yaml` fixture
 - [ ] **Phase 20: AIDP Migration Smoke Test** — Follow-up PR in separate `aidp` repo; end-to-end cluster verification that feature works in production
+
+### v7.0 Dynamic Blueprint System
+
+**Milestone Goal:** Blueprint YAML files become self-describing via an `x-variables` metadata block. The GUI scans `BLUEPRINTS_DIR` at request time to discover blueprints automatically, renders a single generic install form from the schema, and the deploy route accepts a generic variable dict validated against the schema. Credential-type variables link directly to registered WarpCredentials — no `main.py` code change is required to add a new blueprint with new variables.
+
+- [ ] **Phase 26: Dynamic Blueprint Discovery and Self-Describing Variable Schema** — Blueprint YAML declares its own `x-variables` schema; GUI scans BLUEPRINTS_DIR to discover blueprints; one generic `blueprint.html` renders form fields and credential dropdowns dynamically; hardcoded `app_map` and per-variable function params removed
 
 ### v6.0 Secret Management & WEKA Storage Integration
 
@@ -315,6 +322,22 @@ Plans:
 **Wave 2** *(depends on Plans 25-01 and 25-02)*
 - [x] 25-03-PLAN.md — `test_credential_macros.py`: helper grouping/dropping/error-fallback tests (`ApiException`/`ConnectionError`/`TimeoutError`) + `blueprint_detail` context injection + namespace fallback tests (SDK-04, SDK-05 validation)
 
+### Phase 26: Dynamic Blueprint Discovery and Self-Describing Variable Schema
+**Goal**: Blueprint YAML files with an `x-variables` block are discovered automatically from `BLUEPRINTS_DIR`; a single generic `blueprint.html` renders the install form dynamically from the schema; `type: credential` variables render WarpCredential dropdowns; the deploy route accepts all variables as a generic dict; no `main.py` or template change is required when a new blueprint is added
+**Depends on**: Phase 25 (WarpCredential + `_get_credentials_by_type()` must be in place)
+**Requirements**: DYN-01, DYN-02, DYN-03, DYN-04, DYN-05, DYN-06, DYN-07, DYN-08
+**Success Criteria** (what must be TRUE):
+  1. Adding a new YAML file with an `x-variables` block to `BLUEPRINTS_DIR` causes it to appear on the blueprint install page with correct form fields — zero changes to `main.py` or any template file required
+  2. A blueprint variable with `type: credential` and `credential_type: huggingface` renders a `<select>` populated from `_get_credentials_by_type()["huggingface"]`; no ready credentials renders a link to `/settings`
+  3. The `/deploy-stream` route accepts `variables` as a JSON string dict, validates all `required: true` fields are present and non-empty before applying, and substitutes them into the blueprint template via `[[var]]` Jinja2 rendering
+  4. Hardcoded `app_map` dict and the per-variable positional params (`storage_class`, `vllm_chat_model`, `vllm_embed_model`, `vllm_model`, `weka_cluster_filesystem`, `openfold_storage_capacity`, `deployment_name`) are removed from `main.py`
+  5. Existing blueprints (`oss-rag`, `openfold`, `nvidia-vss`) are migrated to `x-variables` format and continue to deploy correctly
+**Plans:** 2 plans
+
+Plans:
+- [ ] 26-01-PLAN.md — `x-variables` schema parser, blueprint discovery scan, generic `/blueprint/{app_name}` route, and generic `blueprint.html` template
+- [ ] 26-02-PLAN.md — Generic `/deploy-stream` route with schema validation, migration of existing blueprints to `x-variables` format, and integration tests
+
 ## Progress
 
 **Execution Order:** 11 → 12 → 13 → 14 → 15 → 16 → 17 → 18 → 19 → 20
@@ -344,3 +367,4 @@ v6.0 Execution Order: 21 → 22 → 23 → 24/25 (Phases 24 and 25 can be develo
 | 23. Backend Credentials API and WEKA Overview Proxy | v6.0 | 4/4 | Complete    | 2026-06-11 |
 | 24. Settings GUI Overhaul | v6.0 | 3/3 | Complete    | 2026-06-12 |
 | 25. Blueprint Credential Selector SDK | v6.0 | 3/3 | Complete    | 2026-06-12 |
+| 26. Dynamic Blueprint Discovery and Self-Describing Variable Schema | v7.0 | 0/TBD | Not started | - |
