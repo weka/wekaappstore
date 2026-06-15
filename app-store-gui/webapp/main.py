@@ -1312,18 +1312,7 @@ def find_blueprint(app_name: str, blueprints_dir: str = None) -> Optional[str]:
 
 @app.get("/blueprint/{name}", response_class=HTMLResponse)
 async def blueprint_detail(request: Request, name: str):
-    # Map known apps to their YAML manifests if available. Unknown names are allowed to render
-    # a template page (per-blueprint) even if there is no YAML yet.
-    app_map = {
-        "oss-rag": os.path.join(BLUEPRINTS_DIR, "oss-rag", "oss-rag-stack.yaml"),
-        "nvidia-rag": os.path.join("Production Deployments", "nvidia-rag.yaml"),
-        "nvidia-vss": os.path.join("Production Deployments", "nvidia-vss.yaml"),
-        "cluster-init": os.path.join(BLUEPRINTS_DIR, "cluster_init", "app-store-cluster-init.yaml"),
-        # Wire OpenFold to its blueprint manifest folder so Deploy works
-        "openfold": os.path.join(BLUEPRINTS_DIR, "openfold-protein", "openfold-stack.yaml"),
-        # "neuralmesh-aidp": os.path.join("Production Deployments", "neuralmesh-aidp.yaml"),
-    }
-    yaml_path = app_map.get(name)
+    yaml_path = find_blueprint(name)
     status = await asyncio.to_thread(get_cluster_status)
     # If there is no YAML mapped for this blueprint, use safe defaults
     reqs = infer_requirements_from_yaml(yaml_path) if yaml_path else {"cpu_nodes": 1, "gpu_nodes": 0}
@@ -1367,6 +1356,14 @@ async def blueprint_detail(request: Request, name: str):
     ns = detected_ns or "default"
     credentials_by_type = await _get_credentials_by_type(ns)
 
+    variable_schema: dict = {}
+    if yaml_path and os.path.isfile(yaml_path):
+        try:
+            with open(yaml_path, "r") as _f:
+                variable_schema = parse_x_variables(_f.read())
+        except Exception:
+            variable_schema = {}
+
     return templates.TemplateResponse(
         request,
         use_template,
@@ -1384,6 +1381,8 @@ async def blueprint_detail(request: Request, name: str):
             "tokenvisor_logo_b64": TOKENVISOR_LOGO_B64,
             "tokenvisor_arch_b64": TOKENVISOR_ARCH_B64,
             "credentials_by_type": credentials_by_type,
+            "variable_schema": variable_schema,
+            "available_creds": credentials_by_type,
         },
     )
 
