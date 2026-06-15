@@ -143,11 +143,46 @@
 | SDK-04 | Phase 25 | Complete |
 | SDK-05 | Phase 25 | Complete |
 
+| DYN-01 | Phase 26 | Not started |
+| DYN-02 | Phase 26 | Not started |
+| DYN-03 | Phase 26 | Not started |
+| DYN-04 | Phase 26 | Not started |
+| DYN-05 | Phase 26 | Not started |
+| DYN-06 | Phase 26 | Not started |
+| DYN-07 | Phase 26 | Not started |
+| DYN-08 | Phase 26 | Not started |
+
 **Coverage:**
-- v1 requirements: 38 total
-- Mapped to phases: 38
+- v1 requirements: 38 total (v6.0)
+- v7.0 requirements: 8 total
+- Mapped to phases: 46
 - Unmapped: 0 ✓
 
 ---
+
+## v7.0 Requirements — Dynamic Blueprint System
+
+### Blueprint Discovery
+
+- **DYN-01**: Any YAML file containing an `x-variables` top-level block placed in `BLUEPRINTS_DIR` is discoverable by the GUI on the next request — no restart, no code change, no config entry required
+- **DYN-02**: The `x-variables` block supports the following per-variable metadata fields: `type` (`string` | `credential`), `required` (bool), `description` (string), `placeholder` (string, optional)
+
+### Dynamic Form Rendering
+
+- **DYN-03**: A single generic `blueprint.html` Jinja2 template renders the install form by looping the `x-variables` schema; it replaces all per-blueprint HTML templates for the install flow
+- **DYN-04**: A variable with `type: credential` and a `credential_type` field renders as a `<select>` dropdown populated from ready WarpCredentials of that type; when no ready credentials exist, a link to `/settings` is shown instead
+
+### Generic Deploy Route
+
+- **DYN-05**: The `/deploy-stream` route accepts all variable values as a JSON string dict (`variables` query param); it validates that all `required: true` variables are non-empty before attempting to render or apply the blueprint
+- **DYN-06**: The hardcoded `app_map` dict and all per-variable positional function parameters (`storage_class`, `vllm_chat_model`, `vllm_embed_model`, `vllm_model`, `weka_cluster_filesystem`, `openfold_storage_capacity`, `deployment_name`) are removed from `main.py`
+
+### Blueprint Migration
+
+- **DYN-07**: All existing blueprint YAML files that use `[[var]]` placeholders (`oss-rag-stack.yaml`, `openfold-stack.yaml`, any nvidia blueprint) are migrated to include a correct `x-variables` block declaring every placeholder variable they use
+- **DYN-08**: Blueprint install pages surface a pre-flight credential check: if a `type: credential` variable has no ready credentials of the required type, the Install button is disabled and a message directs the user to `/settings`
+
+---
 *Requirements defined: 2026-06-11*
+*v7.0 requirements added: 2026-06-15*
 *Last updated: 2026-06-11 after v6.0 milestone start*
