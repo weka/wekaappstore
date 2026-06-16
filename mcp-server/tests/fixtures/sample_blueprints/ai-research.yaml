@@ -13,14 +13,14 @@ apiVersion: warp.io/v1alpha1
 kind: WekaAppStore
 metadata:
   name: ai-research
-  namespace: ai-platform
+  namespace: [[ namespace ]]
 spec:
   appStack:
     components:
       - name: vector-db
         enabled: true
         depends_on: []
-        target_namespace: ai-platform
+        target_namespace: [[ namespace ]]
         helm_chart:
           repository: https://charts.qdrant.tech
           name: qdrant
@@ -38,7 +38,7 @@ spec:
         enabled: true
         depends_on:
           - vector-db
-        target_namespace: ai-platform
+        target_namespace: [[ namespace ]]
         helm_chart:
           repository: https://charts.example.io
           name: research-api
