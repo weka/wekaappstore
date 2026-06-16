@@ -1,5 +1,30 @@
 # Milestones
 
+## v7.0 Secret Management, WEKA Storage Integration & Dynamic Blueprint System (Shipped: 2026-06-17)
+
+**Phases completed:** 6 phases (21-26), 18 plans
+**Timeline:** 2026-06-11 → 2026-06-17 (6 days, 176 commits)
+**Files changed:** 95 | +21,355 / -576 lines
+**Requirements delivered:** 45/46 — CRD-01..06, OPS-01..09, GUI-01..15, API-01..08, SDK-01..05, DYN-01..06, DYN-08; DYN-07 Partial (external repo)
+**Archive:** `.planning/milestones/v7.0-ROADMAP.md`
+
+**Note:** Encompasses both v6.0 (Secret Management, Phases 21-25) and v7.0 (Dynamic Blueprint System, Phase 26) — archived together as a continuous sprint.
+
+**Key accomplishments:**
+- `WarpCredential` CRD with typed schema, enum admission validation (`nvidia-ngc` | `huggingface` | `weka-storage`), status subresource, namespace-scoped RBAC for operator secret management
+- Operator reconciler auto-derives type-specific secrets: NGC → API key + docker pull secret; HuggingFace → token; WEKA Storage → username/token/endpoint; idempotent with kopf status conditions
+- `/api/credentials` CRUD REST API + `/api/weka/overview` proxy (60s server-side cache, `?bust=1` bypass); legacy `/api/secret/{nvidia,huggingface}` endpoints retired
+- Settings page overhaul: Credential Management section (3 types, inline add forms, traffic-light states polling every 2s), WEKA Storage Overview panel (capacity bar, filesystem table, backend IP grid)
+- `_credential_macros.html` Jinja2 macro SDK (`credential_select` + `weka_storage_select` with `warpSyncEndpoint` JS); `_get_credentials_by_type` helper auto-injected into all blueprint template contexts
+- Dynamic blueprint discovery: `parse_x_variables` + `find_blueprint` scanner + generic `blueprint.html`; `/deploy-stream` refactored to generic `variables` JSON dict; hardcoded `app_map` and all 7 per-variable positional params removed from `main.py`
+
+**Tech debt captured:**
+- DYN-07 production blueprint migration (oss-rag, openfold, nvidia) deferred to external `warp-blueprints` repo
+- v3.1 E2E chat validation still deferred (see `.planning/v3.0-KNOWN-ISSUES.md`)
+- v5.0 Phases 19-20 (Validator Soft-Warning, AIDP Migration Smoke Test) unstarted
+
+---
+
 ## v4.0 App Categories on Home Screen (Shipped: 2026-04-21)
 
 **Phases completed:** 1 phase (Phase 15), 3 plans, 8 tasks

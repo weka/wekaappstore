@@ -90,18 +90,59 @@
 
 ---
 
+## Milestone: v7.0 — Secret Management, WEKA Storage Integration & Dynamic Blueprint System
+
+**Shipped:** 2026-06-17
+**Phases:** 6 (21-26) | **Plans:** 18 | **Commits:** 176 | **Files:** 95 changed (+21,355/-576)
+
+### What Was Built
+- `WarpCredential` CRD with typed schema, enum admission validation, status subresource; namespace-scoped RBAC for operator secret management
+- Operator reconciler: per-type secret derivation (NGC API key + docker pull secret, HuggingFace token, WEKA username/token/endpoint), idempotent, no key values in logs
+- `/api/credentials` CRUD + `/api/weka/overview` proxy (60s cache); Settings page overhaul with per-type credential lists (traffic-light states, inline add forms) and WEKA Storage Overview panel
+- `_credential_macros.html` Jinja2 SDK auto-injected into all blueprint template contexts; `credential_select` and `weka_storage_select` macros
+- Dynamic blueprint discovery: `parse_x_variables` + `find_blueprint` + generic `blueprint.html`; `/deploy-stream` generic variables dict; `app_map` fully removed
+
+### What Worked
+- **Wave-based execution within phases** — Plans 21-02, 22-01 through 22-03, 23-01 through 23-04 completed with clean wave barriers; no merge conflicts across same-file plans
+- **Gap closure plan (26-03)** identified 2 critical issues (500 bug, silent variable discard) from the code review and closed them atomically — a clean model for handling review findings post-execution
+- **Verification-driven development** — VERIFICATION.md written before gap closure confirmed which issues were real vs. already fixed; avoided wasted fix work
+- **Single REQUIREMENTS.md spanning both v6.0 and v7.0** — worked well as a living document; the traceability table was the canonical "done" signal throughout
+
+### What Was Inefficient
+- **STATE.md went stale** — after completing v6.0 Phase 25, state was never updated when Phase 26 started; the `milestone_complete` status for v6.0 persisted while v7.0 work was in flight. Progress check had to infer state from artifacts rather than STATE.md.
+- **ROADMAP plans count was wrong** — Phase 26 was listed as "2 plans" but shipped with 3; and traceability table showed DYN-01..08 as "Not started" even after Phase 26 verification passed. Traceability updates need to happen at plan completion time, not just at milestone close.
+- **Two milestones in one REQUIREMENTS.md** — the v7.0 DYN requirements appended to the v6.0 REQUIREMENTS.md was pragmatic but made milestone boundary ambiguous; prompted a "which version?" question at close.
+
+### Patterns Established
+- **`parse_x_variables` returns `{}` on all failure paths** — graceful degradation for schema errors is the right default for user-facing blueprint discovery
+- **`[[var]]` for user-facing substitution vs `${VAR}` for operator substitution** — prevents namespace collision between the two substitution systems in the same YAML
+- **Code review → VERIFICATION.md → gap closure plan** — the three-step review cycle (CR-01 critical → verify confirms → 26-03 fixes) is the right pattern for non-trivial plan gaps
+
+### Key Lessons
+1. **Update STATE.md milestone/status at phase transition boundaries** — stale status caused confusion at milestone close; `status: milestone_complete` should only be set once the REQUIREMENTS.md is also archived
+2. **ROADMAP plan counts and traceability table must be updated at plan completion** — not retroactively at milestone close; stale "0/TBD" and "Not started" rows made the progress report misleading
+3. **Single REQUIREMENTS.md per milestone** — when a second milestone starts, create a new REQUIREMENTS.md rather than appending v7.0 requirements to a v6.0 file
+
+### Cost Observations
+- Model mix: sonnet for all agent roles throughout
+- 6-day sprint: multiple sessions across 176 commits
+- Wave-based parallelism was the main throughput driver; phases with 3-4 plans in waves completed roughly 2× faster than sequential phases
+
+---
+
 ## Cross-Milestone Trends
 
-| Metric | v2.0 | v4.0 |
-|--------|------|------|
-| Phases | 5 | 1 |
-| Plans | 11 | 3 |
-| Tests | 103 | 0 (frontend — grep invariants + visual verify) |
-| LOC | 4,628 | +162 / -56 (single file) |
-| Audit defects | 3 (all fixed) | 0 |
-| Audit re-check | passed | passed (first pass) |
-| Timeline | ~50 min exec + surrounding work | ~1h40min end-to-end |
+| Metric | v2.0 | v4.0 | v7.0 |
+|--------|------|------|------|
+| Phases | 5 | 1 | 6 |
+| Plans | 11 | 3 | 18 |
+| Tests | 103 | 0 (grep invariants) | operator + GUI + blueprint tests |
+| LOC delta | 4,628 new | +162/-56 (single file) | +21,355/-576 (95 files) |
+| Verification gaps | 3 (all fixed) | 0 | 2 critical (both fixed in 26-03) |
+| Verification re-check | passed | passed (first pass) | passed (re-verification after gap closure) |
+| Timeline | ~50 min exec | ~1h40min end-to-end | 6 days, 176 commits |
 
 **Trend notes:**
-- v4.0 was dramatically tighter in scope than v2.0 — single-file frontend vs. multi-module Python server. The GSD pipeline compressed accordingly (1 phase, 3 plans, no test files).
-- Grep-level invariants replaced traditional test coverage for v4.0 because the codebase has no frontend test harness. This worked well for a tightly-scoped single-file change; won't scale to larger UI work.
+- v7.0 was the largest milestone yet — 6 phases spanning CRD/operator/API/GUI/SDK/dynamic-discovery. Wave-based execution per phase kept individual plan complexity manageable.
+- The "code review → verification → gap closure plan" three-step cycle appeared for the first time in v7.0 (Phase 26) — a pattern worth standardizing for non-trivial phases.
+- STATE.md staleness is a recurring issue now (v4.0 CLI bugs, v7.0 manual stale status). Consider a lightweight "status sync" step at every phase boundary.

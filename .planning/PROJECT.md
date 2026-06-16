@@ -10,37 +10,31 @@ The primary users are platform users and cluster admins who interact with OpenCl
 
 OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
 
-## Current Milestone: v6.0 Secret Management & WEKA Storage Integration
+## Current State (after v7.0)
 
-**Goal:** Give App Store administrators a first-class credential management system — named, multi-key storage for NGC/HuggingFace/WEKA credentials via a new `WarpCredential` CRD, automatic secret derivation by the operator, a blueprint Jinja2 macro SDK for credential selection, and live WEKA storage visibility on the Settings page.
-
-**Source PRD:** `.planning/PRD-secret-management-overhaul.md`
-
-**Target features:**
-- `WarpCredential` CRD (multi-instance, one CR per named credential, types: `nvidia-ngc` / `huggingface` / `weka-storage`)
-- Operator reconciler: NGC docker pull secret + Opaque API key auto-derivation per credential; WEKA token/endpoint/username storage
-- Settings GUI overhaul: Credential Management section at top, per-type multi-key lists, traffic-light status (red=add / green=delete), amber transitional state
-- Blueprint Credential Selector SDK: `_credential_macros.html` Jinja2 macro library (`credential_select`, `weka_storage_select`) + `GET /api/credentials?type=<t>` REST endpoint
-- WEKA Storage Overview panel: cluster capacity bar, filesystem table (human-readable names, utilisation, ≥90% amber), backend node IP grid, multi-cluster selector, 60s cache + refresh
-- Retire old `/api/secret/nvidia` + `/api/secret/huggingface` endpoints
-- Conditionals, loops, full template engines (Jinja, Go templates)
-- Cross-component variable references
-- External variable sources (Vault, env vars, AWS Secrets Manager)
-- Substitution into `spec.appStack.components[].dependsOn` arrays
-- Backward-incompatible changes — existing CRs without `variables:` MUST behave identically
-
-## Current State (after v4.0)
-
-v4.0 shipped 2026-04-21. v3.1 deferred E2E chat work remains tracked separately (see `.planning/v3.0-KNOWN-ISSUES.md`).
+v7.0 shipped 2026-06-17. v3.1 deferred E2E chat work remains tracked separately (see `.planning/v3.0-KNOWN-ISSUES.md`).
 
 **What's shipped end-to-end:**
 - 8-tool MCP server (`mcp-server/`, v2.0) with flat agent-friendly JSON responses, 103 tests, Dockerfile, CI/CD to `wekachrisjen/weka-app-store-mcp`
 - SKILL.md defining the 12-step agent workflow (v2.0)
 - OpenClaw/NemoClaw deployed to EKS GPU node via agent-sandbox CRD (v3.0) — infrastructure functional, E2E chat deferred to v3.1
 - Kubernetes manifest set: dedicated RBAC, SKILL.md ConfigMap, MCP sidecar wiring, init-container-generated openclaw.json, git-sync blueprint catalog (v3.0)
-- WEKA App Store home page with 3-card category filter row (AIDP, WARP, Partner) above the catalog grid, URL hash deep-link support, full keyboard accessibility, mobile responsive (v4.0)
+- WEKA App Store home page with 3-card category filter row (AIDP, WARP, Partner), URL hash deep-link support, keyboard accessibility, mobile responsive (v4.0)
+- `render()` helper + `spec.appStack.variables` CRD field for single-pass `${VAR}` substitution in manifests and valuesFiles; pre-scan backward-compat guard (v5.0, Phases 16-18)
+- `WarpCredential` CRD + operator reconciler: NGC docker pull secret + API key, HuggingFace token, WEKA username/token/endpoint auto-derived per credential; idempotent (v6.0)
+- `/api/credentials` CRUD REST API + `/api/weka/overview` proxy (60s cache); Settings page Credential Management + WEKA Storage Overview panel; `_credential_macros.html` SDK auto-injected into all blueprint templates (v6.0)
+- Dynamic blueprint discovery: `parse_x_variables` + `find_blueprint` scanner + generic `blueprint.html`; `/deploy-stream` accepts generic `variables` JSON dict; hardcoded `app_map` fully removed (v7.0)
+
+**Codebase size (2026-06-17):**
+- `app-store-gui/webapp/main.py`: 2,409 lines Python
+- `operator_module/main.py`: 1,701 lines Python
+- `mcp-server/server.py`: 57 lines (tools registered in `mcp-server/tools/`)
+- Total test suite: 103+ MCP tests + operator tests + GUI credential API tests + dynamic blueprint tests
 
 ## Recent Milestones
+
+**v7.0 Secret Management, WEKA Storage Integration & Dynamic Blueprint System — Shipped 2026-06-17**
+6 phases (21-26), 18 plans, 95 files changed, +21,355 / -576 lines. `WarpCredential` CRD + operator + GUI credential management + WEKA overview panel + blueprint macro SDK + dynamic blueprint discovery with self-describing `x-variables` schema. `app_map` fully removed; blueprints are now zero-code-change extensible.
 
 **v4.0 App Categories on Home Screen — Shipped 2026-04-21**
 Single-file frontend feature: 3-card category filter (AIDP=1 app, WARP=4, Partner=0) above the App Catalog grid, URL hash deep-links, keyboard a11y, mobile responsive. Delivered in 1 phase / 3 plans / ~1h40min in `app-store-gui/webapp/templates/index.html`. All 14 requirements (CAT/FIL/VIS/URL/A11Y) verified. No new dependencies, no build step.
@@ -71,10 +65,18 @@ Infrastructure delivered: HTTP transport, EKS deployment via agent-sandbox CRD, 
 - ✓ OpenClaw/NemoClaw deployed to EKS GPU node via experimental agent-sandbox CRD — v3.0 (NCLAW-01, NCLAW-03)
 - ✓ Kubernetes manifest set with dedicated RBAC, SKILL.md ConfigMap, MCP sidecar wiring, init-container-generated openclaw.json, git-sync blueprint catalog — v3.0 (K8S-01..05, NCLAW-02, NCLAW-04)
 - ✓ Three top-level app categories (AIDP, WARP, Partner) as selectable filter cards on the home screen with URL hash deep-links, keyboard a11y, mobile responsive — v4.0 (CAT-01..03, FIL-01..03, VIS-01..02, URL-01..03, A11Y-01..03)
+- ✓ `render()` helper with pre-scan backward-compat guard; `spec.appStack.variables` CRD field; operator wiring into `handle_appstack_deployment` + `load_values_from_reference`; `${namespace}` auto-default; key validation; README docs — v5.0 Phases 16-18 (OP-01..12, CRD-01..03, TST-01..05, DOC-01..06)
+- ✓ `WarpCredential` CRD (multi-instance, typed schema, status subresource); namespace-scoped operator RBAC; per-type secret derivation (NGC: API key + docker pull, HuggingFace: token, WEKA: username/token/endpoint); idempotent reconciler — v6.0 Phases 21-22 (CRD-01..06, OPS-01..09)
+- ✓ `/api/credentials` CRUD REST API + `/api/weka/overview` proxy (60s cache, `?bust=1`); legacy `/api/secret/{nvidia,huggingface}` retired; Settings page Credential Management + WEKA Storage Overview panel — v6.0 Phases 23-24 (API-01..08, GUI-01..15)
+- ✓ `_credential_macros.html` Jinja2 SDK (`credential_select` + `weka_storage_select`); `_get_credentials_by_type` helper auto-injected into all blueprint template contexts — v6.0 Phase 25 (SDK-01..05)
+- ✓ Dynamic blueprint discovery (`parse_x_variables` + `find_blueprint`); generic `blueprint.html`; `/deploy-stream` generic `variables` JSON dict; `app_map` and all per-variable positional params removed — v7.0 Phase 26 (DYN-01..06, DYN-08; DYN-07 Partial)
 
 ### Active
 
-v6.0 Secret Management & WEKA Storage Integration — requirements being defined. See `.planning/REQUIREMENTS.md` and `.planning/PRD-secret-management-overhaul.md` for the source PRD.
+- [ ] v3.1 E2E Chat Validation — inspect tool `load_incluster_config`, init container config gap, NIM model reliability, OpenClaw upgrade (see `.planning/v3.0-KNOWN-ISSUES.md`)
+- [ ] v5.0 Phase 19: Validator Soft-Warning — MCP `validate_yaml` soft-warns on hardcoded DNS / namespace literals; portable fixture
+- [ ] v5.0 Phase 20: AIDP Migration Smoke Test — separate `aidp` repo; end-to-end cluster verification
+- [ ] DYN-07 complete: Migrate production blueprints (`oss-rag-stack.yaml`, `openfold-stack.yaml`, nvidia blueprints) in external `warp-blueprints` repo to `x-variables` format
 
 ### Out of Scope
 
@@ -118,6 +120,11 @@ OpenClaw connects via WebSocket Gateway, uses OpenAI-compatible model API, and r
 | Single React root (PRD Option A) for v4.0 Categories feature | Lifting `ThemeProvider` out of `Catalog` into a new `AppShell` keeps both category cards and catalog grid under one theme provider, shares `selectedCategory` state via plain `useState` (no context needed for 2 consumers), preserves single-file CDN-React constraint | ✓ Good — shipped v4.0 in 1h40min; zero new deps; all 5 critical pitfalls mitigated via grep-level verification |
 | No count Chip on category cards in v4.0 | Deferred to v4.1 polish milestone to keep v4.0 scope tight and ship in one session | ✓ Good — cleanly deferred; worth reconsidering if catalog grows beyond 5 items |
 | Acronym-first category labels ("AIDP" not "NeuralMesh AIDP") | Shorter horizontal footprint on the 3-card row; description beneath carries the full name for accessibility | — Pending — revisit after user feedback on whether "AIDP" alone is recognizable |
+| WarpCredential is multi-instance (one CR per named credential, not per type) | Enables multiple NGC API keys, multiple WEKA clusters per namespace; each credential independently lifecycle-managed | ✓ Good — v6.0 |
+| Derived secrets not deleted on WarpCredential delete | Avoids accidental removal of secrets in use by running workloads; admin must clean up manually | ✓ Good — v6.0 |
+| `[[var]]` Jinja2 delimiters for dynamic blueprint substitution | Avoids conflicts with shell `$VAR` expansion in YAML and with operator `render()` function's `${VAR}` syntax | ✓ Good — v7.0 |
+| `parse_x_variables` returns `{}` on all failure paths (not raises) | Blueprint pages degrade to a static install form rather than 500; a malformed `x-variables` block is not a hard error | ✓ Good — v7.0 |
+| DYN-07 production blueprint migration deferred to external `warp-blueprints` repo | Fixture YAMLs prove the feature; live production blueprints live outside this repo; migration is a separate PR | ✓ Good — v7.0 |
 
 ## Evolution
 
@@ -137,4 +144,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-12
+*Last updated: 2026-06-17 after v7.0 milestone*

@@ -7,8 +7,8 @@
 - 🔜 **v3.1 E2E Chat Validation** - Phase 14 deferred here along with 4 known issues from v3.0 retry (see `.planning/v3.0-KNOWN-ISSUES.md`)
 - ✅ **v4.0 App Categories on Home Screen** - Phase 15 (shipped 2026-04-21)
 - 🔜 **v5.0 AppStack Variable Substitution** - Phases 16-20
-- 🔜 **v6.0 Secret Management & WEKA Storage Integration** - Phases 21-25
-- 🔜 **v7.0 Dynamic Blueprint System** - Phase 26
+- ✅ **v6.0 Secret Management & WEKA Storage Integration** - Phases 21-25 (shipped 2026-06-12)
+- ✅ **v7.0 Dynamic Blueprint System** - Phase 26 (shipped 2026-06-17)
 
 ## Phases
 
@@ -53,21 +53,27 @@ See MILESTONES.md for full v2.0 summary.
 - [ ] **Phase 19: Validator Soft-Warning and Portable Fixture** — Validator accepts `variables:` block without error; soft-warns on hardcoded DNS / `namespace:` literals; `ai-research-portable.yaml` fixture
 - [ ] **Phase 20: AIDP Migration Smoke Test** — Follow-up PR in separate `aidp` repo; end-to-end cluster verification that feature works in production
 
-### v7.0 Dynamic Blueprint System
+<details>
+<summary>✅ v6.0 Secret Management & WEKA Storage Integration (Phases 21-25) — SHIPPED 2026-06-12</summary>
 
-**Milestone Goal:** Blueprint YAML files become self-describing via an `x-variables` metadata block. The GUI scans `BLUEPRINTS_DIR` at request time to discover blueprints automatically, renders a single generic install form from the schema, and the deploy route accepts a generic variable dict validated against the schema. Credential-type variables link directly to registered WarpCredentials — no `main.py` code change is required to add a new blueprint with new variables.
+- [x] Phase 21: WarpCredential CRD and Helm RBAC (2/2 plans) — completed 2026-06-11
+- [x] Phase 22: Operator WarpCredential Reconciler (3/3 plans) — completed 2026-06-11
+- [x] Phase 23: Backend Credentials API and WEKA Overview Proxy (4/4 plans) — completed 2026-06-11
+- [x] Phase 24: Settings GUI Overhaul (3/3 plans) — completed 2026-06-12
+- [x] Phase 25: Blueprint Credential Selector SDK (3/3 plans) — completed 2026-06-12
 
-- [ ] **Phase 26: Dynamic Blueprint Discovery and Self-Describing Variable Schema** — Blueprint YAML declares its own `x-variables` schema; GUI scans BLUEPRINTS_DIR to discover blueprints; one generic `blueprint.html` renders form fields and credential dropdowns dynamically; hardcoded `app_map` and per-variable function params removed
+See `.planning/milestones/v7.0-ROADMAP.md` for full phase details.
 
-### v6.0 Secret Management & WEKA Storage Integration
+</details>
 
-**Milestone Goal:** Give App Store administrators a first-class credential management system — named, multi-key storage for NGC/HuggingFace/WEKA credentials via a new `WarpCredential` CRD, automatic secret derivation by the operator, a blueprint Jinja2 macro SDK for credential selection, and live WEKA storage visibility on the Settings page.
+<details>
+<summary>✅ v7.0 Dynamic Blueprint System (Phase 26) — SHIPPED 2026-06-17</summary>
 
-- [x] **Phase 21: WarpCredential CRD and Helm RBAC** — `WarpCredential` CRD defined in Helm chart; operator service account has Secret CRUD permissions scoped to the App Store namespace (completed 2026-06-11)
-- [x] **Phase 22: Operator WarpCredential Reconciler** — Operator reconciles `WarpCredential` CRs, deriving correct secrets per type and maintaining `status` conditions; idempotent (completed 2026-06-11)
-- [x] **Phase 23: Backend Credentials API and WEKA Overview Proxy** — GUI backend exposes `/api/credentials` CRUD endpoints and `/api/weka/overview` proxy; old secret endpoints removed (completed 2026-06-11)
-- [x] **Phase 24: Settings GUI Overhaul** — Settings page restructured with Credential Management first, per-type credential lists with traffic-light states, inline add forms, and WEKA Storage Overview panel (completed 2026-06-12)
-- [x] **Phase 25: Blueprint Credential Selector SDK** — Blueprint install pages render credential dropdowns and WEKA endpoint fields using Jinja2 macros; `credentials_by_type` injected automatically into all blueprint template contexts (completed 2026-06-12)
+- [x] Phase 26: Dynamic Blueprint Discovery and Self-Describing Variable Schema (3/3 plans) — completed 2026-06-17
+
+See `.planning/milestones/v7.0-ROADMAP.md` for full phase details.
+
+</details>
 
 ## Phase Details
 
@@ -335,8 +341,9 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 26-01-PLAN.md — `x-variables` schema parser, blueprint discovery scan, generic `/blueprint/{app_name}` route, and generic `blueprint.html` template
-- [ ] 26-02-PLAN.md — Generic `/deploy-stream` route with schema validation, migration of existing blueprints to `x-variables` format, and integration tests
+- [x] 26-01-PLAN.md — `x-variables` schema parser, blueprint discovery scan, generic `/blueprint/{app_name}` route, and generic `blueprint.html` template
+- [x] 26-02-PLAN.md — Generic `/deploy-stream` route with schema validation, migration of existing blueprints to `x-variables` format, and integration tests
+- [x] 26-03-PLAN.md — Gap closure: ns_creds_missing 500 fix, [[namespace]] fixture tokens, abspath normalization, dead code removal (completed 2026-06-17)
 
 ## Progress
 
@@ -367,4 +374,4 @@ v6.0 Execution Order: 21 → 22 → 23 → 24/25 (Phases 24 and 25 can be develo
 | 23. Backend Credentials API and WEKA Overview Proxy | v6.0 | 4/4 | Complete    | 2026-06-11 |
 | 24. Settings GUI Overhaul | v6.0 | 3/3 | Complete    | 2026-06-12 |
 | 25. Blueprint Credential Selector SDK | v6.0 | 3/3 | Complete    | 2026-06-12 |
-| 26. Dynamic Blueprint Discovery and Self-Describing Variable Schema | v7.0 | 0/TBD | Not started | - |
+| 26. Dynamic Blueprint Discovery and Self-Describing Variable Schema | v7.0 | 3/3 | Complete    | 2026-06-17 |
