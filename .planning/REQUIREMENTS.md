@@ -149,8 +149,10 @@
 | DYN-04 | Phase 26 | Not started |
 | DYN-05 | Phase 26 | Not started |
 | DYN-06 | Phase 26 | Not started |
-| DYN-07 | Phase 26 | Not started |
+| DYN-07 | Phase 26 | Partial (external repo) |
 | DYN-08 | Phase 26 | Not started |
+
+**Note — DYN-07 Partial:** Sample fixture blueprints (`ai-research.yaml`, `data-pipeline.yaml`) migrated to `[[namespace]]` tokens in Phase 26. Production blueprints (`oss-rag-stack.yaml`, `openfold-stack.yaml`, nvidia blueprints) live in the external `warp-blueprints` repo and must be migrated there separately.
 
 **Coverage:**
 - v1 requirements: 38 total (v6.0)
