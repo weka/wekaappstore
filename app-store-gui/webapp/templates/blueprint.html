@@ -169,7 +169,7 @@
                   {% endif %}
                   <div>
                     <label class="block text-sm mb-1" for="field-{{ var_name }}">
-                      {{ var_meta.get("description") or (var_name | replace("_", " ") | title) }}
+                      {{ var_name | replace("_", " ") | title }}
                     </label>
                     {% if creds %}
                       <select id="field-{{ var_name }}" name="{{ var_name }}"
@@ -191,7 +191,7 @@
                 {% else %}
                   <div>
                     <label class="block text-sm mb-1" for="field-{{ var_name }}">
-                      {{ var_meta.get("description") or (var_name | replace("_", " ") | title) }}
+                      {{ var_name | replace("_", " ") | title }}
                     </label>
                     <input id="field-{{ var_name }}" name="{{ var_name }}"
                            placeholder="{{ var_meta.get('placeholder', '') }}"
