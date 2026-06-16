@@ -2321,10 +2321,6 @@ async def deploy_stream(
         # Extract namespace from variables dict; default to "default" if absent or empty
         namespace = str(user_vars.get("namespace", "default") or "default").strip() or "default"
 
-        # For cluster-init, ensure namespace defaults to "default"
-        if app_name == "cluster-init" and not namespace:
-            namespace = "default"
-
         # Required-field validation (cluster-init is exempt)
         if app_name != "cluster-init":
             if not os.path.isabs(yaml_path):
