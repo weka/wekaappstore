@@ -1284,7 +1284,7 @@ def find_blueprint(app_name: str, blueprints_dir: str = None) -> Optional[str]:
         blueprints_dir = BLUEPRINTS_DIR
     # Special case: cluster-init always maps to its fixed path
     if app_name == "cluster-init":
-        return os.path.join(blueprints_dir, "cluster_init", "app-store-cluster-init.yaml")
+        return os.path.abspath(os.path.join(blueprints_dir, "cluster_init", "app-store-cluster-init.yaml"))
     if not blueprints_dir or not os.path.isdir(blueprints_dir):
         return None
     try:
@@ -2320,10 +2320,6 @@ async def deploy_stream(
 
         # Extract namespace from variables dict; default to "default" if absent or empty
         namespace = str(user_vars.get("namespace", "default") or "default").strip() or "default"
-
-        # For cluster-init, ensure namespace defaults to "default"
-        if app_name == "cluster-init" and not namespace:
-            namespace = "default"
 
         # Required-field validation (cluster-init is exempt)
         if app_name != "cluster-init":
