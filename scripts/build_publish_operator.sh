@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 IMAGE="${IMAGE:-wekachrisjen/weka-app-store-multi-arch}"
-DOCKERFILE="${REPO_ROOT}/operator_module/Dockerfile"
+DOCKERFILE="${REPO_ROOT}/docker/operator.Dockerfile"
 GIT_SHA="${GIT_SHA:-$(git -C "${REPO_ROOT}" rev-parse --short=12 HEAD)}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
 

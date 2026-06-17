@@ -14,7 +14,9 @@ RUN apt-get update && apt-get install -y curl tar ca-certificates && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Installing kopf and other dependencies for the operator to function
-COPY ../operator_module/requirements.txt .
+# Build context is the repo root (see scripts/build_publish_operator.sh), so
+# COPY paths are repo-root-relative (no ../).
+COPY operator_module/requirements.txt .
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
@@ -22,9 +24,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Set the working directory
 WORKDIR /app
 
-# Copy your operator code into the container
-COPY ../operator_module/main.py .
+# Copy your operator code into the container.
+# The Helm chart launches `kopf run ... /app/operator.py`
+# (weka-app-store-operator-chart/templates/deployment.yaml), so the code must
+# live at that exact path. The CMD below is a standalone-run fallback that the
+# chart overrides.
+COPY operator_module/main.py /app/operator.py
 
 # Use the kopf run command to execute the operator
 # Default to watching all namespaces so the image behaves correctly even without the Helm overrides.
-CMD ["kopf", "run", "--all-namespaces", "--verbose", "/app/operator_module/main.py"]
+CMD ["kopf", "run", "--all-namespaces", "--verbose", "/app/operator.py"]
