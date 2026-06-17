@@ -5,7 +5,6 @@ import subprocess
 import yaml
 import tempfile
 import os
-import string
 import re
 import time
 import base64
@@ -254,40 +253,35 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
 
 
 def render(text: str, variables: Optional[Dict[str, str]]) -> str:
-    """Single-pass ${VAR} substitution via stdlib string.Template.
+    """Allowlist ${VAR} substitution: replace only ${name} for names explicitly
+    provided in `variables`; leave ALL other $-content untouched.
 
-    Behavior contract (Phase 16, locked by CONTEXT.md D-01..D-06):
-      - Returns text unchanged if variables is None or {} (D-02 empty-vars check first).
-      - Returns text unchanged if '${' is not present in text (D-01 pre-scan guard;
-        backward-compat for cluster_init/app-store-cluster-init.yaml shell scripts
-        containing bare $CRDS, $CRD, $MISSING, $GATEWAY_API_URL — these never enter
-        Template.substitute()).
-      - Otherwise delegates to stdlib string.Template in strict substitution mode
-        (D-03 no subclass; OP-02 strict, not safe_substitute).
-      - $$ escapes to a literal $ (stdlib behavior; OP-04, locked by unit test).
-      - On undefined variable (KeyError) or malformed placeholder like ${} or ${123}
-        (ValueError), re-raises ValueError chained from the original exception
-        (D-04 ValueError not kopf.PermanentError; D-05 message format; D-06 'from e').
-        Phase 18 will catch this ValueError and wrap it in kopf.PermanentError with
-        component context.
+    Supersedes the original Phase 16 strict-string.Template contract (D-01..D-06,
+    OP-02/OP-04). Rationale: kubernetesManifest and Helm-values blobs legitimately
+    embed shell syntax — $(cmd), $VAR, ${SHELL_VAR}, ${} inside comments, and $$
+    (the shell PID). string.Template.substitute() raised "Invalid placeholder" on
+    the first such token, which broke every component whose manifest carries a
+    bash script (e.g. aidp-bootstrap-ngc-secrets, keycloak-secret-sync — 46 such
+    tokens across the AIDP appstack). Substituting only an explicit allowlist of
+    known variable names removes the collision class entirely; the delimiter is
+    not the problem, over-broad substitution is.
+
+    Contract:
+      - Returns text unchanged if variables is None or {}.
+      - Replaces every braced occurrence ${name} -> variables[name], for each
+        name in `variables` only. Bare $name is treated as shell content and left.
+      - Every other $-sequence ($(, $VAR, ${unknown}, ${}, $$) is preserved
+        byte-for-byte. No exception is raised for unknown/foreign placeholders.
+        Undefined-variable detection is the caller's responsibility at the
+        variable-resolution layer — it is not inferable from manifest text, where
+        an "undefined" ${X} is indistinguishable from a legitimate shell ${X}.
     """
     if not variables:
         return text
-    if '${' not in text:
-        # No braced placeholders. Bare $identifier shell content (e.g., $CRDS in
-        # cluster_init/app-store-cluster-init.yaml) MUST short-circuit here to
-        # avoid Template.substitute() raising KeyError on bare references. The
-        # one exception is the $$ literal-dollar escape (OP-04), which still
-        # requires Template processing to collapse $$ -> $.
-        if '$$' not in text:
-            return text
-    try:
-        return string.Template(text).substitute(variables)
-    except KeyError as e:
-        name = e.args[0] if e.args else ''
-        raise ValueError(f"Undefined variable: ${{{name}}}") from e
-    except ValueError as e:
-        raise ValueError(f"Malformed placeholder in template: {e}") from e
+    # Only the exact, known variable names — braced form — are substitution
+    # targets. re.escape guards against regex-special characters in names.
+    pattern = re.compile(r"\$\{(" + "|".join(re.escape(k) for k in variables) + r")\}")
+    return pattern.sub(lambda m: variables[m.group(1)], text)
 
 
 def _render_or_raise(

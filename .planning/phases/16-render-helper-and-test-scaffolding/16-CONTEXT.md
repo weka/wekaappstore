@@ -3,6 +3,32 @@
 **Gathered:** 2026-05-06
 **Status:** Ready for planning
 
+> ## ⚠️ SUPERSEDED (2026-06-17) — `render()` is now ALLOWLIST substitution, NOT strict `string.Template`
+>
+> The strict `string.Template.substitute()` contract below (**D-01..D-06, OP-02, OP-04**, and the
+> dependent **Phase 18 OP-07 / DOC-04** "undefined `${VAR}` → `PermanentError`") **caused a production
+> outage** and has been reversed. **Do NOT restore strict substitution, the `$$` escape, or the
+> undefined/malformed → raise behavior.**
+>
+> **What broke:** operator chart `0.1.65` / image `v0.12` shipped this strict `render()` to a live
+> cluster. `stack_vars` always contains at least `{'namespace': ...}` (main.py:923), so every
+> component manifest containing a `${` was pushed through `string.Template.substitute()`, which raised
+> `Invalid placeholder` on the **first shell `$`** — `$(cmd)`, `$VAR`, `${SHELL_VAR}`, a `${` inside a
+> bash comment, or `$$` (the shell PID). The AIDP appstack alone has **46** such tokens across
+> ngc-secrets, keycloak-secret-sync, envoy-endpoint-discovery, embedding-gateway, … so **every
+> Job-script component failed at deploy** (`Malformed placeholder in template: Invalid placeholder in
+> string: line 99, col 18`).
+>
+> **Current contract (`operator_module/main.py` `render()`):** substitute **only** `${name}` where
+> `name` is an explicitly provided variable (allowlist regex); leave **all** other `$`-content
+> byte-for-byte (`$(`, `$VAR`, `${unknown}`, `${}`, `$$`); **never raise** on foreign/malformed
+> placeholders. The delimiter was never the problem — over-broad substitution was. Undefined-variable
+> detection (if ever desired) belongs at the variable-resolution layer, because in manifest text an
+> "undefined" `${X}` is indistinguishable from a legitimate shell `${X}`.
+>
+> Regression locked by `test_render_shell_manifest_only_substitutes_known_vars` (test_render.py). The
+> decisions below are retained for historical context only.
+
 <domain>
 ## Phase Boundary
 

@@ -192,28 +192,20 @@ def test_kubernetes_manifest_substitutes_namespace():
     assert "${" not in captured[0]
 
 
-def test_undefined_variable_in_manifest_raises_permanent_error():
-    """OP-07 + DOC-04: undefined ${VAR} -> kopf.PermanentError naming variable + component.
-
-    Targets _render_or_raise directly to lock the exact error format string
-    (message must contain the variable name AND `Component '<name>'`).
-    Reconcile-boundary propagation is asserted separately by
-    test_handle_appstack_propagates_permanent_error_to_kopf_boundary.
+def test_unknown_variable_in_manifest_left_untouched():
+    """Allowlist contract (supersedes OP-07/DOC-04): an unprovided ${VAR} in a
+    manifest is NOT an error — it is preserved verbatim, since it is
+    indistinguishable from a legitimate shell ${VAR}. Undefined-variable
+    detection moved to the variable-resolution layer.
     """
-    import kopf
     from main import _render_or_raise
 
-    with pytest.raises(kopf.PermanentError) as exc_info:
-        _render_or_raise(
-            "metadata:\n  namespace: ${unset}\n",
-            {"namespace": "staging"},
-            source_desc="Component 'ingress'.kubernetesManifest",
-        )
-
-    msg = str(exc_info.value)
-    assert "unset" in msg
-    assert "Component" in msg
-    assert "ingress" in msg
+    out = _render_or_raise(
+        "metadata:\n  namespace: ${unset}\n",
+        {"namespace": "staging"},
+        source_desc="Component 'ingress'.kubernetesManifest",
+    )
+    assert out == "metadata:\n  namespace: ${unset}\n"
 
 
 def test_configmap_valuesfile_substitutes_variables():
@@ -465,13 +457,19 @@ def test_handle_appstack_propagates_permanent_error_to_kopf_boundary():
 
     components = [{
         "name": "ingress",
-        "kubernetesManifest": "metadata:\n  namespace: ${unset}\n",
+        "kubernetesManifest": "metadata:\n  namespace: ${namespace}\n",
     }]
     spec = {"appStack": {"components": components}}
 
+    # render() no longer raises on undefined vars (allowlist contract), so the
+    # trigger is mocked: any kopf.PermanentError raised while processing a
+    # component must propagate out, not be swallowed into comp_status['message'].
     with patch("main.subprocess.run"), \
          patch("main._load_kube_config_once", return_value=False), \
          patch("main.HelmOperator"), \
+         patch("main._render_or_raise",
+               side_effect=kopf.PermanentError(
+                   "Component 'ingress'.kubernetesManifest: simulated permanent failure")), \
          pytest.raises(kopf.PermanentError) as exc_info:
         handle_appstack_deployment(
             body={"spec": spec},
@@ -482,7 +480,6 @@ def test_handle_appstack_propagates_permanent_error_to_kopf_boundary():
         )
 
     msg = str(exc_info.value)
-    assert "unset" in msg
     assert "ingress" in msg
 
 

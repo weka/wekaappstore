@@ -62,11 +62,13 @@ def test_render_happy_path() -> None:
     assert render("hello ${NAME}", {"NAME": "world"}) == "hello world"
 
 
-def test_render_double_dollar_escape() -> None:
-    """render('price is $$5', {'x': 'y'}) returns 'price is $5' (OP-04 $$ escape)."""
+def test_render_double_dollar_preserved() -> None:
+    """$$ is the shell PID and is NOT collapsed to $ (supersedes OP-04 $$ escape).
+    Preserved verbatim so embedded bash scripts keep working."""
     from main import render
 
-    assert render("price is $$5", {"x": "y"}) == "price is $5"
+    assert render("price is $$5", {"x": "y"}) == "price is $$5"
+    assert render("pid is $$", {"namespace": "rag"}) == "pid is $$"
 
 
 def test_render_dockerconfigjson_unchanged_when_no_braces() -> None:
@@ -92,33 +94,59 @@ def test_render_substitutes_namespace_in_small_json() -> None:
     )
 
 
-def test_render_undefined_variable_raises_value_error() -> None:
-    """render() with ${UNDEF} raises ValueError naming the variable (D-04, D-05)."""
+def test_render_unknown_braced_token_left_untouched() -> None:
+    """${UNDEF} (not an allowlisted name) is preserved verbatim and does NOT raise —
+    it is indistinguishable from a legitimate shell ${VAR}. (Supersedes D-04/D-05;
+    undefined-variable detection now lives at the variable-resolution layer.)"""
     from main import render
 
-    with pytest.raises(ValueError) as exc_info:
-        render("value: ${UNDEF}", {"x": "y"})
-    assert "UNDEF" in str(exc_info.value)
+    assert render("value: ${UNDEF}", {"x": "y"}) == "value: ${UNDEF}"
 
 
-def test_render_malformed_empty_placeholder_raises_value_error() -> None:
-    """render('bad: ${}', non-empty vars) raises ValueError with 'Malformed' in message (D-04, D-05)."""
+def test_render_empty_placeholder_left_untouched() -> None:
+    """${} is foreign shell-ish content: preserved verbatim, no exception."""
     from main import render
 
-    # NOTE: must pass non-empty variables — otherwise the empty-vars guard
-    # short-circuits BEFORE Template.substitute() can detect the malformed placeholder.
-    with pytest.raises(ValueError) as exc_info:
-        render("bad: ${}", {"x": "y"})
-    assert "Malformed" in str(exc_info.value)
+    assert render("bad: ${}", {"x": "y"}) == "bad: ${}"
 
 
-def test_render_malformed_numeric_placeholder_raises_value_error() -> None:
-    """render('bad: ${123}') raises ValueError with 'Malformed' in message (D-04, D-05)."""
+def test_render_numeric_placeholder_left_untouched() -> None:
+    """${123} is not an allowlisted name: preserved verbatim, no exception."""
     from main import render
 
-    with pytest.raises(ValueError) as exc_info:
-        render("bad: ${123}", {"x": "y"})
-    assert "Malformed" in str(exc_info.value)
+    assert render("bad: ${123}", {"x": "y"}) == "bad: ${123}"
+
+
+def test_render_shell_manifest_only_substitutes_known_vars() -> None:
+    """Regression for the AIDP outage: a Job manifest full of shell $-syntax must
+    pass through untouched EXCEPT for the allowlisted ${namespace}. The previous
+    strict string.Template raised 'Invalid placeholder' on the first $( / ${ / $$
+    token (46 such tokens across the AIDP appstack), breaking every component."""
+    from main import render
+
+    manifest = (
+        "    set -euo pipefail\n"
+        '    KC_HOST="http://keycloak-http.${namespace}.svc.cluster.local"\n'
+        '    TOKEN=$(curl -sf "$KC_HOST/realms/master" | jq -r .access_token)\n'
+        '    for i in $(seq 1 30); do echo "$i"; done\n'
+        '    local CLIENT_ID="$1"\n'
+        "    dollar='$'\n"
+        "    # the pattern *'${'* is a guard, not a placeholder\n"
+        '    if [[ -z "${TOKEN}" ]]; then echo "pid=$$"; fi\n'
+    )
+    out = render(manifest, {"namespace": "rag"})
+
+    # Only ${namespace} is substituted.
+    assert "keycloak-http.rag.svc.cluster.local" in out
+    assert "${namespace}" not in out
+    # Every shell $-form is preserved byte-for-byte (no substitution, no raise).
+    assert "$(curl" in out
+    assert "$(seq 1 30)" in out
+    assert '"$1"' in out
+    assert "dollar='$'" in out
+    assert "*'${'*" in out
+    assert "${TOKEN}" in out  # unknown braced token left as shell content
+    assert "pid=$$" in out    # $$ (shell PID) not collapsed
 
 
 def test_render_no_op_when_variables_none() -> None:
