@@ -4,7 +4,7 @@ replicaCount: 1
 image:
   repository: wekachrisjen/weka-app-store-multi-arch
   pullPolicy: IfNotPresent
-  tag: "v0.11"
+  tag: "v0.13"
 
 # Control how the operator watches resources
 watch:
