@@ -1,0 +1,1925 @@
+# =============================================================================
+# WEKA AIDP AppStack Blueprint
+# =============================================================================
+# What: WekaAppStore CR that orchestrates the complete AIDP platform deployment
+#       via the WEKA App Store operator.
+#
+# Prerequisites (must exist BEFORE applying this file):
+#   1. ConfigMap aidp-site-config in namespace rag
+#      (apply appstack/aidp-site-config.yaml after filling in all <replace-me>
+#       values)
+#   2. All required Kubernetes Secrets — see appstack/required-secrets.md
+#   3. ConfigMap keycloak-realm-config in namespace keycloak
+#      (applied by the AIDP Helm chart's post-install hook)
+#
+# Apply:
+#   kubectl apply -f appstack/aidp-site-config.yaml
+#   kubectl apply -f appstack/weka-aidp-appstack.yaml
+# =============================================================================
+
+apiVersion: warp.io/v1alpha1
+kind: WekaAppStore
+metadata:
+  name: weka-aidp
+  namespace: rag
+spec:
+  appStack:
+    # CFG-09-FIX-04 (Phase 35, 2026-05-12) — UPDATED 2026-05-12 (post-deploy hotfix):
+    # The customer-supplied NGC token is currently substituted client-side via
+    # `envsubst '$ngcApiKey'` before `kubectl apply`. See appstack/DEPLOY.md §3.1
+    # for the customer workflow. The single ${ngcApiKey} substitution site lives
+    # in Component 0 (aidp-bootstrap-secrets) on the `ngc-api-key.apiKey` line.
+    #
+    # FUTURE — WEKA App Store UX: When `spec.appStack.variables` is supported
+    # upstream (currently a future feature per BACKLOG.md OPS-BL-01, status:
+    # "waiting on upstream operator PRD to ship"), the App Store form field
+    # will write the customer's token to spec.appStack.variables.ngcApiKey,
+    # and the operator will resolve ${ngcApiKey} in every kubernetesManifest:
+    # block before applying. Until then, attempting to declare the variables
+    # block here triggers a strict-decoding error from the v1alpha1 CRD:
+    #
+    #   Error from server (BadRequest): error when creating "weka-aidp-appstack.yaml":
+    #   WekaAppStore in version "v1alpha1" cannot be handled as a WekaAppStore:
+    #   strict decoding error: unknown field "spec.appStack.variables"
+    #
+    # The envsubst-client-side flow does NOT depend on this field (envsubst is
+    # pure text substitution at the YAML byte level, independent of the CR
+    # schema). When the upstream PRD ships, re-introduce the variables block:
+    #
+    #   variables:
+    #     ngcApiKey: ""
+    #
+    components:
+
+      # =====================================================================
+      # Component 0: WEKA S3 Load Balancer
+      # nginx reverse proxy that load-balances across WEKA S3 nodes, exposing
+      # a stable ClusterIP (nginx-s3-lb-service.rag.svc.cluster.local:9000)
+      # consumed by Milvus, nv-ingest, and the RAG pipeline.
+      # SITE-SPECIFIC: update the upstream block IPs in the ConfigMap below
+      # to match your WEKA cluster's S3 node IPs before applying.
+      # Run: weka cluster nodes --role S3 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'
+      # =====================================================================
+      - name: weka-s3-lb
+        enabled: true
+        dependsOn: []
+        description: "nginx S3 load balancer — stable ClusterIP in front of WEKA S3 nodes"
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: weka-s3-lb-nginx-config
+            namespace: rag
+          data:
+            nginx.conf: |
+              # SITE-SPECIFIC: Replace these IPs with your WEKA cluster's S3 node IPs.
+              # Run: weka cluster nodes --role S3 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'
+              # to enumerate them. Port 9000 is the standard WEKA S3 port.
+              upstream weka_s3 {
+                 least_conn;
+              server 192.168.1.3:9000;
+              server 192.168.1.1:9000;
+              server 192.168.1.2:9000;
+              }
+              server {
+                 listen       9000;
+                 listen  [::]:9000;
+                 server_name _;
+
+                 ignore_invalid_headers off;
+                 client_max_body_size 0;
+                 proxy_buffering off;
+                 proxy_request_buffering off;
+
+                 location /healthz {
+                    access_log off;
+                    return 200 "ok\n";
+                    add_header Content-Type text/plain;
+                 }
+
+                 location / {
+                    proxy_set_header Host $http_host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+
+                    proxy_connect_timeout 300;
+                    proxy_read_timeout    300;
+                    proxy_send_timeout    300;
+                    proxy_http_version 1.1;
+                    proxy_set_header Connection "";
+                    chunked_transfer_encoding off;
+
+                    proxy_pass http://weka_s3;
+                 }
+              }
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx-deployment
+            namespace: rag
+          spec:
+            selector:
+              matchLabels:
+                app: nginx
+            replicas: 1
+            strategy:
+              type: Recreate
+            template:
+              metadata:
+                labels:
+                  app: nginx
+              spec:
+                hostNetwork: true
+                dnsPolicy: ClusterFirstWithHostNet
+                nodeSelector:
+                  weka.io/nim-role: llm
+                containers:
+                - name: nginx
+                  image: nginx:1.27.2
+                  ports:
+                  - containerPort: 9000
+                  readinessProbe:
+                    httpGet:
+                      path: /healthz
+                      port: 9000
+                    initialDelaySeconds: 3
+                    periodSeconds: 10
+                    failureThreshold: 3
+                  livenessProbe:
+                    httpGet:
+                      path: /healthz
+                      port: 9000
+                    initialDelaySeconds: 10
+                    periodSeconds: 30
+                    failureThreshold: 3
+                  lifecycle:
+                    preStop:
+                      exec:
+                        command: ["/bin/sh", "-c", "nginx -s quit; sleep 5"]
+                  volumeMounts:
+                    - name: nginx-config
+                      mountPath: /etc/nginx/conf.d/default.conf
+                      subPath: nginx.conf
+                volumes:
+                  - name: nginx-config
+                    configMap:
+                      name: weka-s3-lb-nginx-config
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: nginx-s3-lb-service
+            namespace: rag
+          spec:
+            type: ClusterIP
+            selector:
+              app: nginx
+            ports:
+              - port: 9000
+                targetPort: 9000
+
+      # =====================================================================
+      # Component 1: Bootstrap Secrets
+      # Applied early so subsequent Helm charts find their existingSecret
+      # references. Source-of-truth mirror of appstack/aidp-secrets.yaml
+      # (active secrets only; commented placeholders omitted).
+      # Every other component dependsOn this.
+      # =====================================================================
+      - name: aidp-bootstrap-secrets
+        enabled: true
+        dependsOn: []
+        description: "Bootstrap secrets required by all downstream components"
+        kubernetesManifest: |
+          # CFG-09 (2026-05-11): the cleartext nvapi-... token previously
+          # embedded directly in this manifest (in ngc-secret and ngc-api
+          # 3-alias) is removed. The customer creates ONE Secret named
+          # `ngc-api-key` (key: apiKey) containing the nvapi-... token,
+          # and the AIDP helm chart's `ngc-secret-materialize` pre-install
+          # Job (helm/aidp/templates/ngc-secret-materialize-job.yaml) reads
+          # that input and materializes both `ngc-secret` (dockerconfigjson)
+          # and `ngc-api` (3-alias Opaque) at install time. Closes the
+          # CC-3 SEC-01 plaintext-secrets-in-source gap.
+          #
+          # CFG-09-FIX-04 (Phase 35, 2026-05-12): the Phase 34 placeholder
+          # sentinel is replaced with the template variable <ngcApiKey>
+          # (placeholder-form rendering to keep substituted output free of
+          # the customer's real token — see comment block below the
+          # stringData line). Resolved either by client-side `envsubst`
+          # (developer flow) or by the WEKA App Store operator's static
+          # variable substitution (App Store flow). Single substitution
+          # surface replaces the Phase 34 Option A/B split.
+          #
+          # ngc-api-key — single-input customer Secret (CFG-09 source of truth).
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: ngc-api-key
+            namespace: rag
+            labels:
+              app.kubernetes.io/component: ngc-secret-input
+          type: Opaque
+          stringData:
+            # CFG-09-FIX-04 (Phase 35, 2026-05-12): templated for variable
+            # substitution. Replaces the Phase 34 placeholder sentinel.
+            # See spec.appStack.variables.ngcApiKey above and
+            # appstack/DEPLOY.md §3.1.
+            apiKey: "${ngcApiKey}"
+          ---
+          # keycloak-admin-secret — Keycloak admin console password
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: keycloak-admin-secret
+            namespace: rag
+          type: Opaque
+          stringData:
+            admin-password: "Password123"
+          ---
+          # aidp-gui-secrets — OIDC credentials for the AIDP GUI's Keycloak client.
+          # KEYCLOAK_CLIENT_ID matches the "aidp-gui" client in the realm import.
+          # KEYCLOAK_CLIENT_SECRET is a placeholder here — Keycloak 25+ discards
+          # client secrets during realm import, so the real value is set via the
+          # Admin API after AppStack reaches Ready (see DEPLOY.md §9a) and this
+          # Secret is then patched to match.
+          # SESSION_SECRET must be a random 32+ byte string (openssl rand -hex 32).
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: aidp-gui-secrets
+            namespace: rag
+          type: Opaque
+          stringData:
+            KEYCLOAK_CLIENT_ID: "aidp-gui"
+            KEYCLOAK_CLIENT_SECRET: "<replace-me>"
+            SESSION_SECRET: "<replace-me>"
+          ---
+          # aidp-gui-operator-secrets — WEKA API token used by the Kopf operator
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: aidp-gui-operator-secrets
+            namespace: rag
+          type: Opaque
+          stringData:
+            WATCHER_WEKA_TOKEN: "eyJhbGciOiJSUzI1NiIsIml0dCI6IkJBQ0tFTkQiLCJ0eXAiOiJKV1QifQ.eyJleHAiOjE3ODQ1OTMzNzEsImlhdCI6MTc3NjgxNzM3MSwiaXR0IjoiQkFDS0VORCIsInN1YiI6eyJndWlkIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAwIiwib3JnX2lkIjowLCJyZXZvY2F0aW9uX2N5Y2xlIjowLCJyb2xlIjoiQ2x1c3RlckFkbWluVXNlciIsInNvdXJjZSI6IkludGVybmFsIiwidXNlcm5hbWUiOiJhZG1pbiJ9fQ.VXnbYoiTB_751leMVOTaduhAYrqcF9gsiE5k7awZQA725p2Lq6As4-sGQGL8rMk4r2eYbPXJINEdptGBqV0J0y3Hn4YyIhGaW9cJsHHXTrizv5MFNvOJMDICFNY9uc7LjcXCEglYP8XkGk3vRJxr9za6CP0sfk99Pnsr54GMaBgGO-nlxXiPqbqPKxV6x84Tf4AEQt5I-n-e1MEk_a-JGU5FoVkWL48LM8elPyM5ixtajFmbU9uT7muLP6LzwpjOGOkOto5orkEozb38A5JQFu2VUUlWXqrk0N88GkgOBIy5pOQMjUZ_x2p-n7DMzk0c3mao0XW19I_sVtdDf9p_fg"
+          ---
+          # rag-gateway-secrets — RAG Gateway API keys
+          # CFG-07 (2026-05-11): TOOL_API_KEY removed from per-service Secrets;
+          # see tool-api-key Secret below — single source of truth.
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: rag-gateway-secrets
+            namespace: rag
+          type: Opaque
+          stringData:
+            OPENAI_API_KEY: "replace-me"
+          ---
+          # rag-bridge-secrets — RAG Bridge Keycloak client (TOOL_API_KEY removed; see tool-api-key Secret below)
+          # KEYCLOAK_CLIENT_ID matches the "rag-bridge" client in the realm import
+          # (mirrors aidp-gui above). KEYCLOAK_CLIENT_SECRET is a placeholder here —
+          # Keycloak 25+ discards client secrets during realm import, so the real
+          # value is patched in by the keycloak-secret-sync Job (sync_client rag-bridge).
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: rag-bridge-secrets
+            namespace: rag
+          type: Opaque
+          stringData:
+            KEYCLOAK_CLIENT_ID: "rag-bridge"
+            KEYCLOAK_CLIENT_SECRET: "<replace-me>"
+          ---
+          # tool-api-key — single TOOL_API_KEY Secret consumed by both
+          # rag-gateway and rag-bridge Deployments via secretKeyRef. CFG-07
+          # eliminates the audit §1.8 duplicate "MUST match" coupling.
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: tool-api-key
+            namespace: rag
+            labels:
+              app.kubernetes.io/managed-by: aidp-bootstrap
+              app.kubernetes.io/component: tool-api-key
+          type: Opaque
+          stringData:
+            TOOL_API_KEY: "f08783f6-4cf3-484c-b628-1861aff66fcd"
+          ---
+          # space-manager-secrets — Space Manager runtime env (Postgres DSN +
+          # WEKA REST API credentials). All three keys are loaded as env vars
+          # via envFrom in the space-manager Deployment. SM_WEKA_API_USER and
+          # SM_WEKA_API_PASSWORD are required at startup (config.py raises
+          # "SM_WEKA_API_USER is required" / "...PASSWORD is required" if missing).
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: space-manager-secrets
+            namespace: rag
+          type: Opaque
+          stringData:
+            SM_POSTGRES_DSN: "postgresql+asyncpg://space_manager:Password123@space-manager-postgres.rag.svc.cluster.local:5432/space_manager"
+            SM_WEKA_API_USER: "spaceman"      # WEKA REST API username (e.g. "spaceman")
+            SM_WEKA_API_PASSWORD: "Password123"  # WEKA REST API password
+          ---
+          # space-manager-postgres-secrets — Space Manager PostgreSQL pod credentials
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: space-manager-postgres-secrets
+            namespace: rag
+          type: Opaque
+          stringData:
+            password: "Password123"
+            postgres-password: "Password123"
+
+      # =====================================================================
+      # Component 0.5: NGC Secret Materialize (CFG-09-FIX, Phase 34, 2026-05-11)
+      # Reads the customer-supplied `ngc-api-key` Secret (key: apiKey) and
+      # materializes `ngc-secret` (dockerconfigjson) and `ngc-api` (3-alias
+      # Opaque) in the `rag` namespace BEFORE nvidia-rag-blueprint installs.
+      # Replaces helm/aidp/templates/ngc-secret-materialize-job.yaml, which
+      # ran as a pre-install hook of the aidp helm chart — too late in the
+      # dependency graph (the aidp release is LAST). See appstack/DEPLOY.md
+      # §3.1 for the customer workflow.
+      # =====================================================================
+      - name: aidp-bootstrap-ngc-secrets
+        enabled: true
+        dependsOn: [aidp-bootstrap-secrets]
+        description: "Materialize ngc-secret (dockerconfigjson) and ngc-api (3-alias Opaque) from customer-supplied ngc-api-key Secret"
+        kubernetesManifest: |
+          # CFG-09-FIX (Phase 34, 2026-05-11): runs BEFORE nvidia-rag-blueprint
+          # via aidp-bootstrap-nim-cache. Previously this lived in the aidp
+          # helm chart as a pre-install hook, which ran too late (the aidp
+          # release is the LAST chart in the dependency graph). This component
+          # replaces helm/aidp/templates/ngc-secret-materialize-job.yaml.
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: ngc-secret-materialize
+            namespace: rag
+            labels:
+              app.kubernetes.io/name: ngc-secret-materialize
+              app.kubernetes.io/component: appstack-bootstrap
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata:
+            name: ngc-secret-materialize
+            namespace: rag
+          rules:
+            # Narrow scope: input Secret name only (read), output Secret names only (write).
+            - apiGroups: [""]
+              resources: ["secrets"]
+              verbs: ["create"]
+            - apiGroups: [""]
+              resources: ["secrets"]
+              resourceNames: ["ngc-api-key"]
+              verbs: ["get"]
+            - apiGroups: [""]
+              resources: ["secrets"]
+              resourceNames: ["ngc-api", "ngc-secret"]
+              verbs: ["get", "update", "patch"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata:
+            name: ngc-secret-materialize
+            namespace: rag
+          subjects:
+            - kind: ServiceAccount
+              name: ngc-secret-materialize
+              namespace: rag
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: Role
+            name: ngc-secret-materialize
+          ---
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: ngc-secret-materialize
+            namespace: rag
+            labels:
+              app.kubernetes.io/name: ngc-secret-materialize
+              app.kubernetes.io/component: appstack-bootstrap
+          spec:
+            backoffLimit: 3
+            ttlSecondsAfterFinished: 60
+            template:
+              spec:
+                restartPolicy: OnFailure
+                serviceAccountName: ngc-secret-materialize
+                containers:
+                  - name: materialize
+                    image: alpine/k8s:1.30.0
+                    env:
+                      - name: NS
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.namespace
+                      - name: NGC_API_KEY_INPUT
+                        valueFrom:
+                          secretKeyRef:
+                            name: ngc-api-key
+                            key: apiKey
+                      - name: NGC_API_SECRET_NAME
+                        value: "ngc-api"
+                      - name: NGC_PULL_SECRET_NAME
+                        value: "ngc-secret"
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set -euo pipefail
+                        # CFG-09-FIX-04 (Phase 35, 2026-05-12): the placeholder is now
+                        # the template variable <ngcApiKey> (Phase 35 replaces the
+                        # Phase 34 placeholder sentinel).
+                        #
+                        # CRITICAL — comments and echoes in this script body
+                        # intentionally use the placeholder form <ngcApiKey> (angle
+                        # brackets) instead of the dollar-brace form. envsubst is a
+                        # TEXT substitution tool; it does NOT honor bash quoting.
+                        # Any literal dollar-brace ngcApiKey in this script body
+                        # would be rewritten to the customer's real token at apply
+                        # time and leak into the Job's command[] field in etcd
+                        # (visible to anyone with Pod read access in this namespace).
+                        #
+                        # The glob substring check below tests for the byte sequence
+                        # `${` itself. The pattern *'${'* is NOT a registered
+                        # envsubst target (which is scoped to ngcApiKey only), so
+                        # it survives substitution verbatim. At Job runtime, bash
+                        # matches the glob: if NGC_API_KEY_INPUT contains a `${`
+                        # substring, the variable was not substituted (or substituted
+                        # with garbage); the guard fires.
+                        #
+                        # The Hint echo below assembles the literal `dollar
+                        # ngcApiKey` byte sequence at bash runtime from a `dollar`
+                        # variable plus the bare word `ngcApiKey`, so that byte
+                        # sequence never appears in the YAML source and envsubst
+                        # leaves the Hint line alone.
+                        if [[ -z "${NGC_API_KEY_INPUT}" || "${NGC_API_KEY_INPUT}" == *'${'* ]]; then
+                          dollar='$'
+                          echo "ERROR: Secret ngc-api-key.apiKey is empty or contains an un-substituted template variable." >&2
+                          echo "Hint: see appstack/DEPLOY.md Section 3.1 — substitute the ngcApiKey variable before applying the AppStack." >&2
+                          echo "Hint:   export ngcApiKey=nvapi-..." >&2
+                          echo "Hint:   envsubst '${dollar}ngcApiKey' < appstack/weka-aidp-appstack.yaml | kubectl apply -f -" >&2
+                          exit 1
+                        fi
+
+                        echo "Materializing ${NGC_API_SECRET_NAME} (3-alias Opaque) and ${NGC_PULL_SECRET_NAME} (dockerconfigjson)..."
+
+                        # 3-alias Opaque Secret
+                        cat <<EOF | kubectl apply -f -
+                        apiVersion: v1
+                        kind: Secret
+                        metadata:
+                          name: ${NGC_API_SECRET_NAME}
+                          namespace: ${NS}
+                          labels:
+                            app.kubernetes.io/managed-by: aidp-bootstrap
+                            app.kubernetes.io/component: ngc-secret-materialize
+                        type: Opaque
+                        stringData:
+                          NGC_API_KEY: "${NGC_API_KEY_INPUT}"
+                          NVIDIA_API_KEY: "${NGC_API_KEY_INPUT}"
+                          NGC_CLI_API_KEY: "${NGC_API_KEY_INPUT}"
+                        EOF
+
+                        # dockerconfigjson Secret for nvcr.io image pulls
+                        AUTH_B64=$(printf '%s:%s' '$oauthtoken' "${NGC_API_KEY_INPUT}" | base64 -w0)
+                        DCJ=$(cat <<JSON | base64 -w0
+                        {
+                          "auths": {
+                            "nvcr.io": {
+                              "username": "\$oauthtoken",
+                              "password": "${NGC_API_KEY_INPUT}",
+                              "auth": "${AUTH_B64}"
+                            }
+                          }
+                        }
+                        JSON
+                        )
+
+                        cat <<EOF | kubectl apply -f -
+                        apiVersion: v1
+                        kind: Secret
+                        metadata:
+                          name: ${NGC_PULL_SECRET_NAME}
+                          namespace: ${NS}
+                          labels:
+                            app.kubernetes.io/managed-by: aidp-bootstrap
+                            app.kubernetes.io/component: ngc-secret-materialize
+                        type: kubernetes.io/dockerconfigjson
+                        data:
+                          .dockerconfigjson: "${DCJ}"
+                        EOF
+
+                        echo "Materialized ${NGC_API_SECRET_NAME} and ${NGC_PULL_SECRET_NAME}."
+        readinessCheck:
+          type: job
+          name: ngc-secret-materialize
+          timeout: 180
+
+      # =====================================================================
+      # Component 0.25: Keycloak Realm Config
+      # ConfigMap consumed by the keycloakx chart via extraVolumes/
+      # extraVolumeMounts. Keycloak mounts this at /opt/keycloak/data/import
+      # and imports on start via --import-realm.
+      # Split from aidp-bootstrap-secrets so its apply shows up as its own
+      # component status / log line.
+      # Placeholders AIDP_REDIRECT_URI_PLACEHOLDER and AIDP_ORIGIN_PLACEHOLDER
+      # in the embedded JSON are overwritten at install time by the
+      # `keycloak-secret-sync` AppStack component (further down), which
+      # PUTs the aidp-gui client config with the real redirect URI and
+      # web origin derived from gui.baseUrl in aidp-site-config.
+      # =====================================================================
+      - name: aidp-keycloak-realm-config
+        enabled: true
+        dependsOn: [aidp-bootstrap-secrets]
+        description: "Keycloak realm import ConfigMap (rag-gateway realm definition)"
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: keycloak-realm-config
+            namespace: rag
+          data:
+            rag-gateway-realm.json: |
+              {
+                "realm": "rag-gateway",
+                "enabled": true,
+                "sslRequired": "none",
+                "registrationAllowed": false,
+                "loginWithEmailAllowed": true,
+                "duplicateEmailsAllowed": false,
+                "resetPasswordAllowed": false,
+                "editUsernameAllowed": false,
+                "bruteForceProtected": true,
+                "clients": [
+                  {
+                    "clientId": "aidp-gui",
+                    "enabled": true,
+                    "protocol": "openid-connect",
+                    "publicClient": false,
+                    "standardFlowEnabled": true,
+                    "implicitFlowEnabled": false,
+                    "directAccessGrantsEnabled": false,
+                    "serviceAccountsEnabled": false,
+                    "redirectUris": [
+                      "AIDP_REDIRECT_URI_PLACEHOLDER"],
+                    "webOrigins": [
+                      "AIDP_ORIGIN_PLACEHOLDER"],
+                    "defaultClientScopes": [
+                      "openid",
+                      "profile",
+                      "email"],
+                    "optionalClientScopes": [
+                      "address",
+                      "phone",
+                      "offline_access",
+                      "microprofile-jwt"],
+                    "protocolMappers": [
+                      {
+                        "name": "groups",
+                        "protocol": "openid-connect",
+                        "protocolMapper": "oidc-group-membership-mapper",
+                        "consentRequired": false,
+                        "config": {
+                          "full.path": "false",
+                          "id.token.claim": "true",
+                          "access.token.claim": "true",
+                          "claim.name": "groups",
+                          "userinfo.token.claim": "true"
+                        }
+                      },
+                      {
+                        "name": "realm roles",
+                        "protocol": "openid-connect",
+                        "protocolMapper": "oidc-usermodel-realm-role-mapper",
+                        "consentRequired": false,
+                        "config": {
+                          "multivalued": "true",
+                          "user.attribute": "foo",
+                          "id.token.claim": "true",
+                          "access.token.claim": "true",
+                          "claim.name": "realm_access.roles",
+                          "jsonType.label": "String"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "clientId": "rag-gateway-1",
+                    "enabled": true,
+                    "protocol": "openid-connect",
+                    "bearerOnly": true,
+                    "publicClient": false,
+                    "standardFlowEnabled": false,
+                    "implicitFlowEnabled": false,
+                    "directAccessGrantsEnabled": false,
+                    "serviceAccountsEnabled": false
+                  },
+                  {
+                    "clientId": "rag-bridge",
+                    "enabled": true,
+                    "protocol": "openid-connect",
+                    "publicClient": false,
+                    "serviceAccountsEnabled": true,
+                    "standardFlowEnabled": false,
+                    "directAccessGrantsEnabled": false,
+                    "implicitFlowEnabled": false
+                  }
+                ],
+                "roles": {
+                  "realm": [
+                    {
+                      "name": "aidp-cluster-admin",
+                      "description": "AIDP Cluster Admin -- full cluster-wide watcher management",
+                      "composite": false,
+                      "clientRole": false
+                    },
+                    {
+                      "name": "aidp-admin",
+                      "description": "AIDP Admin -- full watcher management with purge capability",
+                      "composite": false,
+                      "clientRole": false
+                    }
+                  ],
+                  "client": {}
+                },
+                "groups": [
+                  {
+                    "name": "cluster-admins",
+                    "path": "/cluster-admins",
+                    "realmRoles": [
+                      "aidp-cluster-admin"]
+                  },
+                  {
+                    "name": "admins",
+                    "path": "/admins",
+                    "realmRoles": [
+                      "aidp-admin"]
+                  },
+                  {
+                    "name": "users",
+                    "path": "/users"
+                  }
+                ],
+                "defaultGroups": [
+                  "/users"],
+                "scopeMappings": [],
+                "requiredActions": [],
+                "users": []
+              }
+
+      # =====================================================================
+      # Component 0.5: Bootstrap Storage
+      # Creates a static PV bound to the pre-existing WEKA "vectordb"
+      # filesystem, and a tightly-bound PVC that Milvus will mount as its
+      # segment/binlog storage (/var/lib/milvus/data). The claimRef +
+      # volumeName pairing ensures no other PVC can accidentally claim
+      # this PV.
+      # =====================================================================
+      - name: aidp-bootstrap-storage
+        enabled: false
+        dependsOn: [aidp-bootstrap-secrets]
+        description: "Disabled — superseded by S3 mode (was: Static PV + PVC for Milvus POSIX mode, bound to WEKA vectordb filesystem)"
+        kubernetesManifest: |
+          # PersistentVolume — static binding to the existing WEKA filesystem "vectordb"
+          apiVersion: v1
+          kind: PersistentVolume
+          metadata:
+            name: milvus-vectordb-pv
+          spec:
+            capacity:
+              storage: 10Ti              # informational for static FS-backed volumes
+            accessModes:
+              - ReadWriteMany
+            persistentVolumeReclaimPolicy: Retain
+            storageClassName: storageclass-wekafs-fs-static
+            csi:
+              driver: csi.weka.io
+              volumeHandle: weka/v2/vectordb   # format: weka/v2/<existing_fs_name>
+              volumeAttributes:
+                filesystem: vectordb
+            # Pre-bind to the PVC below — prevents any other PVC from claiming.
+            claimRef:
+              namespace: rag
+              name: milvus-vectordb-pvc
+          ---
+          # PersistentVolumeClaim — consumed by the Milvus standalone pod
+          # via persistence.persistentVolumeClaim.existingClaim in the chart values.
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: milvus-vectordb-pvc
+            namespace: rag
+          spec:
+            accessModes:
+              - ReadWriteMany
+            resources:
+              requests:
+                storage: 10Ti
+            storageClassName: storageclass-wekafs-fs-static
+            volumeName: milvus-vectordb-pv
+
+      # =====================================================================
+      # Component 0.75: Envoy Endpoint Discovery
+      # The Envoy Gateway is installed cluster-wide BEFORE the AIDP AppStack
+      # (via the WEKA App Store cluster-init step), so its Service ClusterIP
+      # exists by the time this Job runs. The Job:
+      #   1. Looks up the Envoy Gateway Service ClusterIP
+      #   2. Writes a small ConfigMap (envoy-endpoints) containing only the
+      #      discovered IP under `global.keycloakHostAlias.ip`
+      #   3. The aidp component's valuesFiles list references both
+      #      aidp-site-config (user-edited; hostname only) AND envoy-endpoints
+      #      (auto-populated; ip only). The operator deep-merges them at
+      #      install time, so customers no longer need to know the IP up front.
+      #
+      # NOTE on future operator ${variables} support: the bash script below
+      # uses ${ENVOY_IP} for shell interpolation. Once the WekaAppStore
+      # operator's variable-substitution feature ships per
+      # PRD-appstack-variable-substitution.md, these patterns will collide
+      # with operator-side substitution — same caveat as keycloak-secret-sync.
+      # When that ships, this entire component is superseded by the v2
+      # "dynamic variable sources" backlog item (.planning/BACKLOG.md).
+      # =====================================================================
+      - name: envoy-endpoint-discovery
+        enabled: true
+        dependsOn: [aidp-bootstrap-secrets]
+        description: "Discover Envoy Gateway ClusterIP and write envoy-endpoints ConfigMap"
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: envoy-endpoint-discovery
+            namespace: rag
+          ---
+          # ClusterRole — read-only, services only, scoped to no specific
+          # namespace because we read from envoy-gateway-system.
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRole
+          metadata:
+            name: envoy-endpoint-discovery
+          rules:
+            - apiGroups: [""]
+              resources: ["services"]
+              verbs: ["get", "list"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: envoy-endpoint-discovery
+          subjects:
+            - kind: ServiceAccount
+              name: envoy-endpoint-discovery
+              namespace: rag
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: envoy-endpoint-discovery
+          ---
+          # Role — write the small overlay ConfigMap in the rag namespace.
+          # Split into two rules because Kubernetes RBAC's resourceNames
+          # filter only applies to verbs that operate on an existing named
+          # resource (get/update/patch/delete). For "create" the name lives
+          # in the request body and isn't known at admission time, so
+          # resourceNames silently denies all creates. The script only ever
+          # creates "envoy-endpoints" so the practical scope is the same.
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata:
+            name: envoy-endpoint-discovery
+            namespace: rag
+          rules:
+            - apiGroups: [""]
+              resources: ["configmaps"]
+              verbs: ["create"]
+            - apiGroups: [""]
+              resources: ["configmaps"]
+              resourceNames: ["envoy-endpoints"]
+              verbs: ["get", "update", "patch"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata:
+            name: envoy-endpoint-discovery
+            namespace: rag
+          subjects:
+            - kind: ServiceAccount
+              name: envoy-endpoint-discovery
+              namespace: rag
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: Role
+            name: envoy-endpoint-discovery
+          ---
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: envoy-endpoint-discovery
+            namespace: rag
+          spec:
+            backoffLimit: 6
+            ttlSecondsAfterFinished: 60
+            template:
+              spec:
+                restartPolicy: OnFailure
+                serviceAccountName: envoy-endpoint-discovery
+                containers:
+                  - name: discover
+                    image: alpine/k8s:1.30.0
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set -euo pipefail
+                        echo "Discovering Envoy Gateway ClusterIP..."
+
+                        ENVOY_IP=""
+                        for i in $(seq 1 30); do
+                          ENVOY_IP=$(kubectl -n envoy-gateway-system get svc \
+                            -l 'gateway.envoyproxy.io/owning-gateway-name=warp-edge-gateway' \
+                            -o jsonpath='{.items[0].spec.clusterIP}' 2>/dev/null || true)
+                          [[ -n "${ENVOY_IP}" ]] && break
+                          echo "  waiting for Envoy Gateway... (${i}/30)"
+                          sleep 5
+                        done
+
+                        if [[ -z "${ENVOY_IP}" ]]; then
+                          echo "ERROR: Envoy Gateway service not found in envoy-gateway-system." >&2
+                          echo "Hint: ensure the WEKA App Store cluster-init has installed the Gateway before AIDP." >&2
+                          exit 1
+                        fi
+                        echo "Discovered Envoy Gateway ClusterIP: ${ENVOY_IP}"
+
+                        cat <<EOF | kubectl apply -f -
+                        apiVersion: v1
+                        kind: ConfigMap
+                        metadata:
+                          name: envoy-endpoints
+                          namespace: rag
+                          labels:
+                            app.kubernetes.io/managed-by: aidp-bootstrap
+                            app.kubernetes.io/component: envoy-endpoint-discovery
+                        data:
+                          aidp-values: |
+                            global:
+                              keycloakHostAlias:
+                                enabled: true
+                                ip: "${ENVOY_IP}"
+                        EOF
+
+                        echo "Wrote envoy-endpoints ConfigMap (ip=${ENVOY_IP})."
+        readinessCheck:
+          type: job
+          name: envoy-endpoint-discovery
+          timeout: 180
+
+      # =====================================================================
+      # Component 1: Keycloak Identity Provider
+      # =====================================================================
+      - name: keycloak
+        enabled: true
+        dependsOn: [aidp-bootstrap-secrets, aidp-keycloak-realm-config]
+        description: "Keycloak OIDC identity provider with AIDP realm configuration"
+        helmChart:
+          repository: https://codecentric.github.io/helm-charts
+          name: keycloakx
+          version: "7.1.9"
+          releaseName: keycloak
+          crdsStrategy: Skip
+        values:
+          # Pin Service/StatefulSet name to "keycloak". Without this the
+          # codecentric/keycloakx chart names them "<release>-<chart>" =
+          # "keycloak-keycloakx", which the AIDP HTTPRoute backendRef
+          # (helm/aidp/templates/envoy/httproute-keycloak.yaml) and the
+          # post-install secret-sync Job expect to be exactly "keycloak".
+          # Same pattern used for space-manager-postgres further down.
+          fullnameOverride: keycloak
+          command:
+            - "/opt/keycloak/bin/kc.sh"
+            - "start"
+            - "--http-port=8080"
+            - "--hostname-strict=false"
+            - "--http-relative-path=/auth/"
+            - "--proxy-headers=xforwarded"   # Keycloak 25+ replaced --proxy=edge
+            - "--import-realm"               # import realm JSON from /opt/keycloak/data/import on start
+            - "--health-enabled=true"                 # expose management interface on port 9000
+            - "--metrics-enabled=true"                # expose /metrics on management interface
+            - "--http-management-relative-path=/auth" # match chart probes that target /auth/health on port 9000
+
+
+          extraEnv: |
+            - name: KEYCLOAK_ADMIN
+              value: admin
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-secret
+                  key: admin-password
+            - name: JAVA_OPTS_APPEND
+              value: >-
+                -Djgroups.dns.query={{ include "keycloak.fullname" . }}-headless
+
+          # The realm-config ConfigMap is mounted directly into the main
+          # container (see extraVolumeMounts below). No init container cp
+          # step is needed — Keycloak reads JSON files from the mount path.
+
+          extraVolumes: |
+            - name: realm-config
+              configMap:
+                name: keycloak-realm-config
+
+          extraVolumeMounts: |
+            - name: realm-config
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+
+          service:
+            type: ClusterIP
+            httpPort: 80
+            httpsPort: 443
+
+          postgresql:
+            enabled: true
+            auth:
+              existingSecret: keycloak-postgres-secret
+              secretKeys:
+                adminPasswordKey: postgres-password
+                userPasswordKey: password
+            # Bitnami catalog change (Aug 2025): use bitnamilegacy mirror.
+            image:
+              registry: docker.io
+              repository: bitnamilegacy/postgresql
+            volumePermissions:
+              image:
+                registry: docker.io
+                repository: bitnamilegacy/os-shell
+            metrics:
+              image:
+                registry: docker.io
+                repository: bitnamilegacy/postgres-exporter
+
+        valuesFiles:
+          - kind: ConfigMap
+            name: aidp-site-config
+            key: keycloak-values
+
+        readinessCheck:
+          # Operator's statefulset wait relies on .status.conditions[type=Ready]
+          # which StatefulSets don't populate. Use pod-level Ready instead.
+          type: pod
+          selector: "app.kubernetes.io/instance=keycloak,app.kubernetes.io/name=keycloakx"
+          # Cold start (postgres init + realm import + Quarkus boot) can take
+          # 4–6 minutes. 600s gives comfortable headroom.
+          timeout: 600
+
+      # =====================================================================
+      # Component 1.5: Keycloak Secret Sync
+      # Keycloak 25+ silently discards client secrets during realm import
+      # (keycloak/keycloak#30543). Confidential clients (aidp-gui, rag-bridge)
+      # are auto-generated by Keycloak instead. This Job authenticates as
+      # admin, FETCHES the generated client secrets via the Admin API, and
+      # PATCHES the downstream K8s Secrets (aidp-gui-secrets, rag-bridge-
+      # secrets) so the AIDP component starts with real values via envFrom.
+      # Idempotent: re-runs are no-ops when secrets are already in sync.
+      # Sequenced BEFORE aidp so its pods boot the first time with real
+      # secrets — no rollout restart required.
+      #
+      # NOTE on future operator ${variables} support: the bash script below
+      # uses ${NS}, ${KC_HOST}, etc. for shell interpolation. Once the
+      # WekaAppStore operator's variable-substitution feature ships per
+      # PRD-appstack-variable-substitution.md, these patterns will collide
+      # with operator-side substitution. Either (a) update the PRD to use
+      # safe_substitute() so unknown names pass through, or (b) escape the
+      # bash references here as $$NS, $$KC_HOST etc. at the same time the
+      # operator change lands.
+      # =====================================================================
+      - name: keycloak-secret-sync
+        enabled: true
+        dependsOn: [keycloak]
+        description: "Fetch Keycloak-generated client secrets and patch downstream K8s Secrets"
+        kubernetesManifest: |
+          # ServiceAccount + Role scoped to ONLY the two Secrets that consume
+          # Keycloak client credentials. Cannot read any other Secret.
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: keycloak-secret-sync
+            namespace: rag
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata:
+            name: keycloak-secret-sync
+            namespace: rag
+          rules:
+            - apiGroups: [""]
+              resources: ["secrets"]
+              resourceNames: ["aidp-gui-secrets", "rag-bridge-secrets"]
+              verbs: ["get", "patch"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata:
+            name: keycloak-secret-sync
+            namespace: rag
+          subjects:
+            - kind: ServiceAccount
+              name: keycloak-secret-sync
+              namespace: rag
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: Role
+            name: keycloak-secret-sync
+          ---
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: keycloak-secret-sync
+            namespace: rag
+          spec:
+            backoffLimit: 6
+            ttlSecondsAfterFinished: 60     # auto-clean after success so reapply can recreate
+            template:
+              spec:
+                restartPolicy: OnFailure
+                serviceAccountName: keycloak-secret-sync
+                containers:
+                  - name: sync
+                    image: alpine/k8s:1.30.0
+                    env:
+                      - name: NS
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.namespace
+                      - name: KC_ADMIN_PASSWORD
+                        valueFrom:
+                          secretKeyRef:
+                            name: keycloak-admin-secret
+                            key: admin-password
+                      # Site-config aidp-values blob — Job uses yq to extract
+                      # gui.baseUrl for the aidp-gui client URL config.
+                      - name: AIDP_VALUES
+                        valueFrom:
+                          configMapKeyRef:
+                            name: aidp-site-config
+                            key: aidp-values
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set -euo pipefail
+                        # codecentric/keycloakx names the main Service "<fullname>-http"
+                        # (see chart's templates/service.yaml). With fullnameOverride: keycloak
+                        # the resulting Service is "keycloak-http", not "keycloak".
+                        KC_HOST="http://keycloak-http.${NS}.svc.cluster.local"
+                        REALM="rag-gateway"
+
+                        echo "Waiting for Keycloak master realm at ${KC_HOST}..."
+                        until curl -sf -H "X-Forwarded-Proto: https" "${KC_HOST}/auth/realms/master" >/dev/null; do
+                          sleep 5
+                        done
+
+                        echo "Authenticating as admin..."
+                        ADMIN_TOKEN=$(curl -sf -H "X-Forwarded-Proto: https" -X POST \
+                          "${KC_HOST}/auth/realms/master/protocol/openid-connect/token" \
+                          -d "client_id=admin-cli" \
+                          -d "username=admin" \
+                          -d "password=${KC_ADMIN_PASSWORD}" \
+                          -d "grant_type=password" | jq -r '.access_token')
+
+                        if [[ -z "${ADMIN_TOKEN}" || "${ADMIN_TOKEN}" == "null" ]]; then
+                          echo "ERROR: failed to obtain admin token" >&2
+                          exit 1
+                        fi
+
+                        # Ensure rag-gateway realm has sslRequired=NONE.
+                        # Why: in-cluster pods (aidp-gui, rag-bridge) fetch the
+                        # realm's .well-known/openid-configuration over plain
+                        # HTTP. Keycloak's default sslRequired=external rejects
+                        # non-localhost HTTP with 403. Until real TLS is in
+                        # place between pods and Envoy → Keycloak, the realm
+                        # has to allow plain HTTP. When TLS lands cluster-wide,
+                        # REMOVE this block AND change the realm JSON back to
+                        # "sslRequired": "external".
+                        # Idempotent: no-op if already NONE.
+                        echo "Ensuring rag-gateway realm sslRequired=NONE..."
+                        CURRENT_SSL=$(curl -sf -H "X-Forwarded-Proto: https" \
+                          -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                          "${KC_HOST}/auth/admin/realms/${REALM}" \
+                          | jq -r '.sslRequired // empty')
+                        case "${CURRENT_SSL}" in
+                          NONE|none)
+                            echo "  already NONE, skipping"
+                            ;;
+                          *)
+                            curl -sf -H "X-Forwarded-Proto: https" \
+                              -X PUT \
+                              -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                              -H "Content-Type: application/json" \
+                              -d '{"sslRequired":"NONE"}' \
+                              "${KC_HOST}/auth/admin/realms/${REALM}"
+                            echo "  patched (was: ${CURRENT_SSL})"
+                            ;;
+                        esac
+
+                        sync_client() {
+                          local CLIENT_ID="$1"
+                          local TARGET_SECRET="$2"
+                          local SECRET_KEY="$3"
+
+                          echo "Syncing ${CLIENT_ID} -> secret/${TARGET_SECRET}.${SECRET_KEY}"
+
+                          local CLIENT_UUID
+                          CLIENT_UUID=$(curl -sf -H "X-Forwarded-Proto: https" \
+                            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                            "${KC_HOST}/auth/admin/realms/${REALM}/clients" \
+                            | jq -r ".[] | select(.clientId==\"${CLIENT_ID}\") | .id")
+
+                          if [[ -z "${CLIENT_UUID}" || "${CLIENT_UUID}" == "null" ]]; then
+                            echo "ERROR: client ${CLIENT_ID} not found in realm ${REALM}" >&2
+                            exit 1
+                          fi
+
+                          local CLIENT_SECRET
+                          CLIENT_SECRET=$(curl -sf -H "X-Forwarded-Proto: https" \
+                            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                            "${KC_HOST}/auth/admin/realms/${REALM}/clients/${CLIENT_UUID}/client-secret" \
+                            | jq -r '.value')
+
+                          if [[ -z "${CLIENT_SECRET}" || "${CLIENT_SECRET}" == "null" ]]; then
+                            echo "ERROR: ${CLIENT_ID} returned no client-secret (is it a confidential client?)" >&2
+                            exit 1
+                          fi
+
+                          local CURRENT
+                          CURRENT=$(kubectl -n "${NS}" get secret "${TARGET_SECRET}" \
+                            -o jsonpath="{.data.${SECRET_KEY}}" | base64 -d 2>/dev/null || echo "")
+
+                          if [[ "${CURRENT}" == "${CLIENT_SECRET}" ]]; then
+                            echo "  already in sync, skipping"
+                            return 0
+                          fi
+
+                          local ENCODED
+                          ENCODED=$(printf '%s' "${CLIENT_SECRET}" | base64 | tr -d '\n')
+                          kubectl -n "${NS}" patch secret "${TARGET_SECRET}" \
+                            --type='json' \
+                            -p="[{\"op\":\"replace\",\"path\":\"/data/${SECRET_KEY}\",\"value\":\"${ENCODED}\"}]"
+                          echo "  patched"
+                        }
+
+                        # Grant a confidential client's service account one or more
+                        # realm-management client roles. rag-bridge needs view-users +
+                        # query-users so its client-credentials token can call the admin
+                        # users endpoint (uid/gids lookup). Idempotent — skips roles
+                        # already assigned. Same in-cluster admin pattern as sync_client.
+                        grant_sa_realm_mgmt_roles() {
+                          local CLIENT_ID="$1"; shift
+                          local ROLES="$*"
+                          echo "Granting realm-management roles to ${CLIENT_ID} service account: ${ROLES}"
+
+                          local CLIENT_UUID
+                          CLIENT_UUID=$(curl -sf -H "X-Forwarded-Proto: https" \
+                            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                            "${KC_HOST}/auth/admin/realms/${REALM}/clients" \
+                            | jq -r ".[] | select(.clientId==\"${CLIENT_ID}\") | .id")
+                          if [[ -z "${CLIENT_UUID}" || "${CLIENT_UUID}" == "null" ]]; then
+                            echo "ERROR: client ${CLIENT_ID} not found in realm ${REALM}" >&2; exit 1
+                          fi
+
+                          local SA_ID
+                          SA_ID=$(curl -sf -H "X-Forwarded-Proto: https" \
+                            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                            "${KC_HOST}/auth/admin/realms/${REALM}/clients/${CLIENT_UUID}/service-account-user" \
+                            | jq -r '.id')
+                          if [[ -z "${SA_ID}" || "${SA_ID}" == "null" ]]; then
+                            echo "ERROR: ${CLIENT_ID} has no service account (serviceAccountsEnabled?)" >&2; exit 1
+                          fi
+
+                          local RM_UUID
+                          RM_UUID=$(curl -sf -H "X-Forwarded-Proto: https" \
+                            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                            "${KC_HOST}/auth/admin/realms/${REALM}/clients?clientId=realm-management" \
+                            | jq -r '.[0].id')
+
+                          local CURRENT
+                          CURRENT=$(curl -sf -H "X-Forwarded-Proto: https" \
+                            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                            "${KC_HOST}/auth/admin/realms/${REALM}/users/${SA_ID}/role-mappings/clients/${RM_UUID}" \
+                            | jq -r '.[].name')
+
+                          local TO_ADD="[]"
+                          for ROLE in ${ROLES}; do
+                            if echo "${CURRENT}" | grep -qx "${ROLE}"; then
+                              echo "  ${ROLE}: already granted"; continue
+                            fi
+                            local ROLE_OBJ
+                            ROLE_OBJ=$(curl -sf -H "X-Forwarded-Proto: https" \
+                              -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                              "${KC_HOST}/auth/admin/realms/${REALM}/clients/${RM_UUID}/roles/${ROLE}")
+                            TO_ADD=$(echo "${TO_ADD}" | jq ". + [${ROLE_OBJ}]")
+                          done
+
+                          if [[ "$(echo "${TO_ADD}" | jq 'length')" == "0" ]]; then
+                            echo "  nothing to add"; return 0
+                          fi
+                          curl -sf -H "X-Forwarded-Proto: https" -X POST \
+                            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                            -H "Content-Type: application/json" \
+                            -d "${TO_ADD}" \
+                            "${KC_HOST}/auth/admin/realms/${REALM}/users/${SA_ID}/role-mappings/clients/${RM_UUID}"
+                          echo "  granted"
+                        }
+
+                        sync_client aidp-gui   aidp-gui-secrets   KEYCLOAK_CLIENT_SECRET
+                        sync_client rag-bridge rag-bridge-secrets KEYCLOAK_CLIENT_SECRET
+
+                        # rag-bridge's SA must read users for the uid/gids admin lookup.
+                        grant_sa_realm_mgmt_roles rag-bridge view-users query-users
+
+                        # Declare uid + gids as managed user-profile attributes so every user
+                        # (new + existing) carries the fields rag-bridge reads (KC_UID_ATTR /
+                        # KC_GIDS_ATTR). edit=admin so only admins set them; OPTIONAL (not
+                        # required) so OIDC/OAuth signup isn't blocked. Idempotent.
+                        # NOTE: declaring the FIELDS does not auto-populate VALUES — set them
+                        # per user (Admin Console / API) or federate from LDAP. rag-gateway
+                        # TOOL_FALLBACK_UID/GIDS covers any user left unset.
+                        echo "Ensuring uid/gids declared in ${REALM} user profile..."
+                        PROFILE=$(curl -sf -H "X-Forwarded-Proto: https" \
+                          -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                          "${KC_HOST}/auth/admin/realms/${REALM}/users/profile")
+                        if echo "${PROFILE}" | jq -e '.attributes[] | select(.name=="uid")' >/dev/null 2>&1; then
+                          echo "  already declared, skipping"
+                        else
+                          echo "${PROFILE}" | jq '.attributes += [
+                            {"name":"uid","displayName":"POSIX UID","multivalued":false,
+                             "permissions":{"view":["admin","user"],"edit":["admin"]},
+                             "validations":{"pattern":{"pattern":"^[0-9]+$","error-message":"uid must be numeric"}}},
+                            {"name":"gids","displayName":"POSIX GIDs","multivalued":true,
+                             "permissions":{"view":["admin","user"],"edit":["admin"]},
+                             "validations":{"pattern":{"pattern":"^[0-9]+$","error-message":"gid must be numeric"}}}
+                          ]' \
+                            | curl -sf -H "X-Forwarded-Proto: https" -X PUT \
+                                -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                                -H "Content-Type: application/json" \
+                                -d @- \
+                                "${KC_HOST}/auth/admin/realms/${REALM}/users/profile" >/dev/null
+                          echo "  declared uid + gids in user profile"
+                        fi
+
+                        # ------------------------------------------------------------------
+                        # Configure aidp-gui client redirectUris and webOrigins.
+                        # Keycloak rejects any login whose redirect_uri doesn't appear in
+                        # the client's registered redirectUris. The realm JSON ships the
+                        # literal placeholders AIDP_REDIRECT_URI_PLACEHOLDER and
+                        # AIDP_ORIGIN_PLACEHOLDER; this block PUTs the real values derived
+                        # from gui.baseUrl in aidp-site-config. Idempotent — skips when
+                        # already in sync.
+                        # ------------------------------------------------------------------
+                        configure_client_urls() {
+                          local CLIENT_ID="$1"
+                          local REDIRECT_URI="$2"
+                          local WEB_ORIGIN="$3"
+
+                          echo "Configuring ${CLIENT_ID} URLs (redirect=${REDIRECT_URI}, origin=${WEB_ORIGIN})..."
+
+                          local CLIENT_UUID
+                          CLIENT_UUID=$(curl -sf -H "X-Forwarded-Proto: https" \
+                            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                            "${KC_HOST}/auth/admin/realms/${REALM}/clients" \
+                            | jq -r ".[] | select(.clientId==\"${CLIENT_ID}\") | .id")
+
+                          if [[ -z "${CLIENT_UUID}" || "${CLIENT_UUID}" == "null" ]]; then
+                            echo "ERROR: client ${CLIENT_ID} not found in realm ${REALM}" >&2
+                            exit 1
+                          fi
+
+                          local CURRENT_CLIENT
+                          CURRENT_CLIENT=$(curl -sf -H "X-Forwarded-Proto: https" \
+                            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                            "${KC_HOST}/auth/admin/realms/${REALM}/clients/${CLIENT_UUID}")
+
+                          local DESIRED_REDIRECTS DESIRED_ORIGINS
+                          DESIRED_REDIRECTS=$(jq -nc --arg r "${REDIRECT_URI}" '[$r]')
+                          DESIRED_ORIGINS=$(jq -nc --arg o "${WEB_ORIGIN}" '[$o]')
+
+                          local CURRENT_REDIRECTS CURRENT_ORIGINS
+                          CURRENT_REDIRECTS=$(echo "${CURRENT_CLIENT}" | jq -c '.redirectUris // []')
+                          CURRENT_ORIGINS=$(echo "${CURRENT_CLIENT}" | jq -c '.webOrigins // []')
+
+                          if [[ "${CURRENT_REDIRECTS}" == "${DESIRED_REDIRECTS}" \
+                              && "${CURRENT_ORIGINS}" == "${DESIRED_ORIGINS}" ]]; then
+                            echo "  already in sync, skipping"
+                            return 0
+                          fi
+
+                          local PATCHED
+                          PATCHED=$(echo "${CURRENT_CLIENT}" | jq \
+                            --argjson redirects "${DESIRED_REDIRECTS}" \
+                            --argjson origins "${DESIRED_ORIGINS}" \
+                            '.redirectUris = $redirects | .webOrigins = $origins')
+
+                          curl -sf -H "X-Forwarded-Proto: https" \
+                            -X PUT \
+                            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                            -H "Content-Type: application/json" \
+                            -d "${PATCHED}" \
+                            "${KC_HOST}/auth/admin/realms/${REALM}/clients/${CLIENT_UUID}"
+                          echo "  patched"
+                        }
+
+                        AIDP_BASE_URL=$(printf '%s' "${AIDP_VALUES}" | yq '.gui.baseUrl // ""')
+                        if [[ -z "${AIDP_BASE_URL}" || "${AIDP_BASE_URL}" == "null" ]]; then
+                          echo "ERROR: gui.baseUrl missing from aidp-site-config" >&2
+                          exit 1
+                        fi
+                        AIDP_BASE_URL="${AIDP_BASE_URL%/}"      # strip trailing slash
+                        configure_client_urls aidp-gui \
+                          "${AIDP_BASE_URL}/oauth/oidc/callback" \
+                          "${AIDP_BASE_URL}"
+
+                        echo "Keycloak post-install config complete."
+        readinessCheck:
+          type: job
+          name: keycloak-secret-sync
+          timeout: 300
+
+      # =====================================================================
+      # Component 2: Clustered Milvus (external to NVIDIA RAG blueprint)
+      # CPU-only, S3-backed via WEKA S3 (no MinIO pod, no Pulsar — bundled
+      # Kafka MQ). Woodpecker disabled: WEKA S3 does not return the
+      # ErrSegmentFenced error that Woodpecker's conditional-write probe
+      # requires, causing the streaming node to panic on startup.
+      # Release name "milvus" is intentional: it preserves the proxy
+      # service DNS at milvus.rag.svc.cluster.local:19530 so existing
+      # consumers (rag-gateway, space-manager, ingestor, GUI) need no
+      # config changes.
+      # =====================================================================
+      - name: milvus
+        enabled: true
+        dependsOn: [aidp-bootstrap-secrets, weka-s3-lb]
+        description: "Milvus 2.6.3 cluster — vector DB for RAG (S3-backed via WEKA S3 aidp-bucket/milvus, Kafka MQ)"
+        helmChart:
+          repository: https://zilliztech.github.io/milvus-helm
+          name: milvus
+          version: "5.0.5"
+          releaseName: milvus
+          crdsStrategy: Skip
+        valuesFiles:
+          - kind: ConfigMap
+            name: aidp-site-config
+            key: milvus-values
+        readinessCheck:
+          # Cluster mode renders 6 milvus pods (proxy, mixcoord, datanode,
+          # querynode, streamingnode, attu) all carrying the labels below.
+          # The etcd pods carry app.kubernetes.io/name=etcd and are excluded
+          # by the AND, so this selector waits for the full Milvus cluster
+          # without blocking on etcd's separate readiness.
+          type: pod
+          selector: "app.kubernetes.io/instance=milvus,app.kubernetes.io/name=milvus"
+          timeout: 900
+
+      # =====================================================================
+      # (NIM Operator moved to cluster_init/app-store-cluster-init.yaml —
+      # it's a cluster-wide prerequisite, not an AIDP runtime component.)
+      # =====================================================================
+
+      # =====================================================================
+      # Component 2.75: NIM Cache PVCs
+      # Pre-creates the 7 PVCs each NIMCache CR expects, using the default
+      # storage class (WEKA dir-api, dynamic). Decoupling the PVCs from the
+      # blueprint's Helm release means the PVCs survive helm uninstall —
+      # so long as the bootstrap component still owns them.
+      #
+      # NOTE ON PERSISTENCE ACROSS TEARDOWN CYCLES:
+      # Because these PVCs live inside the weka-aidp AppStack, they ARE
+      # deleted when you `kubectl delete wekaappstore weka-aidp`. To keep
+      # cache data through repeated teardowns:
+      #   1) After first provisioning, patch each PV to Retain:
+      #      for p in $(kubectl -n rag get pvc \
+      #        -l 'nim-cache=true' -o jsonpath='{.items[*].spec.volumeName}'); do
+      #        kubectl patch pv $p --type=merge \
+      #          -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}';
+      #      done
+      #   2) Between teardown and reinstall, clear claimRef on Released PVs:
+      #      for p in $(kubectl get pv -o jsonpath='{.items[?(@.status.phase=="Released")].metadata.name}'); do
+      #        kubectl patch pv $p --type=merge -p '{"spec":{"claimRef":null}}';
+      #      done
+      # Alternatively move this component's manifest out into a standalone
+      # nim-cache-pvcs.yaml that you apply once and leave alone.
+      # =====================================================================
+      - name: aidp-bootstrap-nim-cache
+        enabled: true
+        dependsOn: [aidp-bootstrap-secrets, aidp-bootstrap-ngc-secrets]
+        description: "Pre-created PVCs for NIM model caches (survive helm uninstall)"
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: nim-llm-cache-pvc
+            namespace: rag
+            labels:
+              nim-cache: "true"
+              nim: nim-llm
+          spec:
+            accessModes: [ReadWriteMany]
+            storageClassName: storageclass-wekafs-dir-api-retain
+            resources:
+              requests:
+                storage: 120Gi
+          ---
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: nemotron-embedding-ms-cache-pvc
+            namespace: rag
+            labels:
+              nim-cache: "true"
+              nim: nemotron-embedding-ms
+          spec:
+            accessModes: [ReadWriteMany]
+            storageClassName: storageclass-wekafs-dir-api-retain
+            resources:
+              requests:
+                storage: 50Gi
+          ---
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: nemotron-ranking-ms-cache-pvc
+            namespace: rag
+            labels:
+              nim-cache: "true"
+              nim: nemotron-ranking-ms
+          spec:
+            accessModes: [ReadWriteMany]
+            storageClassName: storageclass-wekafs-dir-api-retain
+            resources:
+              requests:
+                storage: 50Gi
+          ---
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: nemoretriever-ocr-v1-pvc
+            namespace: rag
+            labels:
+              nim-cache: "true"
+              nim: nemoretriever-ocr-v1
+          spec:
+            accessModes: [ReadWriteMany]
+            storageClassName: storageclass-wekafs-dir-api-retain
+            resources:
+              requests:
+                storage: 25Gi
+          ---
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: nemoretriever-page-elements-v3-pvc
+            namespace: rag
+            labels:
+              nim-cache: "true"
+              nim: nemoretriever-page-elements-v3
+          spec:
+            accessModes: [ReadWriteMany]
+            storageClassName: storageclass-wekafs-dir-api-retain
+            resources:
+              requests:
+                storage: 25Gi
+          ---
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: nemoretriever-graphic-elements-v1-pvc
+            namespace: rag
+            labels:
+              nim-cache: "true"
+              nim: nemoretriever-graphic-elements-v1
+          spec:
+            accessModes: [ReadWriteMany]
+            storageClassName: storageclass-wekafs-dir-api-retain
+            resources:
+              requests:
+                storage: 25Gi
+          ---
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: nemoretriever-table-structure-v1-pvc
+            namespace: rag
+            labels:
+              nim-cache: "true"
+              nim: nemoretriever-table-structure-v1
+          spec:
+            accessModes: [ReadWriteMany]
+            storageClassName: storageclass-wekafs-dir-api-retain
+            resources:
+              requests:
+                storage: 25Gi
+
+      # =====================================================================
+      # Component 2.9: AIDP Observability Stack
+      # Installs BEFORE nvidia-rag-blueprint so the OTEL collector endpoint
+      # at otel-collector.rag.svc.cluster.local:4317 is ready when
+      # the NVIDIA services boot (per D-02 — Phase 38 APP_TRACING_* /
+      # NIM_OTEL_* envs must connect immediately, not after a cold-start
+      # gap). Loki (200Gi) + Promtail + Tempo (100Gi) + OTEL Collector +
+      # Phoenix (20Gi) — all backed by WEKA POSIX PVCs.
+      # =====================================================================
+      - name: aidp-observability
+        enabled: true
+        dependsOn: [aidp-bootstrap-nim-cache]
+        description: "LGTM+Phoenix observability stack (Loki + Promtail + Tempo + OTEL Collector + Phoenix) — installed BEFORE nvidia-rag-blueprint so the OTEL endpoint exists at NVIDIA boot (per D-02)."
+        helmChart:
+          repository: "https://weka.github.io/aidp-helm"
+          name: aidp-observability
+          version: "0.1.16"
+          releaseName: aidp-observability
+          crdsStrategy: Skip
+        valuesFiles:
+          - kind: ConfigMap
+            name: aidp-site-config
+            key: aidp-observability-values
+        readinessCheck:
+          type: pod
+          selector: "app.kubernetes.io/instance=aidp-observability"
+          timeout: 900
+
+      # =====================================================================
+      # Component 2.10: Embedding Gateway
+      # Envoy Gateway internal proxy that distributes embedding requests
+      # across nemotron-embedding-ms pods at the HTTP layer. Must be
+      # deployed BEFORE nvidia-rag-blueprint so embedding-proxy.rag DNS
+      # resolves when nv-ingest reads EMBEDDING_NIM_ENDPOINT.
+      #
+      # Uses a Job (not bare kubernetesManifest) because the App Store
+      # operator service account lacks RBAC for gateway.envoyproxy.io and
+      # gateway.networking.k8s.io CRDs.
+      #
+      # Stable DNS approach: Envoy Gateway runs its data-plane pods in the
+      # envoy-gateway-system namespace, so a selector-based Service in rag
+      # can never match them. The Job instead creates an ExternalName
+      # Service in rag that resolves to the auto-generated Envoy service in
+      # envoy-gateway-system, discovered by owning-gateway labels.
+      # =====================================================================
+      - name: embedding-gateway
+        enabled: true
+        dependsOn: [aidp-bootstrap-secrets]
+        description: "Envoy Gateway internal L7 proxy for embedding LB — stable embedding-proxy DNS for nv-ingest"
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: embedding-gateway-setup
+            namespace: rag
+          ---
+          # Role: manage Envoy CRDs and Services in rag namespace
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata:
+            name: embedding-gateway-setup
+            namespace: rag
+          rules:
+            - apiGroups: ["gateway.envoyproxy.io"]
+              resources: ["envoyproxies"]
+              verbs: ["get", "create", "update", "patch"]
+            - apiGroups: ["gateway.networking.k8s.io"]
+              resources: ["gateways", "httproutes"]
+              verbs: ["get", "create", "update", "patch"]
+            - apiGroups: [""]
+              resources: ["services"]
+              verbs: ["get", "list", "create", "update", "patch", "delete"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata:
+            name: embedding-gateway-setup
+            namespace: rag
+          subjects:
+            - kind: ServiceAccount
+              name: embedding-gateway-setup
+              namespace: rag
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: Role
+            name: embedding-gateway-setup
+          ---
+          # ClusterRole: read Services in envoy-gateway-system to discover
+          # the auto-generated Envoy service name (unpredictable hash suffix)
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRole
+          metadata:
+            name: embedding-gateway-setup-envoy-reader
+          rules:
+            - apiGroups: [""]
+              resources: ["services"]
+              verbs: ["get", "list"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: embedding-gateway-setup-envoy-reader
+          subjects:
+            - kind: ServiceAccount
+              name: embedding-gateway-setup
+              namespace: rag
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: embedding-gateway-setup-envoy-reader
+          ---
+          # ClusterRole: get/update Gateway status to poll programmed condition
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRole
+          metadata:
+            name: embedding-gateway-setup-gateway-reader
+          rules:
+            - apiGroups: ["gateway.networking.k8s.io"]
+              resources: ["gateways"]
+              verbs: ["get", "list"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: embedding-gateway-setup-gateway-reader
+          subjects:
+            - kind: ServiceAccount
+              name: embedding-gateway-setup
+              namespace: rag
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: embedding-gateway-setup-gateway-reader
+          ---
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: embedding-gateway-setup
+            namespace: rag
+          spec:
+            backoffLimit: 4
+            ttlSecondsAfterFinished: 60
+            template:
+              spec:
+                restartPolicy: OnFailure
+                serviceAccountName: embedding-gateway-setup
+                containers:
+                  - name: apply
+                    image: alpine/k8s:1.30.0
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set -euo pipefail
+
+                        echo "Applying EnvoyProxy, Gateway, HTTPRoute..."
+                        kubectl apply -f - <<'MANIFEST'
+                        apiVersion: gateway.envoyproxy.io/v1alpha1
+                        kind: EnvoyProxy
+                        metadata:
+                          name: internal-proxy
+                          namespace: rag
+                        spec:
+                          provider:
+                            type: Kubernetes
+                            kubernetes:
+                              envoyService:
+                                type: ClusterIP
+                        ---
+                        apiVersion: gateway.networking.k8s.io/v1
+                        kind: Gateway
+                        metadata:
+                          name: embedding-gateway
+                          namespace: rag
+                        spec:
+                          gatewayClassName: envoy-gateway-class
+                          infrastructure:
+                            parametersRef:
+                              group: gateway.envoyproxy.io
+                              kind: EnvoyProxy
+                              name: internal-proxy
+                          listeners:
+                          - name: http
+                            port: 8000
+                            protocol: HTTP
+                            allowedRoutes:
+                              namespaces:
+                                from: Same
+                        ---
+                        apiVersion: gateway.networking.k8s.io/v1
+                        kind: HTTPRoute
+                        metadata:
+                          name: nemotron-embedding-route
+                          namespace: rag
+                        spec:
+                          parentRefs:
+                          - name: embedding-gateway
+                            namespace: rag
+                          rules:
+                          - matches:
+                            - path:
+                                type: PathPrefix
+                                value: /
+                            backendRefs:
+                            - name: nemotron-embedding-ms
+                              port: 8000
+                        MANIFEST
+
+                        echo "Waiting for Gateway embedding-gateway to be programmed..."
+                        for i in $(seq 1 30); do
+                          PROGRAMMED=$(kubectl get gateway embedding-gateway -n rag \
+                            -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null || true)
+                          [[ "${PROGRAMMED}" == "True" ]] && break
+                          echo "  waiting... (${i}/30)"
+                          sleep 5
+                        done
+                        if [[ "${PROGRAMMED}" != "True" ]]; then
+                          echo "ERROR: Gateway did not become programmed in time." >&2
+                          exit 1
+                        fi
+                        echo "Gateway is programmed."
+
+                        echo "Discovering auto-generated Envoy service in envoy-gateway-system..."
+                        ENVOY_SVC=""
+                        for i in $(seq 1 12); do
+                          ENVOY_SVC=$(kubectl -n envoy-gateway-system get svc \
+                            -l "gateway.envoyproxy.io/owning-gateway-name=embedding-gateway,gateway.envoyproxy.io/owning-gateway-namespace=rag" \
+                            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+                          [[ -n "${ENVOY_SVC}" ]] && break
+                          echo "  waiting for Envoy service... (${i}/12)"
+                          sleep 5
+                        done
+                        if [[ -z "${ENVOY_SVC}" ]]; then
+                          echo "ERROR: Could not find auto-generated Envoy service." >&2
+                          exit 1
+                        fi
+                        echo "Found Envoy service: ${ENVOY_SVC}"
+
+                        # Delete any existing embedding-proxy Service (selector-based type
+                        # cannot be changed to ExternalName via apply — must delete first).
+                        kubectl delete svc embedding-proxy -n rag --ignore-not-found=true
+
+                        kubectl apply -f - <<EOF
+                        apiVersion: v1
+                        kind: Service
+                        metadata:
+                          name: embedding-proxy
+                          namespace: rag
+                        spec:
+                          type: ExternalName
+                          externalName: ${ENVOY_SVC}.envoy-gateway-system.svc.cluster.local
+                        EOF
+                        echo "Created ExternalName Service embedding-proxy -> ${ENVOY_SVC}.envoy-gateway-system.svc.cluster.local"
+        readinessCheck:
+          type: job
+          name: embedding-gateway-setup
+          timeout: 300
+
+      # =====================================================================
+      # Component 3: NVIDIA RAG Blueprint (Umbrella Chart)
+      # =====================================================================
+      - name: nvidia-rag-blueprint
+        enabled: true
+        dependsOn: [milvus, aidp-bootstrap-nim-cache, aidp-observability, embedding-gateway, weka-s3-lb]
+        description: "NVIDIA RAG Blueprint — NIMs, ingestion pipeline, and RAG server (external Milvus)"
+        helmChart:
+          # Public classic HTTPS Helm repo (ChartMuseum) — no NGC auth required.
+          # oci:// scheme for this registry returns 404; use https://.
+          repository: https://helm.ngc.nvidia.com/nvidia/blueprint
+          name: nvidia-blueprint-rag
+          version: "v2.5.0"
+          # Release name must be "rag" so subcharts produce the services
+          # the blueprint hardcodes: rag-minio, rag-redis-master, rag-server.
+          releaseName: rag
+          crdsStrategy: Auto
+        valuesFiles:
+          - kind: ConfigMap
+            name: aidp-site-config
+            key: nvidia-rag-values
+          - kind: ConfigMap
+            name: aidp-site-config
+            key: nvidia-gpu-profile
+        readinessCheck:
+          type: deployment
+          name: rag-server
+          # APPS-03 / Pitfall 4: NIM cold-start requires up to 1 hour for
+          # model download on first deploy. Default 600s kills the deployment.
+          timeout: 3600
+
+      # =====================================================================
+      # Component 3: PostgreSQL for Space Manager
+      # =====================================================================
+      - name: space-manager-postgres
+        enabled: true
+        dependsOn: [aidp-bootstrap-secrets]
+        description: "PostgreSQL 16 for Space Manager eviction database"
+        helmChart:
+          repository: https://charts.bitnami.com/bitnami
+          name: postgresql
+          version: "18.6.1"
+          releaseName: space-manager-postgres
+          crdsStrategy: Skip
+        values:
+          # Force Service/StatefulSet name to "space-manager-postgres" (otherwise
+          # the Bitnami chart appends "-postgresql", producing
+          # "space-manager-postgres-postgresql" — which the DSN in
+          # aidp-site-config.yaml does NOT match, causing DNS lookup failures
+          # in the alembic-migrate init container.
+          fullnameOverride: space-manager-postgres
+          # Bitnami catalog change (Aug 2025): use bitnamilegacy mirror.
+          image:
+            registry: docker.io
+            repository: bitnamilegacy/postgresql
+          volumePermissions:
+            image:
+              registry: docker.io
+              repository: bitnamilegacy/os-shell
+          metrics:
+            image:
+              registry: docker.io
+              repository: bitnamilegacy/postgres-exporter
+          auth:
+            existingSecret: space-manager-postgres-secrets
+            database: space_manager
+            username: space_manager
+          primary:
+            persistence:
+              enabled: true
+              size: 10Gi
+        readinessCheck:
+          # Operator's statefulset wait relies on .status.conditions[type=Ready]
+          # which StatefulSets don't populate. Use pod-level Ready instead.
+          type: pod
+          selector: "app.kubernetes.io/instance=space-manager-postgres,app.kubernetes.io/name=postgresql"
+          timeout: 300
+
+      # =====================================================================
+      # Component 4: AIDP (Unified Helm Chart)
+      # Waits for: keycloak, nvidia-rag-blueprint, space-manager-postgres
+      # =====================================================================
+      - name: aidp
+        enabled: true
+        # keycloak-secret-sync transitively pulls in keycloak; aidp pods boot
+        # with real Keycloak client secrets in env via envFrom on first start.
+        # envoy-endpoint-discovery populates the envoy-endpoints ConfigMap so
+        # the keycloakHostAlias.ip value is resolved before chart install.
+        dependsOn: [keycloak-secret-sync, nvidia-rag-blueprint, envoy-endpoint-discovery, space-manager-postgres]
+        description: "WEKA AIDP — GUI, Operator, RAG Gateway, RAG Bridge, Space Manager"
+        helmChart:
+          # The chart name must be just "aidp" — the operator derives the
+          # helm alias from the repository URL and prefixes it automatically
+          # (alias/<name>). "aidp/aidp" produced "aidp-helm/aidp/aidp" which
+          # helm treats as a non-existent chart.
+          repository: "https://weka.github.io/aidp-helm"
+          name: aidp
+          version: "0.1.41"
+          releaseName: aidp
+          crdsStrategy: Auto
+        valuesFiles:
+          - kind: ConfigMap
+            name: aidp-site-config
+            key: aidp-values
+          # envoy-endpoints ships the auto-discovered Envoy ClusterIP. Layered
+          # AFTER aidp-site-config so its `global.keycloakHostAlias.ip` value
+          # overrides any placeholder in site-config via the operator's
+          # deep-merge of valuesFiles entries.
+          - kind: ConfigMap
+            name: envoy-endpoints
+            key: aidp-values
+          # CFG-07 (2026-05-11): the aidp-secrets valuesFile reference was
+          # removed — that Secret (`aidp-secrets`, key `aidp-secret-values`)
+          # was never created by Component 0, so the reference was a stale
+          # boilerplate footgun. appstack/aidp-secrets.yaml is regenerated
+          # as placeholder-only documentation; the live Secrets ship inline
+          # in Component 0 above. Restore this entry only if a follow-up
+          # plan adds a real `aidp-secrets` Secret with chart values.
+        readinessCheck:
+          type: deployment
+          name: aidp-gui
+          timeout: 300
+
+      # =====================================================================
+      # Component 5: NVIDIA RAG Frontend (Optional — disabled by default)
+      # AIDP GUI replaces this component. Enable only for NVIDIA-native UI.
+      # Waits for: nvidia-rag-blueprint
+      # =====================================================================
+      - name: rag-frontend
+        enabled: false
+        dependsOn: [nvidia-rag-blueprint]
+        description: "NVIDIA RAG Frontend web UI (optional — AIDP GUI replaces this)"
+        helmChart:
+          repository: oci://helm.ngc.nvidia.com/nvidia/blueprint/charts
+          name: rag-frontend
+          version: "2.5.0"
+          releaseName: rag-frontend
+          crdsStrategy: Skip
+        readinessCheck:
+          type: deployment
+          name: rag-frontend
+          timeout: 300

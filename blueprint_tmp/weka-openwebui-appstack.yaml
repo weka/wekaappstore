@@ -1,0 +1,1212 @@
+# =============================================================================
+# Open WebUI Add-on AppStack
+# =============================================================================
+# What: WekaAppStore CR that deploys Open WebUI as an add-on to an already-
+#       running AIDP cluster. Provides OIDC-authenticated chat UI backed by
+#       the AIDP RAG pipeline via rag-bridge.
+#
+# Prerequisites:
+#   1. The AIDP AppStack (weka-aidp-appstack.yaml) is already deployed and
+#      all its components are Ready.
+#   2. openwebui-site-config ConfigMap is applied:
+#        kubectl apply -f appstack/openwebui-site-config.yaml
+#
+# Apply order:
+#   kubectl apply -f appstack/openwebui-site-config.yaml
+#   kubectl apply -f appstack/weka-openwebui-appstack.yaml
+# =============================================================================
+
+apiVersion: warp.io/v1alpha1
+kind: WekaAppStore
+metadata:
+  name: weka-openwebui
+  namespace: rag
+spec:
+  appStack:
+    # This add-on has no envsubst template variables (no $ngcApiKey-style
+    # fields — Open WebUI secrets are generated at deploy time by
+    # Component 1/3, and OIDC/Envoy values are derived from existing AIDP
+    # ConfigMaps by Component 2).
+    #
+    # Note: spec.appStack.variables is intentionally absent.
+    # The v1alpha1 CRD rejects it with a strict-decoding error:
+    #
+    #   Error from server (BadRequest): error when creating "weka-openwebui-appstack.yaml":
+    #   WekaAppStore in version "v1alpha1" cannot be handled as a WekaAppStore:
+    #   strict decoding error: unknown field "spec.appStack.variables"
+    #
+    # When upstream ships variables support (WEKA App Store backlog), this
+    # add-on has nothing to move there — no envsubst substitutions needed.
+    components:
+
+      # =====================================================================
+      # Component 1: openwebui-bootstrap-secrets
+      # Creates the open-webui-secrets Secret with placeholder values.
+      # Component 3 (openwebui-keycloak-client) later patches the real values:
+      #   OAUTH_CLIENT_SECRET  — fetched from Keycloak
+      #   WEBUI_SECRET_KEY     — generated from /dev/urandom
+      #   WEBUI_ADMIN_PASSWORD — generated from /dev/urandom
+      # WEBUI_ADMIN_EMAIL may be seeded to a fixed admin email (e.g.
+      # admin@openwebui.local) since Component 3 only generates the password.
+      # =====================================================================
+      - name: openwebui-bootstrap-secrets
+        enabled: true
+        dependsOn: []
+        description: "Bootstrap Open WebUI Secret with placeholder values (patched by Component 3)"
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: openwebui-bootstrap-sa
+            namespace: rag
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata:
+            name: openwebui-bootstrap-role
+            namespace: rag
+          rules:
+            - apiGroups: [""]
+              resources: ["secrets"]
+              verbs: ["create"]
+            - apiGroups: [""]
+              resources: ["secrets"]
+              resourceNames: ["open-webui-secrets"]
+              verbs: ["get"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata:
+            name: openwebui-bootstrap-rb
+            namespace: rag
+          subjects:
+            - kind: ServiceAccount
+              name: openwebui-bootstrap-sa
+              namespace: rag
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: Role
+            name: openwebui-bootstrap-role
+          ---
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: openwebui-bootstrap-secrets
+            namespace: rag
+          spec:
+            backoffLimit: 6
+            ttlSecondsAfterFinished: 60
+            template:
+              spec:
+                restartPolicy: OnFailure
+                serviceAccountName: openwebui-bootstrap-sa
+                containers:
+                  - name: bootstrap
+                    image: alpine/k8s:1.30.0
+                    env:
+                      - name: NS
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.namespace
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set -euo pipefail
+                        kubectl get secret open-webui-secrets -n "$NS" >/dev/null 2>&1 \
+                          && echo "open-webui-secrets already exists, skipping." && exit 0
+                        kubectl create secret generic open-webui-secrets \
+                          --from-literal=WEBUI_SECRET_KEY='<replace-me>' \
+                          --from-literal=OAUTH_CLIENT_SECRET='<replace-me>' \
+                          --from-literal=WEBUI_ADMIN_EMAIL='admin@openwebui.local' \
+                          --from-literal=WEBUI_ADMIN_PASSWORD='<replace-me>' \
+                          -n "$NS"
+                        echo "open-webui-secrets created."
+        readinessCheck:
+          type: job
+          name: openwebui-bootstrap-secrets
+          timeout: 60
+
+      # =====================================================================
+      # Component 2: openwebui-config-derive
+      # Reads aidp-site-config (global.keycloak.*) and envoy-endpoints
+      # (global.keycloakHostAlias.ip) to derive the OIDC provider URL and
+      # Keycloak hostAlias IP. Writes openwebui-derived-config ConfigMap with
+      # helm values consumed by the open-webui Helm component.
+      # No keycloak variables are re-declared — all values are derived (D-05/D-06).
+      # =====================================================================
+      - name: openwebui-config-derive
+        enabled: true
+        dependsOn: [openwebui-bootstrap-secrets]
+        description: "Derive OIDC URL + hostAlias from existing AIDP ConfigMaps; write openwebui-derived-config"
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: openwebui-config-derive
+            namespace: rag
+          ---
+          # Role — namespaced, least-privilege.
+          # Three rules required because Kubernetes RBAC resourceNames does not
+          # filter "create" (name lives in request body, not admission context).
+          # Rule 1: create configmaps (unnamed — allows creating openwebui-derived-config)
+          # Rule 2: get/update/patch openwebui-derived-config by name (idempotent re-runs)
+          # Rule 3: get source ConfigMaps by name (read-only inputs)
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata:
+            name: openwebui-config-derive
+            namespace: rag
+          rules:
+            - apiGroups: [""]
+              resources: ["configmaps"]
+              verbs: ["create"]
+            - apiGroups: [""]
+              resources: ["configmaps"]
+              resourceNames: ["openwebui-derived-config"]
+              verbs: ["get", "update", "patch"]
+            - apiGroups: [""]
+              resources: ["configmaps"]
+              resourceNames: ["aidp-site-config", "envoy-endpoints", "openwebui-site-config"]
+              verbs: ["get"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata:
+            name: openwebui-config-derive
+            namespace: rag
+          subjects:
+            - kind: ServiceAccount
+              name: openwebui-config-derive
+              namespace: rag
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: Role
+            name: openwebui-config-derive
+          ---
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: openwebui-config-derive
+            namespace: rag
+          spec:
+            backoffLimit: 6
+            ttlSecondsAfterFinished: 60
+            template:
+              spec:
+                restartPolicy: OnFailure
+                serviceAccountName: openwebui-config-derive
+                containers:
+                  - name: derive
+                    image: alpine/k8s:1.30.0
+                    env:
+                      - name: NS
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.namespace
+                      # Inject source ConfigMap blobs via configMapKeyRef so the
+                      # script can parse them with yq — avoids volume mounts.
+                      - name: AIDP_VALUES
+                        valueFrom:
+                          configMapKeyRef:
+                            name: aidp-site-config
+                            key: aidp-values
+                      - name: ENVOY_VALUES
+                        valueFrom:
+                          configMapKeyRef:
+                            name: envoy-endpoints
+                            key: aidp-values
+                      - name: OWUI_VALUES
+                        valueFrom:
+                          configMapKeyRef:
+                            name: openwebui-site-config
+                            key: openwebui-values
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set -euo pipefail
+                        echo "Deriving Open WebUI config from AIDP ConfigMaps..."
+
+                        # Parse keycloak variables from aidp-site-config (global.keycloak.*)
+                        KC_FQDN=$(echo "$AIDP_VALUES" | yq '.global.keycloak.fqdn')
+                        KC_SCHEME=$(echo "$AIDP_VALUES" | yq '.global.keycloak.scheme')
+                        KC_REALM=$(echo "$AIDP_VALUES" | yq '.global.keycloak.realm')
+                        KC_BASEPATH=$(echo "$AIDP_VALUES" | yq '.global.keycloak.basePath')
+
+                        # Parse Envoy Gateway ClusterIP from envoy-endpoints (written by envoy-endpoint-discovery)
+                        KC_IP=$(echo "$ENVOY_VALUES" | yq '.global.keycloakHostAlias.ip')
+
+                        # Parse Open WebUI base URL from openwebui-site-config
+                        OWUI_BASE_URL=$(echo "$OWUI_VALUES" | yq '.openwebui.baseUrl')
+
+                        echo "KC_FQDN=$KC_FQDN KC_SCHEME=$KC_SCHEME KC_REALM=$KC_REALM"
+                        echo "KC_BASEPATH=$KC_BASEPATH KC_IP=$KC_IP"
+                        echo "OWUI_BASE_URL=$OWUI_BASE_URL"
+
+                        # Construct OIDC provider URL per D-08
+                        OPENID_PROVIDER_URL="$KC_SCHEME://$KC_FQDN$KC_BASEPATH/realms/$KC_REALM/.well-known/openid-configuration"
+                        echo "OPENID_PROVIDER_URL=$OPENID_PROVIDER_URL"
+
+                        # Write openwebui-derived-config with helm values for the open-webui chart.
+                        #
+                        # IMPORTANT: Helm REPLACES list-valued keys across valuesFiles (no deep-merge).
+                        # Because openwebui-derived-config is the last valuesFile, its extraEnvVars list
+                        # is the canonical, complete list for the open-webui Deployment — it includes
+                        # both dynamically-derived vars (OPENID_PROVIDER_URL, WEBUI_URL) and all fixed
+                        # env vars (OTEL, LOG_FORMAT, OAuth flags, secret-sourced vars via secretKeyRef).
+                        #
+                        # hostAliases maps the Keycloak FQDN to the Envoy ClusterIP inside the pod.
+                        # Unquoted EOF heredoc interpolates the derived variables into the YAML.
+                        cat <<EOF | kubectl apply -f -
+                        apiVersion: v1
+                        kind: ConfigMap
+                        metadata:
+                          name: openwebui-derived-config
+                          namespace: $NS
+                          labels:
+                            app.kubernetes.io/managed-by: aidp-bootstrap
+                            app.kubernetes.io/component: openwebui-config-derive
+                        data:
+                          openwebui-helm-values: |
+                            extraEnvVars:
+                              - name: OPENID_PROVIDER_URL
+                                value: "$OPENID_PROVIDER_URL"
+                              - name: OPENID_REDIRECT_URI
+                                value: "$OWUI_BASE_URL/oauth/oidc/callback"
+                              - name: WEBUI_URL
+                                value: "$OWUI_BASE_URL"
+                              # RP-initiated logout: OWUI redirects to Keycloak's end_session_endpoint
+                              # (auto-discovered from OPENID_PROVIDER_URL) with id_token_hint, and
+                              # appends this as post_logout_redirect_uri so the user lands back on the
+                              # OWUI login page after the Keycloak SSO session is terminated. The URL
+                              # must be registered in the client's post.logout.redirect.uris (Component 3).
+                              - name: WEBUI_AUTH_SIGNOUT_REDIRECT_URL
+                                value: "$OWUI_BASE_URL/auth"
+                              # --- LLM backend & default model ---
+                              # The nim-llm OpenAI-compatible connection is configured at deploy time by
+                              # the openwebui-tool-register Job via POST /openai/config/update — NOT here.
+                              # ENABLE_OPENAI_API / OPENAI_API_BASE_URLS / OPENAI_API_KEYS are Open WebUI
+                              # PersistentConfig values: env vars seed them only on a fresh DB (empty PVC)
+                              # and are silently ignored on every redeploy (the DB value wins). The API
+                              # call is therefore the single source of truth and is idempotent.
+                              # DEFAULT_MODELS is likewise first-boot-only; on an existing PVC set the
+                              # default in Admin Settings > Interface, or just pick "AIDP RAG Assistant".
+                              - name: DEFAULT_MODELS
+                                value: "aidp-rag-assistant"
+                              - name: LOG_FORMAT
+                                value: "json"
+                              - name: ENABLE_OTEL
+                                value: "true"
+                              - name: ENABLE_OTEL_TRACES
+                                value: "true"
+                              - name: OTEL_SERVICE_NAME
+                                value: "open-webui"
+                              - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                                value: "http://otel-collector.rag.svc.cluster.local:4317"
+                              - name: OTEL_EXPORTER_OTLP_INSECURE
+                                value: "true"
+                              - name: ENABLE_OAUTH_SIGNUP
+                                value: "true"
+                              - name: OAUTH_CLIENT_ID
+                                value: "open-webui"
+                              - name: OAUTH_PROVIDER_NAME
+                                value: "Keycloak"
+                              - name: OAUTH_SCOPES
+                                value: "openid email profile"
+                              # --- OAuth role mapping (immediate access + Keycloak group -> OWUI role) ---
+                              # DEFAULT_USER_ROLE=user: new OAuth users get immediate access; the
+                              # OWUI default is "pending", which requires admin approval.
+                              - name: DEFAULT_USER_ROLE
+                                value: "user"
+                              # Map Keycloak groups (groups claim, bare names) to OWUI roles on every
+                              # login. members of admins/cluster-admins -> OWUI admin; everyone else
+                              # -> user. NOTE: with role management ON, OWUI returns 403 for a login
+                              # whose groups match NONE of allowed/admin — so the default "/users"
+                              # group provisioned by Component 3 guarantees every user is allowed.
+                              - name: ENABLE_OAUTH_ROLE_MANAGEMENT
+                                value: "true"
+                              - name: OAUTH_ROLES_CLAIM
+                                value: "groups"
+                              - name: OAUTH_ALLOWED_ROLES
+                                value: "users,admins,cluster-admins"
+                              - name: OAUTH_ADMIN_ROLES
+                                value: "admins,cluster-admins"
+                              - name: OAUTH_CLIENT_SECRET
+                                valueFrom:
+                                  secretKeyRef:
+                                    name: open-webui-secrets
+                                    key: OAUTH_CLIENT_SECRET
+                              - name: WEBUI_SECRET_KEY
+                                valueFrom:
+                                  secretKeyRef:
+                                    name: open-webui-secrets
+                                    key: WEBUI_SECRET_KEY
+                              - name: WEBUI_ADMIN_EMAIL
+                                valueFrom:
+                                  secretKeyRef:
+                                    name: open-webui-secrets
+                                    key: WEBUI_ADMIN_EMAIL
+                              - name: WEBUI_ADMIN_PASSWORD
+                                valueFrom:
+                                  secretKeyRef:
+                                    name: open-webui-secrets
+                                    key: WEBUI_ADMIN_PASSWORD
+                              - name: RAG_BRIDGE_API_KEY
+                                valueFrom:
+                                  secretKeyRef:
+                                    name: tool-api-key
+                                    key: TOOL_API_KEY
+                            hostAliases:
+                              - ip: "$KC_IP"
+                                hostnames:
+                                  - "$KC_FQDN"
+                        EOF
+
+                        echo "Wrote openwebui-derived-config ConfigMap."
+        readinessCheck:
+          type: job
+          name: openwebui-config-derive
+          timeout: 180
+
+      # =====================================================================
+      # Component 3: openwebui-keycloak-client
+      # Creates the open-webui OIDC client in the rag-gateway Keycloak realm
+      # via the Admin API — idempotently, without modifying realm JSON (D-09/D-10).
+      # Patches open-webui-secrets with:
+      #   OAUTH_CLIENT_SECRET — fetched from Keycloak after client create/update
+      #   WEBUI_SECRET_KEY    — generated as 64-hex from /dev/urandom
+      #   WEBUI_ADMIN_PASSWORD — generated as 64-hex from /dev/urandom (D-20)
+      # Analog: weka-aidp-appstack.yaml:991-1244 (keycloak-secret-sync)
+      # =====================================================================
+      - name: openwebui-keycloak-client
+        enabled: true
+        dependsOn: [openwebui-config-derive]
+        description: "Register open-webui OIDC client in rag-gateway realm; patch open-webui-secrets"
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: openwebui-keycloak-client
+            namespace: rag
+          ---
+          # Role — least-privilege RBAC for the openwebui-keycloak-client Job.
+          # Three rules:
+          #   Rule 1: secrets [get,patch] on open-webui-secrets (write target)
+          #   Rule 2: secrets [get] on keycloak-admin-secret (read admin password)
+          #   Rule 3: configmaps [get] on openwebui-derived-config (read baseUrl)
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata:
+            name: openwebui-keycloak-client
+            namespace: rag
+          rules:
+            - apiGroups: [""]
+              resources: ["secrets"]
+              resourceNames: ["open-webui-secrets"]
+              verbs: ["get", "patch"]
+            - apiGroups: [""]
+              resources: ["secrets"]
+              resourceNames: ["keycloak-admin-secret"]
+              verbs: ["get"]
+            - apiGroups: [""]
+              resources: ["configmaps"]
+              resourceNames: ["openwebui-derived-config"]
+              verbs: ["get"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata:
+            name: openwebui-keycloak-client
+            namespace: rag
+          subjects:
+            - kind: ServiceAccount
+              name: openwebui-keycloak-client
+              namespace: rag
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: Role
+            name: openwebui-keycloak-client
+          ---
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: openwebui-keycloak-client
+            namespace: rag
+          spec:
+            backoffLimit: 3
+            ttlSecondsAfterFinished: 60
+            template:
+              spec:
+                restartPolicy: OnFailure
+                serviceAccountName: openwebui-keycloak-client
+                containers:
+                  - name: register
+                    image: alpine/k8s:1.30.0
+                    env:
+                      - name: NS
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.namespace
+                      - name: KC_ADMIN_PASSWORD
+                        valueFrom:
+                          secretKeyRef:
+                            name: keycloak-admin-secret
+                            key: admin-password
+                      # Read openwebui-derived-config to get the base URL for redirectUris.
+                      # The derived ConfigMap is written by Component 2 at deploy time.
+                      - name: OWUI_DERIVED
+                        valueFrom:
+                          configMapKeyRef:
+                            name: openwebui-derived-config
+                            key: openwebui-helm-values
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set -euo pipefail
+                        # codecentric/keycloakx fullnameOverride: keycloak produces Service "keycloak-http"
+                        KC_HOST="http://keycloak-http.$NS.svc.cluster.local"
+                        REALM="rag-gateway"
+                        TARGET_SECRET="open-webui-secrets"
+
+                        # Extract WEBUI_URL from the derived ConfigMap (written by Component 2).
+                        # The derived blob is a YAML string; yq parses extraEnvVars to find WEBUI_URL.
+                        BASE_URL=$(printf '%s' "$OWUI_DERIVED" | yq '.extraEnvVars[] | select(.name=="WEBUI_URL") | .value')
+                        BASE_URL=$(echo "$BASE_URL" | sed 's|/$||')  # strip trailing slash
+                        if [[ -z "$BASE_URL" || "$BASE_URL" == "null" ]]; then
+                          echo "ERROR: WEBUI_URL not found in openwebui-derived-config" >&2
+                          exit 1
+                        fi
+                        echo "BASE_URL=$BASE_URL"
+
+                        echo "Waiting for Keycloak master realm at $KC_HOST..."
+                        until curl -sf -H "X-Forwarded-Proto: https" "$KC_HOST/auth/realms/master" >/dev/null; do
+                          sleep 5
+                        done
+
+                        echo "Authenticating as admin..."
+                        ADMIN_TOKEN=$(curl -sf -H "X-Forwarded-Proto: https" -X POST \
+                          "$KC_HOST/auth/realms/master/protocol/openid-connect/token" \
+                          -d "client_id=admin-cli" \
+                          -d "username=admin" \
+                          -d "password=$KC_ADMIN_PASSWORD" \
+                          -d "grant_type=password" | jq -r '.access_token')
+
+                        if [[ -z "$ADMIN_TOKEN" || "$ADMIN_TOKEN" == "null" ]]; then
+                          echo "ERROR: failed to obtain admin token" >&2
+                          exit 1
+                        fi
+
+                        # Idempotent client lookup by clientId==open-webui
+                        echo "Looking up open-webui client in $REALM realm..."
+                        CLIENT_UUID=$(curl -sf -H "X-Forwarded-Proto: https" \
+                          -H "Authorization: Bearer $ADMIN_TOKEN" \
+                          "$KC_HOST/auth/admin/realms/$REALM/clients" \
+                          | jq -r '.[] | select(.clientId=="open-webui") | .id')
+
+                        if [[ -z "$CLIENT_UUID" || "$CLIENT_UUID" == "null" ]]; then
+                          echo "Client open-webui not found — creating..."
+                          curl -sf -H "X-Forwarded-Proto: https" \
+                            -X POST \
+                            -H "Authorization: Bearer $ADMIN_TOKEN" \
+                            -H "Content-Type: application/json" \
+                            -d "{\"clientId\":\"open-webui\",\"enabled\":true,\"protocol\":\"openid-connect\",\"publicClient\":false,\"standardFlowEnabled\":true,\"implicitFlowEnabled\":false,\"directAccessGrantsEnabled\":false,\"serviceAccountsEnabled\":false,\"redirectUris\":[\"$BASE_URL/oauth/oidc/callback\"],\"webOrigins\":[\"$BASE_URL\"]}" \
+                            "$KC_HOST/auth/admin/realms/$REALM/clients"
+                          echo "  created"
+
+                          # Re-query UUID after creation
+                          CLIENT_UUID=$(curl -sf -H "X-Forwarded-Proto: https" \
+                            -H "Authorization: Bearer $ADMIN_TOKEN" \
+                            "$KC_HOST/auth/admin/realms/$REALM/clients" \
+                            | jq -r '.[] | select(.clientId=="open-webui") | .id')
+                        else
+                          echo "Client open-webui exists ($CLIENT_UUID) — updating redirectUris/webOrigins..."
+                          CURRENT_CLIENT=$(curl -sf -H "X-Forwarded-Proto: https" \
+                            -H "Authorization: Bearer $ADMIN_TOKEN" \
+                            "$KC_HOST/auth/admin/realms/$REALM/clients/$CLIENT_UUID")
+
+                          DESIRED_REDIRECTS=$(jq -nc --arg r "$BASE_URL/oauth/oidc/callback" '[$r]')
+                          DESIRED_ORIGINS=$(jq -nc --arg o "$BASE_URL" '[$o]')
+                          CURRENT_REDIRECTS=$(echo "$CURRENT_CLIENT" | jq -c '.redirectUris // []')
+                          CURRENT_ORIGINS=$(echo "$CURRENT_CLIENT" | jq -c '.webOrigins // []')
+
+                          if [[ "$CURRENT_REDIRECTS" == "$DESIRED_REDIRECTS" \
+                              && "$CURRENT_ORIGINS" == "$DESIRED_ORIGINS" ]]; then
+                            echo "  redirectUris/webOrigins already in sync, skipping PUT"
+                          else
+                            PATCHED=$(echo "$CURRENT_CLIENT" | jq \
+                              --argjson redirects "$DESIRED_REDIRECTS" \
+                              --argjson origins "$DESIRED_ORIGINS" \
+                              '.redirectUris = $redirects | .webOrigins = $origins')
+                            curl -sf -H "X-Forwarded-Proto: https" \
+                              -X PUT \
+                              -H "Authorization: Bearer $ADMIN_TOKEN" \
+                              -H "Content-Type: application/json" \
+                              -d "$PATCHED" \
+                              "$KC_HOST/auth/admin/realms/$REALM/clients/$CLIENT_UUID"
+                            echo "  patched"
+                          fi
+                        fi
+
+                        if [[ -z "$CLIENT_UUID" || "$CLIENT_UUID" == "null" ]]; then
+                          echo "ERROR: failed to get/create open-webui client UUID" >&2
+                          exit 1
+                        fi
+
+                        # Ensure the open-webui client emits a "groups" claim so Open WebUI OAuth
+                        # role management can map Keycloak groups -> OWUI roles. full.path=false
+                        # produces bare group names (e.g. "admins", "users"). Idempotent.
+                        echo "Ensuring 'groups' protocol mapper on open-webui client..."
+                        HAS_GROUPS_MAPPER=$(curl -sf -H "X-Forwarded-Proto: https" \
+                          -H "Authorization: Bearer $ADMIN_TOKEN" \
+                          "$KC_HOST/auth/admin/realms/$REALM/clients/$CLIENT_UUID/protocol-mappers/models" \
+                          | jq -r '.[] | select(.name=="groups") | .id')
+                        if [[ -z "$HAS_GROUPS_MAPPER" || "$HAS_GROUPS_MAPPER" == "null" ]]; then
+                          curl -sf -H "X-Forwarded-Proto: https" -X POST \
+                            -H "Authorization: Bearer $ADMIN_TOKEN" \
+                            -H "Content-Type: application/json" \
+                            -d '{"name":"groups","protocol":"openid-connect","protocolMapper":"oidc-group-membership-mapper","consentRequired":false,"config":{"full.path":"false","id.token.claim":"true","access.token.claim":"true","userinfo.token.claim":"true","claim.name":"groups"}}' \
+                            "$KC_HOST/auth/admin/realms/$REALM/clients/$CLIENT_UUID/protocol-mappers/models"
+                          echo "  groups mapper created"
+                        else
+                          echo "  groups mapper already present, skipping"
+                        fi
+
+                        # Ensure a default "users" group exists. OWUI role management 403s any login
+                        # whose groups match no allowed/admin role, so every user needs a baseline
+                        # allowed group. Idempotent.
+                        echo "Ensuring '/users' group exists..."
+                        USERS_GROUP_ID=$(curl -sf -H "X-Forwarded-Proto: https" \
+                          -H "Authorization: Bearer $ADMIN_TOKEN" \
+                          "$KC_HOST/auth/admin/realms/$REALM/groups?search=users" \
+                          | jq -r '.[] | select(.name=="users") | .id')
+                        if [[ -z "$USERS_GROUP_ID" || "$USERS_GROUP_ID" == "null" ]]; then
+                          curl -sf -H "X-Forwarded-Proto: https" -X POST \
+                            -H "Authorization: Bearer $ADMIN_TOKEN" \
+                            -H "Content-Type: application/json" \
+                            -d '{"name":"users"}' \
+                            "$KC_HOST/auth/admin/realms/$REALM/groups"
+                          USERS_GROUP_ID=$(curl -sf -H "X-Forwarded-Proto: https" \
+                            -H "Authorization: Bearer $ADMIN_TOKEN" \
+                            "$KC_HOST/auth/admin/realms/$REALM/groups?search=users" \
+                            | jq -r '.[] | select(.name=="users") | .id')
+                          echo "  users group created ($USERS_GROUP_ID)"
+                        else
+                          echo "  users group already present ($USERS_GROUP_ID)"
+                        fi
+
+                        # Register /users as a realm default group so every NEW user auto-joins.
+                        echo "Ensuring '/users' is a realm default group..."
+                        curl -sf -H "X-Forwarded-Proto: https" -X PUT \
+                          -H "Authorization: Bearer $ADMIN_TOKEN" \
+                          "$KC_HOST/auth/admin/realms/$REALM/default-groups/$USERS_GROUP_ID" \
+                          && echo "  /users is a default group" || true
+
+                        # Backfill EXISTING users into /users — default groups only auto-apply to
+                        # users created after registration, so prior users would otherwise be 403'd.
+                        echo "Backfilling existing users into /users..."
+                        for U in $(curl -sf -H "X-Forwarded-Proto: https" \
+                          -H "Authorization: Bearer $ADMIN_TOKEN" \
+                          "$KC_HOST/auth/admin/realms/$REALM/users?max=1000" | jq -r '.[].id'); do
+                          curl -sf -H "X-Forwarded-Proto: https" -X PUT \
+                            -H "Authorization: Bearer $ADMIN_TOKEN" \
+                            "$KC_HOST/auth/admin/realms/$REALM/users/$U/groups/$USERS_GROUP_ID" >/dev/null || true
+                        done
+                        echo "  backfill complete"
+
+                        # Register post-logout redirect URIs so Keycloak accepts OWUI's
+                        # RP-initiated logout (WEBUI_AUTH_SIGNOUT_REDIRECT_URL). Without this,
+                        # Keycloak rejects the post_logout_redirect_uri and the user loops on
+                        # the logout screen instead of returning to the OWUI login page.
+                        echo "Ensuring post.logout.redirect.uris on open-webui client..."
+                        DESIRED_PLR="$BASE_URL/*"
+                        CUR_CLIENT=$(curl -sf -H "X-Forwarded-Proto: https" \
+                          -H "Authorization: Bearer $ADMIN_TOKEN" \
+                          "$KC_HOST/auth/admin/realms/$REALM/clients/$CLIENT_UUID")
+                        CUR_PLR=$(echo "$CUR_CLIENT" | jq -r '.attributes["post.logout.redirect.uris"] // ""')
+                        if [[ "$CUR_PLR" == "$DESIRED_PLR" ]]; then
+                          echo "  post.logout.redirect.uris already set, skipping"
+                        else
+                          PATCHED_PLR=$(echo "$CUR_CLIENT" | jq --arg u "$DESIRED_PLR" \
+                            '.attributes = ((.attributes // {}) + {"post.logout.redirect.uris": $u})')
+                          curl -sf -H "X-Forwarded-Proto: https" -X PUT \
+                            -H "Authorization: Bearer $ADMIN_TOKEN" \
+                            -H "Content-Type: application/json" \
+                            -d "$PATCHED_PLR" \
+                            "$KC_HOST/auth/admin/realms/$REALM/clients/$CLIENT_UUID"
+                          echo "  post.logout.redirect.uris set to $DESIRED_PLR"
+                        fi
+
+                        # Fetch client-secret from Keycloak
+                        echo "Fetching client-secret for open-webui..."
+                        CLIENT_SECRET=$(curl -sf -H "X-Forwarded-Proto: https" \
+                          -H "Authorization: Bearer $ADMIN_TOKEN" \
+                          "$KC_HOST/auth/admin/realms/$REALM/clients/$CLIENT_UUID/client-secret" \
+                          | jq -r '.value')
+
+                        if [[ -z "$CLIENT_SECRET" || "$CLIENT_SECRET" == "null" ]]; then
+                          echo "ERROR: client-secret is empty (is open-webui a confidential client?)" >&2
+                          exit 1
+                        fi
+
+                        # Idempotent base64 patch — compare-then-patch so re-runs are no-ops.
+                        # Analog: weka-aidp-appstack.yaml lines 1149-1163 (keycloak-secret-sync)
+                        patch_secret_key() {
+                          local KEY="$1"
+                          local VALUE="$2"
+                          # Guard: never patch an empty value. A command-substitution
+                          # failure (e.g. a missing generator binary) yields "" without
+                          # tripping set -e, which previously wrote empty secrets silently.
+                          if [[ -z "$VALUE" ]]; then
+                            echo "ERROR: refusing to patch $KEY with an empty value" >&2
+                            return 1
+                          fi
+                          local CURRENT
+                          CURRENT=$(kubectl -n "$NS" get secret "$TARGET_SECRET" \
+                            -o jsonpath="{.data.$KEY}" | base64 -d 2>/dev/null || echo "")
+                          if [[ "$CURRENT" == "$VALUE" ]]; then
+                            echo "  $KEY: already in sync, skipping"
+                            return 0
+                          fi
+                          local ENCODED
+                          ENCODED=$(printf '%s' "$VALUE" | base64 | tr -d '\n')
+                          kubectl -n "$NS" patch secret "$TARGET_SECRET" \
+                            --type='json' \
+                            -p="[{\"op\":\"replace\",\"path\":\"/data/$KEY\",\"value\":\"$ENCODED\"}]"
+                          echo "  $KEY: patched"
+                        }
+
+                        echo "Patching $TARGET_SECRET..."
+                        patch_secret_key OAUTH_CLIENT_SECRET "$CLIENT_SECRET"
+
+                        # CR-03 / WR-02 fix: only generate WEBUI_SECRET_KEY and
+                        # WEBUI_ADMIN_PASSWORD on the first run (when the value is still
+                        # the <replace-me> placeholder). On subsequent runs the values are
+                        # already provisioned: rotating WEBUI_SECRET_KEY invalidates all
+                        # active user sessions; rotating WEBUI_ADMIN_PASSWORD causes
+                        # Component 6 sign-in to fail because Open WebUI's database
+                        # retains the original password from first boot.
+                        CURRENT_SK=$(kubectl -n "$NS" get secret "$TARGET_SECRET" \
+                          -o jsonpath="{.data.WEBUI_SECRET_KEY}" | base64 -d 2>/dev/null || echo "")
+                        if [[ "$CURRENT_SK" =~ ^[0-9a-f]{64}$ ]]; then
+                          echo "  WEBUI_SECRET_KEY: already provisioned, skipping rotation"
+                        else
+                          # openssl is NOT present in alpine/k8s:1.30.0 — generate 256 bits
+                          # of hex from /dev/urandom using tools that are (tr, head).
+                          patch_secret_key WEBUI_SECRET_KEY "$(tr -dc 'a-f0-9' </dev/urandom | head -c64)"
+                        fi
+
+                        CURRENT_PW=$(kubectl -n "$NS" get secret "$TARGET_SECRET" \
+                          -o jsonpath="{.data.WEBUI_ADMIN_PASSWORD}" | base64 -d 2>/dev/null || echo "")
+                        if [[ "$CURRENT_PW" =~ ^[0-9a-f]{64}$ ]]; then
+                          echo "  WEBUI_ADMIN_PASSWORD: already provisioned, skipping rotation"
+                        else
+                          patch_secret_key WEBUI_ADMIN_PASSWORD "$(tr -dc 'a-f0-9' </dev/urandom | head -c64)"
+                        fi
+
+                        echo "openwebui-keycloak-client complete."
+        readinessCheck:
+          type: job
+          name: openwebui-keycloak-client
+          timeout: 300
+
+      # =====================================================================
+      # Component 4: open-webui Helm
+      # Deploys Open WebUI via the official Helm chart.
+      # Chart version: 14.8.0 (app 0.9.6) — verified 2026-06-17 against
+      # https://helm.openwebui.com/index.yaml
+      #
+      # Key decisions:
+      #   - fullnameOverride: open-webui (REQUIRED — RESEARCH Pitfall 2)
+      #     Without this the chart names the Service "open-webui-<chart>",
+      #     so "open-webui.rag.svc:8080" does not resolve and the readinessCheck
+      #     name "open-webui" doesn't match. Same fix as keycloak/postgres in AIDP.
+      #   - service.port: 8080 (RESEARCH Pitfall 1)
+      #     Chart default service.port is 80; container listens on 8080.
+      #     HTTPRoute backendRef port 8080 (Plan 03) must match the Service port.
+      #   - extraEnvVars in valuesFiles only (RESEARCH merge finding)
+      #     Helm replaces list-valued keys across valuesFiles — it does NOT deep-merge.
+      #     ALL extraEnvVars (OTEL, OAuth flags, secret-sourced vars) are consolidated
+      #     into the derived ConfigMap by Component 2 so the canonical list is complete.
+      #     The inline values block has no extraEnvVars to avoid silent replacement.
+      #   - OTEL env var names: ENABLE_OTEL family (RESEARCH Pitfall 4 correction)
+      #     The CONTEXT D-17 stale names do NOT work in the pinned app version.
+      #   - Analog: weka-aidp-appstack.yaml:1761-1807 (aidp Helm component)
+      # =====================================================================
+      - name: open-webui
+        enabled: true
+        dependsOn: [openwebui-keycloak-client]
+        description: "Open WebUI — OIDC-authenticated chat UI backed by AIDP RAG pipeline"
+        helmChart:
+          repository: "https://helm.openwebui.com/"
+          name: open-webui
+          version: "14.8.0"
+          releaseName: open-webui
+          crdsStrategy: Skip
+        values:
+          # fullnameOverride: required so Service DNS = open-webui.rag.svc.cluster.local
+          # (RESEARCH Pitfall 2; same discipline as keycloak fullnameOverride at
+          # weka-aidp-appstack.yaml line 891 and its comment at lines 885-890)
+          fullnameOverride: open-webui
+          # Disable subcharts not needed in this deployment
+          ollama:
+            enabled: false
+          pipelines:
+            enabled: false
+          # service.port 8080 — RESEARCH Pitfall 1.
+          # Chart default is 80; container listens on 8080.
+          # HTTPRoute (Plan 03) uses backendRefs port 8080 — must match here.
+          service:
+            type: ClusterIP
+            port: 8080
+          # WEKA persistence — 5Gi on the WEKA filesystem storageClass (D-15).
+          # Chart values key: persistence.storageClass (not the standard k8s field name).
+          persistence:
+            enabled: true
+            size: 5Gi
+            storageClass: storageclass-wekafs-dir-api
+          # extraEnvVars intentionally absent here — Helm replaces lists across valuesFiles,
+          # so the full env var list lives in openwebui-derived-config (last valuesFile, wins).
+          # See Component 2 for the canonical list.
+        valuesFiles:
+          # Layered in order — later entry overrides earlier for any overlapping key.
+          # site-config: customer-facing baseUrl (read-only; no extraEnvVars)
+          - kind: ConfigMap
+            name: openwebui-site-config
+            key: openwebui-values
+          # derived-config: complete extraEnvVars list (OIDC + OTEL + secrets) + hostAliases.
+          # This is the last entry and owns the canonical extraEnvVars (RESEARCH merge finding).
+          - kind: ConfigMap
+            name: openwebui-derived-config
+            key: openwebui-helm-values
+        readinessCheck:
+          # open-webui is a StatefulSet (fullnameOverride: open-webui, 1 replica),
+          # NOT a Deployment — so `type: deployment`/`name: open-webui` waits on a
+          # deployment that never exists (only open-webui-redis is a Deployment).
+          # `type: statefulset` is also unusable: StatefulSets expose no `Ready`
+          # condition, so the operator's `kubectl wait --for=condition=ready
+          # statefulset` times out. Wait on the stable pod open-webui-0 instead;
+          # pods do have a Ready condition. Verified against the live cluster.
+          type: pod
+          name: open-webui-0
+          timeout: 300
+
+      # =====================================================================
+      # Component 5: openwebui-httproute
+      # Applies an HTTPRoute attaching Open WebUI to warp-edge-gateway (D-18).
+      # The hostname is derived from openwebui.baseUrl via yq. Then polls the
+      # parent Gateway for Programmed=True (cross-namespace: envoy-gateway-system).
+      # Analog: weka-aidp-appstack.yaml:1465-1676 (embedding-gateway-setup)
+      # =====================================================================
+      - name: openwebui-httproute
+        enabled: true
+        dependsOn: [open-webui]
+        description: "Apply HTTPRoute open-webui-route to warp-edge-gateway; poll Programmed=True"
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: openwebui-httproute
+            namespace: rag
+          ---
+          # Role: manage httproutes in rag namespace + get openwebui-site-config ConfigMap
+          # (namespaced; verbs on httproutes scoped to this component's needs)
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata:
+            name: openwebui-httproute
+            namespace: rag
+          rules:
+            - apiGroups: ["gateway.networking.k8s.io"]
+              resources: ["httproutes"]
+              verbs: ["get", "create", "update", "patch"]
+            - apiGroups: [""]
+              resources: ["configmaps"]
+              resourceNames: ["openwebui-site-config"]
+              verbs: ["get"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata:
+            name: openwebui-httproute
+            namespace: rag
+          subjects:
+            - kind: ServiceAccount
+              name: openwebui-httproute
+              namespace: rag
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: Role
+            name: openwebui-httproute
+          ---
+          # ClusterRole: get/list Gateways cluster-wide so the Job can poll
+          # warp-edge-gateway in envoy-gateway-system for Programmed status.
+          # (Analog: embedding-gateway-setup-gateway-reader at lines 1532-1552)
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRole
+          metadata:
+            name: openwebui-httproute-gateway-reader
+          rules:
+            - apiGroups: ["gateway.networking.k8s.io"]
+              resources: ["gateways"]
+              verbs: ["get", "list"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: openwebui-httproute-gateway-reader
+          subjects:
+            - kind: ServiceAccount
+              name: openwebui-httproute
+              namespace: rag
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: openwebui-httproute-gateway-reader
+          ---
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: openwebui-httproute
+            namespace: rag
+          spec:
+            backoffLimit: 4
+            ttlSecondsAfterFinished: 60
+            template:
+              spec:
+                restartPolicy: OnFailure
+                serviceAccountName: openwebui-httproute
+                containers:
+                  - name: apply
+                    image: alpine/k8s:1.30.0
+                    env:
+                      - name: NS
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.namespace
+                      - name: OWUI_VALUES
+                        valueFrom:
+                          configMapKeyRef:
+                            name: openwebui-site-config
+                            key: openwebui-values
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set -euo pipefail
+
+                        # Derive hostname from openwebui.baseUrl:
+                        #   strip scheme (http:// or https://) and any path suffix
+                        OWUI_BASE_URL=$(echo "$OWUI_VALUES" | yq '.openwebui.baseUrl')
+                        # WR-01 fix: \? is a GNU sed extension not supported by busybox sed
+                        # (Alpine Linux). Use two explicit substitutions instead.
+                        OWUI_HOSTNAME=$(echo "$OWUI_BASE_URL" | sed 's|^https://||; s|^http://||' | cut -d'/' -f1)
+                        echo "OWUI_HOSTNAME=$OWUI_HOSTNAME"
+
+                        # Apply HTTPRoute. Uses the hostname derived above.
+                        # Single-quoted MANIFEST heredoc suppresses shell expansion inside YAML;
+                        # the hostname is injected by substituting it before the apply.
+                        # (Analog: embedding-gateway-setup lines 1576-1626)
+                        cat <<EOF | kubectl apply -f -
+                        apiVersion: gateway.networking.k8s.io/v1
+                        kind: HTTPRoute
+                        metadata:
+                          name: open-webui-route
+                          namespace: $NS
+                        spec:
+                          parentRefs:
+                            - name: warp-edge-gateway
+                              namespace: envoy-gateway-system
+                          hostnames:
+                            - "$OWUI_HOSTNAME"
+                          rules:
+                            - matches:
+                                - path:
+                                    type: PathPrefix
+                                    value: /
+                              backendRefs:
+                                - name: open-webui
+                                  port: 8080
+                        EOF
+
+                        echo "Waiting for Gateway warp-edge-gateway to be programmed..."
+                        PROGRAMMED=""
+                        for i in $(seq 1 30); do
+                          PROGRAMMED=$(kubectl get gateway warp-edge-gateway -n envoy-gateway-system \
+                            -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null || true)
+                          [[ "$PROGRAMMED" == "True" ]] && break
+                          echo "  waiting... ($i/30)"
+                          sleep 5
+                        done
+                        if [[ "$PROGRAMMED" != "True" ]]; then
+                          echo "ERROR: Gateway warp-edge-gateway did not reach Programmed=True in time." >&2
+                          exit 1
+                        fi
+                        echo "HTTPRoute open-webui-route applied; Gateway Programmed=True."
+        readinessCheck:
+          type: job
+          name: openwebui-httproute
+          timeout: 300
+
+      # =====================================================================
+      # Component 6: openwebui-tool-register
+      # Idempotently registers the AIDP RAG Search tool in Open WebUI via the
+      # Admin API (D-19/D-20). Uses the corrected endpoint /api/v1/tools/create
+      # (RESEARCH Pitfall 5 — NOT the stale /add endpoint from CONTEXT D-19).
+      # Analog: weka-aidp-appstack.yaml:991-1244 (keycloak-secret-sync) for
+      #   the wait-loop, secretKeyRef env, and idempotent list→select→create.
+      # =====================================================================
+      - name: openwebui-tool-register
+        enabled: true
+        dependsOn: [open-webui]
+        description: "Idempotent Open WebUI Admin API setup: register aidp_rag_bridge tool, set its valve, and create the public aidp-rag-assistant workspace model"
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: openwebui-tool-register
+            namespace: rag
+          ---
+          # Role: get tool-api-key Secret so the pod env can read TOOL_API_KEY
+          # via secretKeyRef. No other Kubernetes API calls are needed — the Job
+          # only talks to the Open WebUI HTTP API.
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata:
+            name: openwebui-tool-register
+            namespace: rag
+          rules:
+            - apiGroups: [""]
+              resources: ["secrets"]
+              resourceNames: ["tool-api-key"]
+              verbs: ["get"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata:
+            name: openwebui-tool-register
+            namespace: rag
+          subjects:
+            - kind: ServiceAccount
+              name: openwebui-tool-register
+              namespace: rag
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: Role
+            name: openwebui-tool-register
+          ---
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: openwebui-tool-register
+            namespace: rag
+          spec:
+            backoffLimit: 6
+            ttlSecondsAfterFinished: 60
+            template:
+              spec:
+                restartPolicy: OnFailure
+                serviceAccountName: openwebui-tool-register
+                containers:
+                  - name: register
+                    image: alpine/k8s:1.30.0
+                    env:
+                      - name: NS
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.namespace
+                      # Admin credentials seeded by openwebui-keycloak-client (Component 3)
+                      - name: WEBUI_ADMIN_EMAIL
+                        valueFrom:
+                          secretKeyRef:
+                            name: open-webui-secrets
+                            key: WEBUI_ADMIN_EMAIL
+                      - name: WEBUI_ADMIN_PASSWORD
+                        valueFrom:
+                          secretKeyRef:
+                            name: open-webui-secrets
+                            key: WEBUI_ADMIN_PASSWORD
+                      # Tool API key from the AIDP AppStack — delivered via valves block
+                      # in the tools/create payload so Open WebUI tool execution has the
+                      # key regardless of pod env inheritance.
+                      - name: RAG_TOOL_API_KEY
+                        valueFrom:
+                          secretKeyRef:
+                            name: tool-api-key
+                            key: TOOL_API_KEY
+                    command:
+                      - /bin/bash
+                      - -c
+                      - |
+                        set -euo pipefail
+
+                        OWUI_BASE="http://open-webui.$NS.svc.cluster.local:8080"
+
+                        # Wait for Open WebUI to be ready (DB migrations run on first boot — Pitfall 7)
+                        # (Analog: keycloak-secret-sync wait-loop at lines 1072-1075)
+                        echo "Waiting for Open WebUI /health..."
+                        until curl -sf "$OWUI_BASE/health" >/dev/null; do
+                          echo "  not ready, retrying..."
+                          sleep 10
+                        done
+                        echo "Open WebUI is ready."
+
+                        # Sign in as admin to obtain a bearer token
+                        # (RESEARCH Code Examples lines 351-353; corrected endpoint /api/v1/auths/signin)
+                        TOKEN=$(curl -sf -X POST "$OWUI_BASE/api/v1/auths/signin" \
+                          -H "Content-Type: application/json" \
+                          -d "{\"email\":\"$WEBUI_ADMIN_EMAIL\",\"password\":\"$WEBUI_ADMIN_PASSWORD\"}" \
+                          | jq -r '.token')
+
+                        if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
+                          echo "ERROR: failed to obtain admin token from Open WebUI" >&2
+                          exit 1
+                        fi
+                        echo "Authenticated as $WEBUI_ADMIN_EMAIL."
+
+                        # Open WebUI's ToolForm (tools/create body) has NO `valves` field —
+                        # valve VALUES are persisted through a SEPARATE endpoint. This sets
+                        # RAG_BRIDGE_API_KEY so tool execution reads a real key
+                        # (self.valves.RAG_BRIDGE_API_KEY). Idempotent — safe on every re-run.
+                        set_rag_valve() {
+                          echo "Setting RAG_BRIDGE_API_KEY valve via /api/v1/tools/id/aidp_rag_bridge/valves/update..."
+                          curl -sf -X POST "$OWUI_BASE/api/v1/tools/id/aidp_rag_bridge/valves/update" \
+                            -H "Authorization: Bearer $TOKEN" \
+                            -H "Content-Type: application/json" \
+                            -d "{\"RAG_BRIDGE_API_KEY\":\"$RAG_TOOL_API_KEY\"}"
+                          echo "RAG_BRIDGE_API_KEY valve set."
+                        }
+
+                        # Configure the self-hosted NVIDIA NIM connection (OpenAI-compatible).
+                        # nim-llm serves nvidia/llama-3.3-nemotron-super-49b-v1.5 on :8000/v1.
+                        # Done via the API (NOT env vars): ENABLE_OPENAI_API/OPENAI_API_BASE_URLS/
+                        # OPENAI_API_KEYS are PersistentConfig — env is ignored once the DB exists.
+                        # This is a global connection, so the model is available to all logged-in
+                        # users. NIM needs no auth; OWUI still sends a key, so a placeholder is used.
+                        # Idempotent: full overwrite on every run. Endpoint confirmed live (GET form).
+                        configure_llm_connection() {
+                          echo "Configuring nim-llm connection via POST /openai/config/update..."
+                          curl -sf -X POST "$OWUI_BASE/openai/config/update" \
+                            -H "Authorization: Bearer $TOKEN" \
+                            -H "Content-Type: application/json" \
+                            -d '{"ENABLE_OPENAI_API":true,"OPENAI_API_BASE_URLS":["http://nim-llm.rag.svc.cluster.local:8000/v1"],"OPENAI_API_KEYS":["nim-no-auth"],"OPENAI_API_CONFIGS":{}}' \
+                            >/dev/null
+                          echo "nim-llm connection configured."
+                        }
+
+                        # Create/refresh the curated workspace model "aidp-rag-assistant":
+                        #   - base_model_id = the NIM-served model (nim-llm connection, Component 2)
+                        #   - meta.toolIds attaches AIDP RAG Search by default, so every chat on this
+                        #     model has the tool active (drives "prefer the RAG tool" behaviour)
+                        #   - params.system = system prompt (base64 below; avoids YAML/heredoc indent clash)
+                        #   - access_control: null => PUBLIC, available to every logged-in user
+                        # Idempotent: updates in place if the model already exists, so redeploys pick up
+                        # prompt changes. Endpoints: POST /api/v1/models/create and
+                        # POST /api/v1/models/model/update?id=... (confirm against the live /docs).
+                        create_assistant_model() {
+                          echo 'L25vX3RoaW5rCgpZb3UgYXJlIHRoZSBXRUtBIEFJRFAgYXNzaXN0YW50LiBZb3UgYW5zd2VyIHF1ZXN0aW9ucyBhYm91dCBXRUtBIHByb2R1Y3RzIChXRUtBRlMsIHBhcmFsbGVsIHN0b3JhZ2UpIHVzaW5nIGEga25vd2xlZGdlIGJhc2UgYWNjZXNzZWQgdGhyb3VnaCB0aGUgIkFJRFAgUkFHIFNlYXJjaCIgdG9vbC4KCkRlY2lkaW5nIHdoZXRoZXIgdG8gc2VhcmNoOgpCZWZvcmUgY2FsbGluZyB0aGUgdG9vbCwgZmlyc3QgY2hlY2sgd2hldGhlciB0aGUgY3VycmVudCBjb252ZXJzYXRpb24gYWxyZWFkeSBjb250YWlucyB0aGUgaW5mb3JtYXRpb24gbmVlZGVkIHRvIGFuc3dlci4gT25seSBjYWxsIHRoZSB0b29sIHdoZW4geW91IGdlbnVpbmVseSBuZWVkIE5FVyBpbmZvcm1hdGlvbiBmcm9tIHRoZSBrbm93bGVkZ2UgYmFzZS4KCi0gRE8gY2FsbCAiQUlEUCBSQUcgU2VhcmNoIiB3aGVuIHRoZSB1c2VyIGFza3MgYWJvdXQgYSBuZXcgdG9waWMsIGEgbmV3IHByb2R1Y3QgcXVlc3Rpb24sIG9yIGZhY3RzIHRoYXQgaGF2ZSBub3QgYWxyZWFkeSBiZWVuIHJldHJpZXZlZCBpbiB0aGlzIGNvbnZlcnNhdGlvbi4KLSBETyBOT1QgY2FsbCB0aGUgdG9vbCB3aGVuIHlvdSBjYW4gYW5zd2VyIGZyb20gdGhlIGNvbnZlcnNhdGlvbiBhbHJlYWR5LCBpbmNsdWRpbmc6CiAgLSBGb2xsb3ctdXBzIGFib3V0IGFuIGFuc3dlciB5b3UganVzdCBnYXZlICgid2hhdCBhcmUgdGhlIHNvdXJjZXM/IiwgInN1bW1hcml6ZSB0aGF0IiwgImV4cGxhaW4gdGhlIHNlY29uZCBwb2ludCIsICJzYXkgaXQgbW9yZSBzaW1wbHkiKS4KICAtIFJlcXVlc3RzIHRvIHJlZm9ybWF0LCBleHBhbmQsIGNvbmRlbnNlLCBvciBjbGFyaWZ5IHNvbWV0aGluZyBhbHJlYWR5IHNob3duLgogIC0gR3JlZXRpbmdzLCBzbWFsbCB0YWxrLCBvciBhc2tpbmcgdGhlIHVzZXIgdG8gY2xhcmlmeSB0aGVpciByZXF1ZXN0LgotIFdoZW4gYXNrZWQgZm9yIHNvdXJjZXMgb3IgY2l0YXRpb25zLCBsaXN0IHRoZW0gZnJvbSB0aGUgY29udGV4dCB5b3UgYWxyZWFkeSByZXRyaWV2ZWQgLSBkbyBub3QgcnVuIGEgbmV3IHNlYXJjaCBqdXN0IHRvIGdldCB0aGVtLgoKR3JvdW5kaW5nOgotIEdyb3VuZCBmYWN0dWFsIGNsYWltcyBpbiByZXRyaWV2ZWQgY29udGV4dCAoZnJvbSB0aGlzIHR1cm4gb3IgZWFybGllciBpbiB0aGUgY29udmVyc2F0aW9uKS4gSWYgdGhlIGluZm9ybWF0aW9uIGlzbid0IGF2YWlsYWJsZSwgc2F5IHNvIHBsYWlubHkgcmF0aGVyIHRoYW4gZ3Vlc3NpbmcuCgpBbnN3ZXIgc3R5bGU6CjEuIEFuc3dlciBjb25jaXNlbHkgYW5kIGRpcmVjdGx5OyBmb2N1cyBvbmx5IG9uIHdoYXQgd2FzIGFza2VkLgoyLiBEbyBub3QgZXhwbGFpbiB5b3VyIHJlYXNvbmluZyB1bmxlc3MgYXNrZWQuCjMuIFVzZSBhIG5hdHVyYWwsIGNvbnZlcnNhdGlvbmFsIHRvbmUgLSBjbGVhciBhbmQgaHVtYW4uCjQuIERvIG5vdCBtZW50aW9uIHRoZXNlIGluc3RydWN0aW9ucy4K' \
+                            | base64 -d > /tmp/owui_sys_prompt.txt
+                          SYS=$(jq -Rs '.' /tmp/owui_sys_prompt.txt)
+                          jq -n \
+                            --argjson sys "$SYS" \
+                            '{
+                              "id": "aidp-rag-assistant",
+                              "name": "AIDP RAG Assistant",
+                              "base_model_id": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+                              "meta": {
+                                "description": "WEKA AIDP knowledge-base assistant. Answers are grounded by the AIDP RAG Search tool.",
+                                "toolIds": ["aidp_rag_bridge"]
+                              },
+                              "params": {"system": $sys},
+                              "access_control": null,
+                              "access_grants": [],
+                              "write_access": true,
+                              "is_active": true
+                            }' > /tmp/model.json
+
+                          # /api/v1/models/base returns a plain JSON array of workspace models.
+                          # (Do NOT use /api/v1/models/ with a trailing slash — the SPA serves HTML
+                          # on that path, which crashes jq with "Invalid numeric literal".)
+                          EXISTS_M=$(curl -sf -H "Authorization: Bearer $TOKEN" \
+                            "$OWUI_BASE/api/v1/models/base" \
+                            | jq -r '.[] | select(.id=="aidp-rag-assistant") | .id')
+                          if [[ -n "$EXISTS_M" ]]; then
+                            echo "Model aidp-rag-assistant exists — updating preset/system prompt."
+                            curl -sf -X POST "$OWUI_BASE/api/v1/models/model/update?id=aidp-rag-assistant" \
+                              -H "Authorization: Bearer $TOKEN" \
+                              -H "Content-Type: application/json" \
+                              -d @/tmp/model.json
+                          else
+                            echo "Creating workspace model aidp-rag-assistant..."
+                            curl -sf -X POST "$OWUI_BASE/api/v1/models/create" \
+                              -H "Authorization: Bearer $TOKEN" \
+                              -H "Content-Type: application/json" \
+                              -d @/tmp/model.json
+                          fi
+                          echo "Workspace model aidp-rag-assistant ready (public, RAG tool attached)."
+                        }
+
+                        # Always (re)build the tool content and create-or-update it below.
+                        # This Job used to skip when the tool already existed, so content changes
+                        # (rag-bridge URL/port, user-identity forwarding) never applied on redeploy.
+
+                        # Write the Python tool content to a temp file then embed in JSON
+                        # using jq -Rs to correctly escape newlines/quotes.
+                        # (RESEARCH Code Examples lines 358-362; CONTEXT lines 152-172)
+                        #
+                        # Base64-encoded to avoid bash heredoc incompatibility with YAML block
+                        # scalars: heredoc terminators must appear at column 0, but YAML block
+                        # scalar baselines require 24 spaces here — the two are mutually exclusive.
+                        # The encoded content is the Valves-API tool class (CR-02 fix).
+                        echo 'IiIiCnRpdGxlOiBBSURQIFJBRyBTZWFyY2gKZGVzY3JpcHRpb246IFNlYXJjaCB0aGUgV0VLQSBBSURQIGtub3dsZWRnZSBiYXNlIHZpYSB0aGUgUkFHIHBpcGVsaW5lLgoiIiIKaW1wb3J0IGpzb24KaW1wb3J0IGh0dHB4CmZyb20gcHlkYW50aWMgaW1wb3J0IEJhc2VNb2RlbAoKUkFHX0JSSURHRV9VUkwgPSAiaHR0cDovL3JhZy1icmlkZ2UucmFnLnN2Yy5jbHVzdGVyLmxvY2FsL2JyaWRnZS90b29sL3JhZy1nYXRld2F5IgoKY2xhc3MgVG9vbHM6CiAgICBjbGFzcyBWYWx2ZXMoQmFzZU1vZGVsKToKICAgICAgICBSQUdfQlJJREdFX0FQSV9LRVk6IHN0ciA9ICIiCgogICAgZGVmIF9faW5pdF9fKHNlbGYpOgogICAgICAgIHNlbGYudmFsdmVzID0gc2VsZi5WYWx2ZXMoKQoKICAgIGFzeW5jIGRlZiBzZWFyY2hfYWlkcChzZWxmLCBxdWVzdGlvbjogc3RyLCBfX3VzZXJfXzogZGljdCA9IHt9LCBfX2V2ZW50X2VtaXR0ZXJfXz1Ob25lKSAtPiBzdHI6CiAgICAgICAgIiIiU2VhcmNoIHRoZSBBSURQIGtub3dsZWRnZSBiYXNlLiA6cGFyYW0gcXVlc3Rpb246IFRoZSBxdWVzdGlvbiB0byBzZWFyY2ggZm9yLiIiIgogICAgICAgIGhlYWRlcnMgPSB7IlgtVG9vbC1BUEktS2V5Ijogc2VsZi52YWx2ZXMuUkFHX0JSSURHRV9BUElfS0VZfQogICAgICAgIGlmIF9fdXNlcl9fLmdldCgiZW1haWwiKToKICAgICAgICAgICAgaGVhZGVyc1siWC1PcGVuV2ViVUktVXNlci1FbWFpbCJdID0gX191c2VyX19bImVtYWlsIl0KICAgICAgICBpZiBfX3VzZXJfXy5nZXQoIm5hbWUiKToKICAgICAgICAgICAgaGVhZGVyc1siWC1PcGVuV2ViVUktVXNlci1OYW1lIl0gPSBfX3VzZXJfX1sibmFtZSJdCiAgICAgICAgY29udGVudCA9ICIiCiAgICAgICAgYXN5bmMgd2l0aCBodHRweC5Bc3luY0NsaWVudCh0aW1lb3V0PTkwLjApIGFzIGNsaWVudDoKICAgICAgICAgICAgciA9IGF3YWl0IGNsaWVudC5wb3N0KFJBR19CUklER0VfVVJMLCBoZWFkZXJzPWhlYWRlcnMsIGpzb249eyJxdWVzdGlvbiI6IHF1ZXN0aW9ufSkKICAgICAgICAgICAgci5yYWlzZV9mb3Jfc3RhdHVzKCkKICAgICAgICAgICAgIyByYWctZ2F0ZXdheSBzdHJlYW1zIG5ld2xpbmUtZGVsaW1pdGVkIEpTT046IG9uZSBjaXRhdGlvbiBvYmplY3QgcGVyCiAgICAgICAgICAgICMgcmV0cmlldmVkIHNvdXJjZSwgdGhlbiBhIGZpbmFsIHsiY29udGVudCI6IC4uLn0uIEZvcndhcmQgZWFjaCBjaXRhdGlvbgogICAgICAgICAgICAjIHRvIE9wZW4gV2ViVUkncyBzb3VyY2Ugc3lzdGVtIChyZW5kZXJzIGZpbGVuYW1lICsgcGFnZSBjaGlwcyksIGFuZAogICAgICAgICAgICAjIHJldHVybiB0aGUgY29uY2F0ZW5hdGVkIGNvbnRleHQgZm9yIHRoZSBtb2RlbCB0byBhbnN3ZXIgZnJvbS4KICAgICAgICAgICAgZm9yIGxpbmUgaW4gci50ZXh0LnNwbGl0bGluZXMoKToKICAgICAgICAgICAgICAgIGxpbmUgPSBsaW5lLnN0cmlwKCkKICAgICAgICAgICAgICAgIGlmIG5vdCBsaW5lOgogICAgICAgICAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgICAgICAgICB0cnk6CiAgICAgICAgICAgICAgICAgICAgb2JqID0ganNvbi5sb2FkcyhsaW5lKQogICAgICAgICAgICAgICAgZXhjZXB0IGpzb24uSlNPTkRlY29kZUVycm9yOgogICAgICAgICAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgICAgICAgICBpZiBub3QgaXNpbnN0YW5jZShvYmosIGRpY3QpOgogICAgICAgICAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgICAgICAgICBpZiBvYmouZ2V0KCJ0eXBlIikgPT0gImNpdGF0aW9uIiBhbmQgX19ldmVudF9lbWl0dGVyX186CiAgICAgICAgICAgICAgICAgICAgZCA9IG9iai5nZXQoImRhdGEiLCB7fSkKICAgICAgICAgICAgICAgICAgICBhd2FpdCBfX2V2ZW50X2VtaXR0ZXJfXyh7CiAgICAgICAgICAgICAgICAgICAgICAgICJ0eXBlIjogImNpdGF0aW9uIiwKICAgICAgICAgICAgICAgICAgICAgICAgImRhdGEiOiB7CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAiZG9jdW1lbnQiOiBkLmdldCgiZG9jdW1lbnQiLCBbXSksCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAibWV0YWRhdGEiOiBkLmdldCgibWV0YWRhdGEiLCBbXSksCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAic291cmNlIjogZC5nZXQoInNvdXJjZSIsIHt9KSwKICAgICAgICAgICAgICAgICAgICAgICAgfSwKICAgICAgICAgICAgICAgICAgICB9KQogICAgICAgICAgICAgICAgZWxpZiAiY29udGVudCIgaW4gb2JqOgogICAgICAgICAgICAgICAgICAgIGNvbnRlbnQgPSBvYmpbImNvbnRlbnQiXQogICAgICAgIHJldHVybiBjb250ZW50IG9yICJObyBhbnN3ZXIgd2FzIHJldHVybmVkIGJ5IHRoZSBrbm93bGVkZ2UgYmFzZS4iCg==' \
+                          | base64 -d > /tmp/tool_content.py
+
+                        # Build tool registration payload with jq.
+                        # meta.manifest is required (RESEARCH Pitfall 5 — ToolForm required fields).
+                        # Content is embedded via jq -Rs to safely escape multi-line Python.
+                        # NOTE: ToolForm has no `valves` field — the valve VALUE is persisted
+                        # separately by set_rag_valve() after create (see /valves/update below).
+                        CONTENT=$(jq -Rs '.' /tmp/tool_content.py)
+                        jq -n \
+                          --argjson content "$CONTENT" \
+                          '{
+                            "id": "aidp_rag_bridge",
+                            "name": "AIDP RAG Search",
+                            "content": $content,
+                            "meta": {"manifest": {}}
+                          }' > /tmp/tool.json
+
+                        # Create on first install, UPDATE on every redeploy so content changes
+                        # (rag-bridge URL/port, user-identity forwarding) actually take effect.
+                        EXISTS=$(curl -sf -H "Authorization: Bearer $TOKEN" \
+                          "$OWUI_BASE/api/v1/tools/" \
+                          | jq -r '.[] | select(.id=="aidp_rag_bridge") | .id')
+                        if [[ -n "$EXISTS" ]]; then
+                          echo "Tool exists — updating content via POST /api/v1/tools/id/aidp_rag_bridge/update..."
+                          curl -sf -X POST "$OWUI_BASE/api/v1/tools/id/aidp_rag_bridge/update" \
+                            -H "Authorization: Bearer $TOKEN" \
+                            -H "Content-Type: application/json" \
+                            -d @/tmp/tool.json >/dev/null
+                        else
+                          echo "Registering tool via POST /api/v1/tools/create..."
+                          curl -sf -X POST "$OWUI_BASE/api/v1/tools/create" \
+                            -H "Authorization: Bearer $TOKEN" \
+                            -H "Content-Type: application/json" \
+                            -d @/tmp/tool.json >/dev/null
+                        fi
+
+                        # Persist the valve value — create/update body has no valves field.
+                        set_rag_valve
+
+                        # Configure the nim-llm connection (env vars are ignored post-init).
+                        configure_llm_connection
+
+                        # Create the curated workspace model (public, RAG tool attached).
+                        create_assistant_model
+
+                        echo "Tool aidp_rag_bridge setup complete."
+        readinessCheck:
+          type: job
+          name: openwebui-tool-register
+          timeout: 300
