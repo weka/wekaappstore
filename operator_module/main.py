@@ -342,6 +342,85 @@ def _render_or_raise(
         raise kopf.PermanentError(f"{source_desc}: {e}") from e
 
 
+# Cluster-scoped kinds must NOT receive a -n namespace flag when applied.
+_CLUSTER_SCOPED_KINDS = {
+    'Namespace', 'Node', 'PersistentVolume', 'StorageClass',
+    'ClusterRole', 'ClusterRoleBinding', 'CustomResourceDefinition',
+    'PriorityClass', 'IngressClass', 'RuntimeClass', 'APIService',
+    'CSIDriver', 'CSINode', 'VolumeAttachment',
+    'ValidatingWebhookConfiguration', 'MutatingWebhookConfiguration',
+}
+
+
+def _split_manifest_docs(manifest_yaml):
+    """Parse a multi-doc manifest into [(kind, namespace_or_None, doc_text), ...].
+
+    Uses the YAML parser (not raw '---' splitting) so document separators that
+    appear inside block scalars — e.g. bash heredocs embedded in a Job command —
+    are correctly ignored. Each doc is re-serialized for per-document kubectl
+    invocation. Comments are dropped (irrelevant to kubectl); string values
+    (including embedded scripts) round-trip intact.
+    """
+    docs = []
+    for doc in yaml.safe_load_all(manifest_yaml):
+        if not isinstance(doc, dict) or not doc:
+            continue
+        kind = doc.get('kind', '')
+        ns = (doc.get('metadata') or {}).get('namespace')
+        text = yaml.safe_dump(doc, sort_keys=False, default_flow_style=False, allow_unicode=True)
+        docs.append((kind, ns, text))
+    return docs
+
+
+def _namespace_args(kind, doc_namespace, default_namespace):
+    """Return ['-n', <ns>] for namespaced kinds, [] for cluster-scoped kinds.
+
+    A document's own metadata.namespace wins; otherwise the component's target
+    namespace is used as the default. This lets one blueprint component span
+    namespaces (e.g. App Store credential reads that create RBAC in the
+    wekaappstore namespace) without the single-'-n' conflict that kubectl
+    rejects ("namespace from the provided object does not match ...").
+    """
+    if kind in _CLUSTER_SCOPED_KINDS:
+        return []
+    return ['-n', doc_namespace or default_namespace]
+
+
+def _apply_manifest_multi_ns(manifest_yaml, default_namespace):
+    """kubectl apply a possibly multi-namespace manifest, one document at a time.
+
+    Returns (ok: bool, message: str). Stops at the first failing document.
+    """
+    try:
+        docs = _split_manifest_docs(manifest_yaml)
+    except Exception as e:
+        return False, f"Failed to parse manifest: {e}"
+    for kind, doc_ns, doc_text in docs:
+        cmd = ['kubectl', 'apply', '-f', '-'] + _namespace_args(kind, doc_ns, default_namespace)
+        result = subprocess.run(cmd, input=doc_text, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            return False, result.stderr
+    return True, 'Manifest applied successfully'
+
+
+def _delete_manifest_multi_ns(manifest_yaml, default_namespace, logger):
+    """kubectl delete a possibly multi-namespace manifest, best-effort, per document.
+
+    Deletes in reverse document order with --ignore-not-found; failures are logged
+    and ignored so one missing/forbidden object never blocks finalizer removal.
+    """
+    try:
+        docs = _split_manifest_docs(manifest_yaml)
+    except Exception as e:
+        logger.warning(f"Failed to parse manifest for delete: {e}")
+        return
+    for kind, doc_ns, doc_text in reversed(docs):
+        cmd = ['kubectl', 'delete', '-f', '-', '--ignore-not-found'] + _namespace_args(kind, doc_ns, default_namespace)
+        result = subprocess.run(cmd, input=doc_text, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            logger.warning(f"Failed to delete {kind} from manifest: {result.stderr.strip()}")
+
+
 # ===================== WarpCredential Pure Helpers =====================
 # Decision-citing docstrings per Pattern S-3 from 22-PATTERNS.md.
 # Helpers are placed in the "pure helper" zone immediately after _render_or_raise
@@ -1136,25 +1215,17 @@ def handle_appstack_deployment(body, spec, name, namespace, status, **kwargs):
                         stack_vars,
                         source_desc=f"Component '{comp_name}'.kubernetesManifest",
                     )
-                    # Write manifest to temp file and apply
-                    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-                        f.write(manifest_yaml)
-                        manifest_file = f.name
-                    
-                    try:
-                        cmd = ["kubectl", "apply", "-f", manifest_file, "-n", target_namespace]
-                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                        
-                        if result.returncode == 0:
-                            comp_status['phase'] = 'Ready'
-                            comp_status['message'] = 'Manifest applied successfully'
-                        else:
-                            comp_status['phase'] = 'Failed'
-                            comp_status['message'] = f"Failed to apply manifest: {result.stderr}"
-                            failed = True
-                    finally:
-                        if os.path.exists(manifest_file):
-                            os.unlink(manifest_file)
+                    # Apply per-document so a manifest spanning namespaces (e.g. App
+                    # Store credential reads that grant RBAC in the wekaappstore
+                    # namespace) is not rejected by a single conflicting -n flag.
+                    ok, msg = _apply_manifest_multi_ns(manifest_yaml, target_namespace)
+                    if ok:
+                        comp_status['phase'] = 'Ready'
+                        comp_status['message'] = 'Manifest applied successfully'
+                    else:
+                        comp_status['phase'] = 'Failed'
+                        comp_status['message'] = f"Failed to apply manifest: {msg}"
+                        failed = True
             else:
                 raise ValueError(f"Component {comp_name} must specify either helmChart or kubernetesManifest")
 
@@ -1486,22 +1557,11 @@ def delete_warrpappstore_function(spec, name, namespace, **kwargs):
                 # Render ${VAR} substitutions first so the manifest namespace matches (OP-07).
                 manifest_yaml = render(component['kubernetesManifest'], stack_vars)
                 target_namespace = component.get('targetNamespace', namespace)
-                
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-                    f.write(manifest_yaml)
-                    manifest_file = f.name
-                
-                try:
-                    cmd = ["kubectl", "delete", "-f", manifest_file, "-n", target_namespace, "--ignore-not-found"]
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                    
-                    if result.returncode == 0:
-                        logging.info(f"Component {comp_name} manifest deleted successfully")
-                    else:
-                        logging.warning(f"Failed to delete component {comp_name} manifest: {result.stderr}")
-                finally:
-                    if os.path.exists(manifest_file):
-                        os.unlink(manifest_file)
+
+                # Delete per-document so cross-namespace manifests are honored
+                # (each object goes to its own namespace, not a single -n).
+                _delete_manifest_multi_ns(manifest_yaml, target_namespace, logging)
+                logging.info(f"Component {comp_name} manifest delete attempted")
     
     # If single Helm chart was used, uninstall the release
     elif 'helmChart' in spec and spec['helmChart']:

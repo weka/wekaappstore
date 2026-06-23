@@ -42,11 +42,15 @@ def _make_kubectl_run_capture():
 
     def _run(cmd, *args, **kwargs):
         if isinstance(cmd, list) and len(cmd) >= 4 and cmd[0] == "kubectl" and cmd[1] == "apply" and cmd[2] == "-f":
-            try:
-                captured.append(Path(cmd[3]).read_text(encoding="utf-8"))
-            except OSError:
-                # tempfile may have been unlinked already in some paths; ignore
-                pass
+            if cmd[3] == "-" and kwargs.get("input") is not None:
+                # Per-document apply: manifest is piped via stdin (-f -).
+                captured.append(kwargs["input"])
+            else:
+                try:
+                    captured.append(Path(cmd[3]).read_text(encoding="utf-8"))
+                except OSError:
+                    # tempfile may have been unlinked already in some paths; ignore
+                    pass
         return _real_subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok", stderr="")
 
     return _run, captured
@@ -192,6 +196,51 @@ def test_kubernetes_manifest_substitutes_namespace():
     assert "${" not in captured[0]
 
 
+def test_appstack_manifest_applies_cross_namespace():
+    """A multi-namespace manifest applies each doc with its own namespace; the
+    component target namespace is the default, and cluster-scoped kinds get no -n.
+
+    Regression: previously the whole manifest was applied with a single
+    `-n <target>`, which kubectl rejects for objects declaring a different
+    namespace (the App Store credential bootstrap creates RBAC in wekaappstore)."""
+    from main import handle_appstack_deployment
+
+    components = [{
+        "name": "ngc-bootstrap",
+        "kubernetesManifest": (
+            "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\n  namespace: ${namespace}\n"
+            "---\n"
+            "apiVersion: rbac.authorization.k8s.io/v1\nkind: Role\nmetadata:\n  name: b\n  namespace: wekaappstore\n"
+            "---\n"
+            "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: c\n"
+        ),
+    }]
+    spec = {"appStack": {"components": components}}
+
+    calls = []
+
+    def _run(cmd, *args, **kwargs):
+        calls.append((list(cmd), kwargs.get("input", "")))
+        return _real_subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok", stderr="")
+
+    with patch("main.subprocess.run", side_effect=_run), \
+         patch("main._load_kube_config_once", return_value=False), \
+         patch("main.HelmOperator"):
+        handle_appstack_deployment(
+            body={"spec": spec}, spec=spec, name="x", namespace="rag", status={},
+        )
+
+    def ns_for(kind):
+        for cmd, inp in calls:
+            if cmd[:3] == ["kubectl", "apply", "-f"] and f"kind: {kind}" in inp:
+                return cmd[cmd.index("-n") + 1] if "-n" in cmd else None
+        raise AssertionError(f"no apply found for {kind}; calls={calls}")
+
+    assert ns_for("ConfigMap") == "rag"          # ${namespace} default
+    assert ns_for("Role") == "wekaappstore"      # explicit cross-namespace
+    assert ns_for("ClusterRole") is None         # cluster-scoped, no -n
+
+
 def test_delete_renders_namespace_in_manifest():
     """Delete path renders ${VAR} so kubectl delete's manifest namespace matches (regression).
 
@@ -216,10 +265,13 @@ def test_delete_renders_namespace_in_manifest():
 
     def _run(cmd, *args, **kwargs):
         if isinstance(cmd, list) and len(cmd) >= 4 and cmd[0] == "kubectl" and cmd[1] == "delete" and cmd[2] == "-f":
-            try:
-                captured.append(Path(cmd[3]).read_text(encoding="utf-8"))
-            except OSError:
-                pass
+            if cmd[3] == "-" and kwargs.get("input") is not None:
+                captured.append(kwargs["input"])
+            else:
+                try:
+                    captured.append(Path(cmd[3]).read_text(encoding="utf-8"))
+                except OSError:
+                    pass
         return _real_subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok", stderr="")
 
     with patch("main.subprocess.run", side_effect=_run), \

@@ -1,0 +1,393 @@
+{% from '_credential_macros.html' import credential_select, weka_storage_select %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AIDP – Semantic Search - Blueprint</title>
+  {% if logo_b64 %}
+    <link rel="icon" type="image/png" href="data:image/png;base64,{{ logo_b64 }}">
+  {% endif %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@emotion/react@11.11.4/dist/emotion-react.umd.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@emotion/styled@11.11.0/dist/emotion-styled.umd.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@mui/material@5.15.14/umd/material-ui.development.js" crossorigin></script>
+  <style>
+    :root { --weka-purple: #6b2fb3; --weka-purple-dark: #552695; --weka-dark: #0B0C10; }
+    body { background: #0b0c10; color: #e5e7eb; font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; }
+    .brand-grad { background: linear-gradient(135deg, #1f2937 0%, #0b0c10 100%); }
+    .card { background: rgba(31, 41, 55, 0.6); border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(6px); }
+    .btn-purple { background: var(--weka-purple); color: white; }
+    .btn-purple:hover { background: var(--weka-purple-dark); }
+    .muted { color: #9ca3af; }
+    .badge { padding: 2px 8px; border-radius: 9999px; font-size: 12px; }
+    /* Make permission badges smaller only within the Blueprint Permissions section */
+    .perm-card .badge { padding: 1px 6px; font-size: 10px; line-height: 1.2; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <header class="brand-grad border-b border-white/10">
+    <div class="max-w-6xl mx-auto px-4 py-6 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        {% if logo_b64 %}
+          <img src="data:image/png;base64,{{ logo_b64 }}" alt="WEKA App Store" class="w-12 h-12 rounded-sm object-contain bg-white/0" />
+        {% else %}
+          <div class="w-12 h-12 rounded-sm" style="background: var(--weka-purple);"></div>
+        {% endif %}
+        <a href="/" class="text-2xl font-semibold tracking-tight hover:underline">WEKA App Store</a>
+      </div>
+      <a href="/" class="text-sm text-white/80 hover:text-white">Back</a>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+      <div class="lg:col-span-2 space-y-6">
+        <div class="card rounded-lg p-6">
+          <h1 class="text-2xl font-semibold mb-2">AIDP &ndash; Semantic Search</h1>
+          <div class="flex items-center gap-2 mb-3">
+            <span class="badge" style="background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.25); color: #bbf7d0;">Open Source</span>
+            <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">AIDP add-on</span>
+          </div>
+          <p class="muted">A conversational semantic-search experience over your NeuralMesh data, powered by Open WebUI and the AIDP RAG pipeline.</p>
+          {% if yaml_path %}
+          <div class="mt-3 text-xs muted">Manifest: {{ yaml_path }}</div>
+          {% endif %}
+        </div>
+
+        <div class="card rounded-lg p-6">
+          <h2 class="text-xl font-semibold mb-3">Introduction</h2>
+          <p class="text-sm text-white/90 leading-relaxed">
+            This add-on deploys <strong>Open WebUI</strong> as a single sign-on chat interface in front of your NeuralMesh AIDP deployment. Users log in with their existing Keycloak identity and ask questions in natural language; answers are grounded in your own documents through the AIDP Retrieval-Augmented Generation (RAG) pipeline, complete with source citations.
+          </p>
+          <p class="text-sm text-white/90 leading-relaxed mt-3">
+            It is an <strong>add-on</strong> &mdash; it reuses the AIDP platform you already deployed (Keycloak identity, the RAG gateway, and the NIM language model) rather than standing up its own. Configuration is automatic: the only value you provide is the external URL the UI will be reachable on.
+          </p>
+        </div>
+
+        <div class="card rounded-lg p-6">
+          <h2 class="text-xl font-semibold mb-3">What this blueprint installs</h2>
+          <ul class="list-disc ml-6 space-y-2 text-sm">
+            <li><strong>Open WebUI</strong> &mdash; the chat UI (official Helm chart), with persistence on WEKA storage.</li>
+            <li><strong>Keycloak OIDC client</strong> &mdash; an <code>open-webui</code> client registered in the existing <code>rag-gateway</code> realm, with Keycloak group &rarr; role mapping (admins / users).</li>
+            <li><strong>AIDP RAG Search tool</strong> &mdash; a built-in tool (<code>aidp_rag_bridge</code>) that queries your knowledge base through the AIDP <code>rag-bridge</code>.</li>
+            <li><strong>&ldquo;AIDP RAG Assistant&rdquo; model</strong> &mdash; a public workspace model wired to the AIDP NIM LLM (<code>nvidia/llama-3.3-nemotron-super-49b-v1.5</code>) with the RAG Search tool attached by default.</li>
+            <li><strong>Ingress route</strong> &mdash; an Envoy <code>HTTPRoute</code> publishing the UI on your chosen URL.</li>
+          </ul>
+        </div>
+
+        <div class="card rounded-lg p-6">
+          <h2 class="text-xl font-semibold mb-3">How it works</h2>
+          <ul class="list-disc ml-6 space-y-2 text-sm">
+            <li><strong>Prerequisite:</strong> the <a href="/blueprint/neuralmesh-aidp" class="text-yellow-400 underline hover:text-white">NeuralMesh AIDP</a> blueprint must already be installed and Ready in the same namespace.</li>
+            <li><strong>No credentials needed:</strong> NVIDIA NGC and WEKA credentials were already materialized by AIDP; this add-on reuses them.</li>
+            <li><strong>Single sign-on:</strong> users authenticate against the existing Keycloak realm; members of the <code>admins</code> / <code>cluster-admins</code> groups get Open WebUI admin.</li>
+            <li><strong>Grounded answers:</strong> questions route through the RAG Search tool to <code>rag-bridge</code> &rarr; the RAG pipeline, returning answers with citations from your own data.</li>
+            <li><strong>Auto-configured:</strong> the OIDC provider URL, client secret, and internal routing are derived at deploy time from AIDP&rsquo;s existing config &mdash; you only supply the external URL below.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="space-y-6">
+        <div class="card rounded-lg p-6">
+          <h2 class="text-lg font-semibold mb-4">Cluster Compatibility</h2>
+          <div class="space-y-3 text-sm">
+            {# TEMPORARY (demo override): CPU and GPU badges hardcoded to green "ok". Revert by restoring the Jinja meets.cpu / meets.gpu conditionals from git history. #}
+            <div class="flex items-center justify-between">
+              <div>CPU worker nodes</div>
+              <div class="flex items-center gap-2">
+                <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need ≥ {{ requirements.cpu_nodes }}</span>
+                <span class="badge" style="background: #065f46; color: #d1fae5;">ok</span>
+              </div>
+            </div>
+            <div class="flex items-center justify-between">
+              <div>GPU worker nodes</div>
+              <div class="flex items-center gap-2">
+                <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need ≥ {{ requirements.gpu_nodes }}</span>
+                <span class="badge" style="background: #065f46; color: #d1fae5;">ok</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card rounded-lg p-6">
+          <h2 class="text-lg font-semibold mb-3">Configure</h2>
+          <form id="deploy-form" class="space-y-4">
+            <!-- Namespace field: editable dropdown of existing namespaces (type a new one to create it) -->
+            <div>
+              <label class="block text-sm mb-1" for="field-namespace">Namespace</label>
+              <input id="field-namespace" name="namespace" list="namespace-options" placeholder="default" value="default"
+                     autocomplete="off"
+                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                     title="Select an existing namespace or type a new one to create it" />
+              <datalist id="namespace-options"></datalist>
+              <div class="muted text-xs mt-1">Select an existing namespace or type a new one (it is created automatically on deploy).</div>
+            </div>
+
+            {% set ns_creds_missing = [] %}
+            <!-- Dynamic fields from x-variables schema -->
+            {% if variable_schema %}
+              {# ns_creds_missing is initialized above; appended inside this block #}
+              {% for var_name, var_meta in variable_schema.items() %}
+                {% if var_name == "namespace" %}
+                  {# namespace is always rendered above as a fixed field; skip here #}
+                {% elif var_meta.get("type") == "credential" %}
+                  {% set ctype = var_meta.get("credential_type", "") %}
+                  {% set creds = available_creds.get(ctype, []) %}
+                  {% if var_meta.get("required") and not creds %}
+                    {% set _ = ns_creds_missing.append(ctype) %}
+                  {% endif %}
+                  <div>
+                    <label class="block text-sm mb-1" for="field-{{ var_name }}">
+                      {{ var_name | replace("_", " ") | title }}
+                    </label>
+                    {% if creds %}
+                      <select id="field-{{ var_name }}" name="{{ var_name }}"
+                              {% if var_meta.get("required") %}required{% endif %}
+                              class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400">
+                        {% for cred in creds %}
+                          <option value="{{ cred.name }}">{{ cred.displayName }}</option>
+                        {% endfor %}
+                      </select>
+                    {% else %}
+                      <p class="text-sm muted">No {{ ctype | replace("-", " ") }} credential configured.
+                        <a href="/settings#credentials" class="text-yellow-400 underline hover:text-white">Add one in Settings.</a>
+                      </p>
+                    {% endif %}
+                    {% if var_meta.get("description") %}
+                      <div class="muted text-xs mt-1">{{ var_meta.get("description") }}</div>
+                    {% endif %}
+                  </div>
+                {% else %}
+                  <div>
+                    <label class="block text-sm mb-1" for="field-{{ var_name }}">
+                      {{ var_name | replace("_", " ") | title }}
+                    </label>
+                    <input id="field-{{ var_name }}" name="{{ var_name }}"
+                           placeholder="{{ var_meta.get('placeholder', '') }}"
+                           {% if var_meta.get("required") %}required{% endif %}
+                           class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                    {% if var_meta.get("description") %}
+                      <div class="muted text-xs mt-1">{{ var_meta.get("description") }}</div>
+                    {% endif %}
+                  </div>
+                {% endif %}
+              {% endfor %}
+
+              {% if ns_creds_missing %}
+                <div class="rounded-md p-3 text-sm" style="background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3);">
+                  Missing required credentials: {{ ns_creds_missing | join(", ") }}.
+                  <a href="/settings#credentials" class="text-yellow-400 underline hover:text-white">Add them in Settings</a> before deploying.
+                </div>
+              {% endif %}
+            {% endif %}
+
+            <button type="submit" id="deploy-btn"
+                    {% if not variable_schema %}disabled title="Blueprint has no x-variables schema"{% endif %}
+                    class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+              Deploy Blueprint
+            </button>
+            <div id="deploy-result" class="text-xs mt-2"></div>
+            <div id="aidp-gate-msg" class="text-xs mt-2 rounded-md border border-yellow-400/40 bg-yellow-500/10 p-3 text-yellow-300" hidden></div>
+          </form>
+
+          <div id="progress" class="mt-4 hidden">
+            <h3 class="text-sm font-semibold mb-2">Installation Progress</h3>
+            <ul id="progress-list" class="space-y-1 text-sm"></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="max-w-6xl mx-auto px-4 py-8 muted text-xs"></footer>
+
+  <script>
+    async function get(url) { const res = await fetch(url); return res.json(); }
+    function resolveNamespaceSync() {
+      const saved = localStorage.getItem('selectedNamespace');
+      return saved && saved.trim() ? saved.trim() : null;
+    }
+    async function syncNamespaceField() {
+      const nsInput = document.getElementById('field-namespace');
+      if (!nsInput) return 'default';
+      let ns = resolveNamespaceSync();
+      if (!ns) {
+        try {
+          const data = await get('/auth-status');
+          ns = (data && data.details && data.details.namespace) ? String(data.details.namespace) : null;
+          if (ns && !localStorage.getItem('selectedNamespace')) {
+            localStorage.setItem('selectedNamespace', ns);
+          }
+        } catch (_) {}
+      }
+      if (!ns) ns = 'default';
+      nsInput.value = ns;
+      return ns;
+    }
+
+    // Populate the namespace dropdown (datalist) with existing cluster namespaces.
+    // The field stays editable so a new namespace can be typed (created on deploy).
+    async function loadNamespaceOptions() {
+      const dl = document.getElementById('namespace-options');
+      if (!dl) return;
+      try {
+        const data = await get('/api/namespaces');
+        if (data && data.ok && Array.isArray(data.items)) {
+          dl.innerHTML = '';
+          for (const n of data.items) {
+            const opt = document.createElement('option');
+            opt.value = n;
+            dl.appendChild(opt);
+          }
+        }
+      } catch (_) { /* dropdown is best-effort; the field still accepts free text */ }
+    }
+
+    // Semantic search requires the AIDP blueprint already deployed in the target namespace.
+    const REQUIRED_AIDP_CR = 'weka-aidp';
+    const missingCreds = {{ ns_creds_missing | tojson }};
+    let aidpPresent = true; // until proven absent
+
+    function updateDeployEnabled() {
+      const btn = document.getElementById('deploy-btn');
+      if (!btn) return;
+      btn.disabled = (missingCreds.length > 0) || !aidpPresent;
+    }
+
+    async function checkAidpDependency(ns) {
+      const msgEl = document.getElementById('aidp-gate-msg');
+      try {
+        const data = await get(`/api/wekaappstore-exists?name=${encodeURIComponent(REQUIRED_AIDP_CR)}&namespace=${encodeURIComponent(ns)}`);
+        if (data && data.ok && data.exists === false) {
+          aidpPresent = false;
+          if (msgEl) {
+            msgEl.hidden = false;
+            msgEl.textContent = `AIDP is not deployed in namespace “${ns}”. Deploy the NeuralMesh AIDP blueprint into this namespace before installing semantic search.`;
+          }
+        } else {
+          // Present, or the check was inconclusive — do not hard-block.
+          aidpPresent = true;
+          if (msgEl) msgEl.hidden = true;
+        }
+      } catch (_) {
+        aidpPresent = true; // transient check failure should not block deploy
+        if (msgEl) msgEl.hidden = true;
+      }
+      updateDeployEnabled();
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const ns = await syncNamespaceField();
+      await loadNamespaceOptions();
+      // Persist the chosen namespace so it stays in sync with the Home page.
+      const nsInput = document.getElementById('field-namespace');
+      if (nsInput) {
+        nsInput.addEventListener('change', () => {
+          const v = (nsInput.value || '').trim();
+          if (v) {
+            localStorage.setItem('selectedNamespace', v);
+            checkAidpDependency(v);
+          }
+        });
+      }
+      updateDeployEnabled();
+      await checkAidpDependency(ns || 'default');
+    });
+
+    const form = document.getElementById('deploy-form');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const ns = (document.getElementById('field-namespace').value || (await syncNamespaceField()) || 'default');
+      const resEl = document.getElementById('deploy-result');
+      const progressEl = document.getElementById('progress');
+      const listEl = document.getElementById('progress-list');
+
+      resEl.textContent = 'Starting deployment...';
+      listEl.innerHTML = '';
+      progressEl.classList.remove('hidden');
+
+      // Collect all named form inputs into a variables dict
+      const formData = new FormData(form);
+      const variables = {};
+      for (const [key, value] of formData.entries()) {
+        if (key !== 'namespace') variables[key] = value.trim();
+      }
+      variables['namespace'] = ns;
+
+      const params = new URLSearchParams({
+        app_name: '{{ name }}',
+        variables: JSON.stringify(variables),
+      });
+      const url = `/deploy-stream?${params.toString()}`;
+      const es = new EventSource(url);
+
+      // Map an operator component phase to a section style.
+      const sectionClass = (phase) => {
+        const base = 'px-3 py-2 rounded border ';
+        switch ((phase || '').toLowerCase()) {
+          case 'ready':
+          case 'healthy':    return base + 'border-green-500/60 bg-green-500/10 text-green-300';
+          case 'failed':
+          case 'error':      return base + 'border-red-500/60 bg-red-500/10 text-red-300';
+          case 'installing': return base + 'border-yellow-400 bg-yellow-500/10 text-yellow-300';
+          default:           return base + 'border-white/10 bg-gray-800/40'; // pending / not started
+        }
+      };
+      es.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'init') {
+            listEl.innerHTML = '';
+            (msg.items || []).forEach((item, idx) => {
+              const li = document.createElement('li');
+              li.textContent = item;
+              li.className = sectionClass('pending');
+              li.dataset.idx = idx;
+              li.dataset.name = item;
+              listEl.appendChild(li);
+            });
+            resEl.textContent = 'Applying manifest to cluster…';
+          } else if (msg.type === 'component') {
+            // Flip this section's colour to match the operator's real per-component phase.
+            // If the operator reports a component the blueprint list didn't include, add it.
+            let li = Array.from(listEl.children).find(el => el.dataset.name === msg.name);
+            if (!li) {
+              li = document.createElement('li');
+              li.dataset.name = msg.name;
+              li.textContent = msg.name;
+              listEl.appendChild(li);
+            }
+            li.className = sectionClass(msg.phase);
+            if (msg.message) li.title = msg.message;
+          } else if (msg.type === 'complete') {
+            if (msg.ok !== false) {
+              listEl.querySelectorAll('li').forEach(li => { li.className = sectionClass('ready'); });
+              const applied = (msg.result && msg.result.applied && msg.result.applied.length) ? ' Applied: ' + msg.result.applied.join(', ') : '';
+              resEl.textContent = 'Deployment complete.' + applied;
+            } else {
+              resEl.textContent = 'Deployment failed: ' + (msg.message || 'a component failed');
+            }
+            es.close();
+          } else if (msg.type === 'error') {
+            resEl.textContent = 'Error: ' + (msg.message || 'Unknown error');
+            es.close();
+          }
+        } catch (err) {
+          resEl.textContent = 'Stream parse error: ' + err;
+          es.close();
+        }
+      };
+      es.onerror = () => {
+        resEl.textContent = 'Stream connection error.';
+        es.close();
+      };
+    });
+  </script>
+</body>
+</html>
