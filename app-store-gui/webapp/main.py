@@ -1752,11 +1752,17 @@ def _validation_disabled(meta: dict) -> bool:
     return isinstance(meta, dict) and meta.get("validate") is False
 
 
+def _is_hostname_field(meta: dict) -> bool:
+    """True when a blueprint declares `format: hostname` — a bare host/FQDN/IP,
+    not a URL (e.g. keycloak_fqdn, which the AIDP chart prefixes with a scheme)."""
+    return isinstance(meta, dict) and (meta.get("format") or "").lower() == "hostname"
+
+
 def _is_url_field(var_name: str, meta: dict) -> bool:
     """True if this variable is expected to contain a URL/endpoint."""
     if not isinstance(meta, dict):
         meta = {}
-    if _validation_disabled(meta):
+    if _validation_disabled(meta) or _is_hostname_field(meta):
         return False
     if (meta.get("type") or "").lower() == "url" or (meta.get("format") or "").lower() == "url":
         return True
@@ -1766,15 +1772,22 @@ def _is_url_field(var_name: str, meta: dict) -> bool:
 def _validate_variable_value(var_name: str, meta: dict, value: str) -> Optional[str]:
     """Return a human-readable error if value is malformed for this variable, else None.
 
-    Empty values are accepted here — required-ness is enforced separately. The
-    checks are intentionally narrow (URL fields only) to avoid rejecting values
-    that legitimately contain spaces. A blueprint may set `validate: false` on a
-    variable to skip these checks entirely (e.g. a bare host/IP, not a URL).
+    Empty values are accepted here — required-ness is enforced separately. A
+    blueprint may set `validate: false` to skip checks, or `format: hostname` to
+    require a bare host/FQDN/IP (rejecting an http:// scheme, a path, or spaces).
     """
     if _validation_disabled(meta):
         return None
     value = (value or "").strip()
     if not value:
+        return None
+    if _is_hostname_field(meta):
+        if "://" in value or value.lower().startswith(("http:", "https:")):
+            return f"{var_name}: enter a hostname only — remove the http:// or https:// prefix"
+        if "/" in value:
+            return f"{var_name}: enter a hostname only — remove the path or trailing slash"
+        if any(ch.isspace() for ch in value):
+            return f"{var_name}: hostname must not contain spaces"
         return None
     if _is_url_field(var_name, meta):
         if any(ch.isspace() for ch in value):
@@ -1868,10 +1881,16 @@ async def blueprint_detail(request: Request, name: str):
                 variable_schema = parse_x_variables(_f.read())
         except Exception:
             variable_schema = {}
-    # Annotate URL fields so the template can render an HTML5 url input that
-    # rejects malformed values (e.g. a stray space) before submit.
+    # Annotate URL/hostname fields so the template can give the browser an early
+    # hint (HTML5 url input, or a hostname pattern that rejects a scheme/path).
     for _vname, _vmeta in (variable_schema or {}).items():
-        if isinstance(_vmeta, dict) and _vmeta.get("type") != "credential" and _is_url_field(_vname, _vmeta):
+        if not isinstance(_vmeta, dict) or _vmeta.get("type") == "credential":
+            continue
+        if _is_hostname_field(_vmeta):
+            _vmeta["_input_type"] = "text"
+            _vmeta["_pattern"] = r"[^\s/]+(\.[^\s/]+)*"
+            _vmeta["_title"] = "Hostname only, e.g. keycloak.example.com (no http:// and no path)"
+        elif _is_url_field(_vname, _vmeta):
             _vmeta["_input_type"] = "url"
 
     # CR identity for install-state detection (Deploy↔Uninstall toggle, read-only fields).

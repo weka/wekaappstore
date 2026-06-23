@@ -346,6 +346,7 @@
                     <input id="field-{{ var_name }}" name="{{ var_name }}"
                            type="{{ var_meta.get('_input_type', 'text') }}"
                            {% if var_meta.get('_input_type') == 'url' %}placeholder="{{ var_meta.get('placeholder', 'https://host.example.com') }}" title="Enter a full URL, e.g. https://host.example.com (no spaces)"{% else %}placeholder="{{ var_meta.get('placeholder', '') }}"{% endif %}
+                           {% if var_meta.get('_pattern') %}pattern="{{ var_meta.get('_pattern') }}" title="{{ var_meta.get('_title', '') }}"{% endif %}
                            {% if var_meta.get("required") %}required{% endif %}
                            class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
                     {% if var_meta.get("description") %}

@@ -139,7 +139,8 @@ When the GUI renders a blueprint page, it reads this block and builds a form. Fi
 | `required` | boolean | No | When `true`, the form disables the Install button until this field has a non-empty value. Defaults to `false`. |
 | `description` | string | No | Help text rendered below the input field on the install form. |
 | `placeholder` | string | No | Gray hint text shown inside the empty input box. Only applies to `type: string`. |
-| `validate` | boolean | No | Set to `false` to skip the GUI's input-format validation for this field. By default fields whose name looks like a URL (`*_url`, `*_uri`, `*_endpoint`, `*_host`, …) are validated as `http(s)://` URLs; use `validate: false` for a bare host/IP or any value that should not be URL-checked. |
+| `format` | string | No | Input format hint for validation. `url` forces full-URL validation (`http(s)://host`). `hostname` requires a bare host/FQDN/IP and **rejects a scheme, path, or spaces** — use it for values that feed Kubernetes `hostAliases`/HTTPRoute hostnames (e.g. `keycloak_fqdn`). Without `format`, fields whose name looks like a URL (`*_url`, `*_uri`, `*_endpoint`, `*_host`, …) are validated as URLs. |
+| `validate` | boolean | No | Set to `false` to skip the GUI's input-format validation for this field entirely (e.g. a bare host/IP that should not be URL-checked and where you don't want `format: hostname` either). |
 | `credential_type` | string | Required when `type` is `credential` | The category of credential to list. Must be one of `nvidia-ngc`, `huggingface`, or `weka-storage`. |
 
 ### `type: string`

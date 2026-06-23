@@ -52,3 +52,32 @@ def test_validate_false_disables_url_validation():
     assert main._validate_variable_value("weka_api_host", meta, "172.3.4.248") is None
     # Without the opt-out, the same field is treated as a URL and rejected.
     assert main._validate_variable_value("weka_api_host", {}, "172.3.4.248") is not None
+
+
+# --------------------------- format: hostname ---------------------------
+
+_HOST = {"format": "hostname"}
+
+
+def test_hostname_field_is_not_url_field():
+    assert main._is_hostname_field(_HOST) is True
+    assert main._is_url_field("keycloak_fqdn", _HOST) is False
+
+
+def test_hostname_accepts_bare_fqdn_and_ip():
+    assert main._validate_variable_value("keycloak_fqdn", _HOST, "keycloak.example.com") is None
+    assert main._validate_variable_value("attu_hostname", _HOST, "attu.example.com") is None
+    assert main._validate_variable_value("weka_api_host", _HOST, "172.3.4.248") is None
+    assert main._validate_variable_value("keycloak_fqdn", _HOST, "keycloak.example.com:8080") is None
+
+
+def test_hostname_rejects_scheme():
+    # The exact operator-breaking case.
+    err = main._validate_variable_value("keycloak_fqdn", _HOST, "http://keycloak.example.com")
+    assert err is not None and "http://" in err
+    assert main._validate_variable_value("keycloak_fqdn", _HOST, "https://keycloak.example.com") is not None
+
+
+def test_hostname_rejects_path_and_spaces():
+    assert main._validate_variable_value("keycloak_fqdn", _HOST, "keycloak.example.com/auth") is not None
+    assert main._validate_variable_value("keycloak_fqdn", _HOST, "keycloak .example.com") is not None
