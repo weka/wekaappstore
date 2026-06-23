@@ -2,3 +2,11 @@
 /weka-csi-config/weka-operator/
 /weka-csi-config/quay-secret.yaml
 /weka-csi-config/csi-wekafs-api-secret.yaml
+
+# OS / editor / tooling junk
+.DS_Store
+.claude/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
