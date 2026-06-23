@@ -309,13 +309,80 @@
         <div class="card rounded-lg p-6">
           <h2 class="text-lg font-semibold mb-3">Configure</h2>
           <form id="deploy-form" class="space-y-4">
-            {# Namespace is resolved from the Home page's selected namespace (localStorage) via syncNamespaceField() on DOMContentLoaded. Kept as a hidden input so the submit handler keeps working without a visible field. #}
-            <input type="hidden" id="namespace" name="namespace" value="default" />
+            <!-- Namespace field: editable dropdown of existing namespaces (type a new one to create it) -->
+            <div>
+              <label class="block text-sm mb-1" for="field-namespace">Namespace</label>
+              <input id="field-namespace" name="namespace" list="namespace-options" placeholder="default" value="default"
+                     autocomplete="off"
+                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                     title="Select an existing namespace or type a new one to create it" />
+              <datalist id="namespace-options"></datalist>
+              <div class="muted text-xs mt-1">Select an existing namespace or type a new one (it is created automatically on deploy).</div>
+            </div>
 
-            {{ weka_storage_select(credential_field="weka_credential", endpoint_field="weka_endpoint", label="WEKA NeuralMesh") }}
-            {{ credential_select(type="nvidia-ngc", field_name="ngc_credential", label="NVIDIA NGC API Key") }}
+            {% set ns_creds_missing = [] %}
+            <!-- Dynamic fields from x-variables schema -->
+            {% if variable_schema %}
+              {# ns_creds_missing is initialized above; appended inside this block #}
+              {% for var_name, var_meta in variable_schema.items() %}
+                {% if var_name == "namespace" %}
+                  {# namespace is always rendered above as a fixed field; skip here #}
+                {% elif var_meta.get("type") == "credential" %}
+                  {% set ctype = var_meta.get("credential_type", "") %}
+                  {% set creds = available_creds.get(ctype, []) %}
+                  {% if var_meta.get("required") and not creds %}
+                    {% set _ = ns_creds_missing.append(ctype) %}
+                  {% endif %}
+                  <div>
+                    <label class="block text-sm mb-1" for="field-{{ var_name }}">
+                      {{ var_name | replace("_", " ") | title }}
+                    </label>
+                    {% if creds %}
+                      <select id="field-{{ var_name }}" name="{{ var_name }}"
+                              {% if var_meta.get("required") %}required{% endif %}
+                              class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400">
+                        {% for cred in creds %}
+                          <option value="{{ cred.name }}">{{ cred.displayName }}</option>
+                        {% endfor %}
+                      </select>
+                    {% else %}
+                      <p class="text-sm muted">No {{ ctype | replace("-", " ") }} credential configured.
+                        <a href="/settings#credentials" class="text-yellow-400 underline hover:text-white">Add one in Settings.</a>
+                      </p>
+                    {% endif %}
+                    {% if var_meta.get("description") %}
+                      <div class="muted text-xs mt-1">{{ var_meta.get("description") }}</div>
+                    {% endif %}
+                  </div>
+                {% else %}
+                  <div>
+                    <label class="block text-sm mb-1" for="field-{{ var_name }}">
+                      {{ var_name | replace("_", " ") | title }}
+                    </label>
+                    <input id="field-{{ var_name }}" name="{{ var_name }}"
+                           placeholder="{{ var_meta.get('placeholder', '') }}"
+                           {% if var_meta.get("required") %}required{% endif %}
+                           class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                    {% if var_meta.get("description") %}
+                      <div class="muted text-xs mt-1">{{ var_meta.get("description") }}</div>
+                    {% endif %}
+                  </div>
+                {% endif %}
+              {% endfor %}
 
-            <button type="submit" disabled class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium opacity-50 cursor-not-allowed">Deploy Blueprint (coming soon)</button>
+              {% if ns_creds_missing %}
+                <div class="rounded-md p-3 text-sm" style="background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3);">
+                  Missing required credentials: {{ ns_creds_missing | join(", ") }}.
+                  <a href="/settings#credentials" class="text-yellow-400 underline hover:text-white">Add them in Settings</a> before deploying.
+                </div>
+              {% endif %}
+            {% endif %}
+
+            <button type="submit" id="deploy-btn"
+                    {% if not variable_schema %}disabled title="Blueprint has no x-variables schema"{% endif %}
+                    class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+              Deploy Blueprint
+            </button>
             <div id="deploy-result" class="text-xs mt-2"></div>
           </form>
 
@@ -332,42 +399,133 @@
 
   <script>
     async function get(url) { const res = await fetch(url); return res.json(); }
-    function resolveNamespaceSync() { const saved = localStorage.getItem('selectedNamespace'); return saved && saved.trim() ? saved.trim() : null; }
-    async function syncNamespaceField() {
-      const nsInput = document.getElementById('namespace'); if (!nsInput) return 'default';
-      let ns = resolveNamespaceSync();
-      if (!ns) { try { const data = await get('/auth-status'); ns = (data && data.details && data.details.namespace) ? String(data.details.namespace) : null; if (ns && !localStorage.getItem('selectedNamespace')) { localStorage.setItem('selectedNamespace', ns); } } catch (_) {} }
-      if (!ns) ns = 'default'; nsInput.value = ns; return ns;
+    function resolveNamespaceSync() {
+      const saved = localStorage.getItem('selectedNamespace');
+      return saved && saved.trim() ? saved.trim() : null;
     }
+    async function syncNamespaceField() {
+      const nsInput = document.getElementById('field-namespace');
+      if (!nsInput) return 'default';
+      let ns = resolveNamespaceSync();
+      if (!ns) {
+        try {
+          const data = await get('/auth-status');
+          ns = (data && data.details && data.details.namespace) ? String(data.details.namespace) : null;
+          if (ns && !localStorage.getItem('selectedNamespace')) {
+            localStorage.setItem('selectedNamespace', ns);
+          }
+        } catch (_) {}
+      }
+      if (!ns) ns = 'default';
+      nsInput.value = ns;
+      return ns;
+    }
+
+    // Populate the namespace dropdown (datalist) with existing cluster namespaces.
+    // The field stays editable so a new namespace can be typed (created on deploy).
+    async function loadNamespaceOptions() {
+      const dl = document.getElementById('namespace-options');
+      if (!dl) return;
+      try {
+        const data = await get('/api/namespaces');
+        if (data && data.ok && Array.isArray(data.items)) {
+          dl.innerHTML = '';
+          for (const n of data.items) {
+            const opt = document.createElement('option');
+            opt.value = n;
+            dl.appendChild(opt);
+          }
+        }
+      } catch (_) { /* dropdown is best-effort; the field still accepts free text */ }
+    }
+
     document.addEventListener('DOMContentLoaded', async () => {
-      // Populates the hidden #namespace input from localStorage or the auth-status endpoint.
       await syncNamespaceField();
+      await loadNamespaceOptions();
+      // Persist the chosen namespace so it stays in sync with the Home page.
+      const nsInput = document.getElementById('field-namespace');
+      if (nsInput) {
+        nsInput.addEventListener('change', () => {
+          const v = (nsInput.value || '').trim();
+          if (v) localStorage.setItem('selectedNamespace', v);
+        });
+      }
+      // Disable deploy button if required credentials are missing
+      const missingCreds = {{ ns_creds_missing | tojson }};
+      if (missingCreds.length > 0) {
+        const btn = document.getElementById('deploy-btn');
+        if (btn) btn.disabled = true;
+      }
     });
+
     const form = document.getElementById('deploy-form');
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const ns = (document.getElementById('namespace').value || (await syncNamespaceField()) || 'default');
+      const ns = (document.getElementById('field-namespace').value || (await syncNamespaceField()) || 'default');
       const resEl = document.getElementById('deploy-result');
       const progressEl = document.getElementById('progress');
       const listEl = document.getElementById('progress-list');
+
       resEl.textContent = 'Starting deployment...';
       listEl.innerHTML = '';
       progressEl.classList.remove('hidden');
-      try {
-        const resp = await fetch(`/deploy-stream/{{ name }}?namespace=${encodeURIComponent(ns)}`);
-        const reader = resp.body.getReader();
-        const dec = new TextDecoder();
-        while (true) {
-          const { value, done } = await reader.read(); if (done) break; const chunk = dec.decode(value);
-          for (const line of chunk.split('\n')) {
-            if (!line.startsWith('data:')) continue; const jsonStr = line.substring(5).trim(); if (!jsonStr) continue;
-            try { const evt = JSON.parse(jsonStr); if (evt.message) { const li = document.createElement('li'); li.textContent = evt.message; listEl.appendChild(li); listEl.scrollTop = listEl.scrollHeight; } } catch (_) {}
-          }
-        }
-        resEl.textContent = 'Deployment stream finished.';
-      } catch (err) {
-        resEl.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+
+      // Collect all named form inputs into a variables dict
+      const formData = new FormData(form);
+      const variables = {};
+      for (const [key, value] of formData.entries()) {
+        if (key !== 'namespace') variables[key] = value.trim();
       }
+      variables['namespace'] = ns;
+
+      const params = new URLSearchParams({
+        app_name: '{{ name }}',
+        variables: JSON.stringify(variables),
+      });
+      const url = `/deploy-stream?${params.toString()}`;
+      const es = new EventSource(url);
+
+      let currentIndex = -1;
+      es.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'init') {
+            listEl.innerHTML = '';
+            (msg.items || []).forEach((item, idx) => {
+              const li = document.createElement('li');
+              li.textContent = item;
+              li.className = 'px-3 py-2 rounded border border-white/10 bg-gray-800/40';
+              li.dataset.idx = idx;
+              listEl.appendChild(li);
+            });
+            resEl.textContent = 'Applying manifest to cluster...';
+          } else if (msg.type === 'progress') {
+            if (currentIndex >= 0) {
+              const prev = listEl.querySelector(`li[data-idx="${currentIndex}"]`);
+              if (prev) prev.className = 'px-3 py-2 rounded border border-white/10 bg-gray-800/40';
+            }
+            currentIndex = msg.currentIndex ?? -1;
+            const cur = listEl.querySelector(`li[data-idx="${currentIndex}"]`);
+            if (cur) cur.className = 'px-3 py-2 rounded border border-yellow-400 bg-yellow-500/10 text-yellow-300';
+          } else if (msg.type === 'complete') {
+            listEl.querySelectorAll('li').forEach(li => {
+              li.className = 'px-3 py-2 rounded border border-green-500/60 bg-green-500/10 text-green-300';
+            });
+            resEl.textContent = 'Deployment submitted. Applied: ' + ((msg.result && msg.result.applied && msg.result.applied.join(', ')) || 'OK');
+            es.close();
+          } else if (msg.type === 'error') {
+            resEl.textContent = 'Error: ' + (msg.message || 'Unknown error');
+            es.close();
+          }
+        } catch (err) {
+          resEl.textContent = 'Stream parse error: ' + err;
+          es.close();
+        }
+      };
+      es.onerror = () => {
+        resEl.textContent = 'Stream connection error.';
+        es.close();
+      };
     });
   </script>
 </body>

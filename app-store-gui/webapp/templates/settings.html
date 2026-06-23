@@ -140,6 +140,20 @@
       {% endif %}
     </section>
 
+    <!-- Section 2b: WEKA CSI Storage Classes -->
+    <section class="card rounded-lg p-5" id="weka-storage-classes-section">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="font-semibold">WEKA CSI Storage Classes</h3>
+          <p class="muted text-sm">StorageClasses backed by the WEKA CSI driver (<code>csi.weka.io</code>) and their live PVC usage.</p>
+        </div>
+        <button type="button" id="weka-sc-refresh" class="px-3 py-1.5 rounded-md text-sm font-medium border border-[var(--weka-purple)]/60 text-[var(--weka-purple)] hover:bg-[var(--weka-purple)]/10 focus:outline-none focus:ring-2 focus:ring-[var(--weka-purple)]">↺ Refresh</button>
+      </div>
+      <div id="weka-sc-loading" class="muted text-sm">Loading storage classes…</div>
+      <div id="weka-sc-error" hidden></div>
+      <div id="weka-sc-content" hidden></div>
+    </section>
+
     <!-- Section 3: Kubernetes Auth Status -->
     <section class="card rounded-lg p-5">
       <div class="flex items-center justify-between mb-4">
@@ -962,6 +976,11 @@
         renderWekaControls();
         loadWekaOverview(false);
       }
+
+      // ---- WEKA CSI Storage Classes wire-up ----
+      const scRefreshBtn = document.getElementById('weka-sc-refresh');
+      if (scRefreshBtn) scRefreshBtn.addEventListener('click', loadStorageClasses);
+      loadStorageClasses();
     });
 
     // -------- WEKA Storage Overview --------
@@ -1051,6 +1070,85 @@
       if (n >= GiB) return `${(n / GiB).toFixed(1)} GiB`;
       if (n >= MiB) return `${(n / MiB).toFixed(1)} MiB`;
       return `${n} B`;
+    }
+
+    // -------- WEKA CSI Storage Classes --------
+    function setScState(state) {
+      const loading = document.getElementById('weka-sc-loading');
+      const error   = document.getElementById('weka-sc-error');
+      const content = document.getElementById('weka-sc-content');
+      if (!loading || !error || !content) return;
+      loading.hidden = state !== 'loading';
+      error.hidden   = state !== 'error';
+      content.hidden = state !== 'content';
+    }
+
+    function renderStorageClasses(items) {
+      const content = document.getElementById('weka-sc-content');
+      if (!content) return;
+      if (!items || items.length === 0) {
+        content.innerHTML = `<p class="muted text-sm">No WEKA CSI storage classes found on this cluster.</p>`;
+        return;
+      }
+      const dash = '&#x2014;';
+      const rows = items.map(sc => {
+        const defaultBadge = sc.isDefault
+          ? ` <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--weka-purple)]/30 text-[var(--weka-purple)] align-middle">default</span>`
+          : '';
+        const usage = sc.pvcCount > 0
+          ? `${sc.pvcCount} PVC${sc.pvcCount === 1 ? '' : 's'} <span class="muted">(${humanBytes(sc.boundBytes)})</span>`
+          : `<span class="muted">unused</span>`;
+        return `
+          <tr class="border-t border-white/5">
+            <td class="py-2 pr-4 text-sm font-mono">${esc(sc.name)}${defaultBadge}</td>
+            <td class="py-2 pr-4 text-sm">${esc(sc.filesystemName || sc.filesystemGroupName || dash)}</td>
+            <td class="py-2 pr-4 text-sm">${esc(sc.volumeType || dash)}</td>
+            <td class="py-2 pr-4 text-sm">${esc(sc.reclaimPolicy || dash)}</td>
+            <td class="py-2 pr-4 text-sm">${sc.allowVolumeExpansion ? 'Yes' : 'No'}</td>
+            <td class="py-2 pr-4 text-sm">${esc(sc.capacityEnforcement || dash)}</td>
+            <td class="py-2 pr-4 text-sm">${usage}</td>
+          </tr>`;
+      }).join('');
+      content.innerHTML = `
+        <div class="overflow-x-auto">
+          <table class="min-w-full">
+            <thead>
+              <tr class="text-left text-xs uppercase text-white/70">
+                <th class="py-2 pr-4">Storage Class</th>
+                <th class="py-2 pr-4">Filesystem</th>
+                <th class="py-2 pr-4">Volume Type</th>
+                <th class="py-2 pr-4">Reclaim</th>
+                <th class="py-2 pr-4">Expansion</th>
+                <th class="py-2 pr-4">Enforcement</th>
+                <th class="py-2 pr-4">In Use</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }
+
+    function renderScError(message) {
+      const banner = document.getElementById('weka-sc-error');
+      if (!banner) return;
+      banner.innerHTML = `<div class="rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-300">Could not load storage classes: ${esc(message)}</div>`;
+    }
+
+    async function loadStorageClasses() {
+      setScState('loading');
+      try {
+        const data = await get('/api/weka/storage-classes');
+        if (data && data.ok) {
+          renderStorageClasses(data.items);
+          setScState('content');
+        } else {
+          renderScError(data && data.error ? data.error : 'Unknown error');
+          setScState('error');
+        }
+      } catch (e) {
+        renderScError(String(e));
+        setScState('error');
+      }
     }
 
     // ---- renderWekaSuccess ----

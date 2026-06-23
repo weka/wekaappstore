@@ -1050,7 +1050,7 @@ async def get_weka_overview(
 
         # 5b: Resolve credential Secret
         try:
-            endpoint, username, token = await asyncio.to_thread(
+            endpoint, _username, token = await asyncio.to_thread(
                 _resolve_weka_credential_secret, credential, ns
             )
         except ApiException as ae:
@@ -1068,14 +1068,13 @@ async def get_weka_overview(
         except RuntimeError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
-        # 5c: Login exchange — WEKA auth failures surface as 502 (Claude's Discretion, CONTEXT.md)
-        try:
-            access_token = await asyncio.to_thread(_weka_login, endpoint, username, token)
-        except RuntimeError:
-            return JSONResponse({"ok": False, "error": "WEKA login failed"}, status_code=502)
+        # 5c: Resolve the Bearer token. WEKA API tokens (weka user generate-api-token)
+        # are long-lived JWTs used directly as Bearer; refresh-style tokens are first
+        # exchanged via /api/v2/login/refresh. _weka_resolve_bearer_token handles both.
+        bearer = await asyncio.to_thread(_weka_resolve_bearer_token, endpoint, token)
 
-        # 5d-e: Build request headers; access_token is never logged
-        headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
+        # 5d-e: Build request headers; the token is never logged
+        headers = {"Authorization": f"Bearer {bearer}", "Accept": "application/json"}
         base = endpoint.rstrip("/")
 
         # 5f: Three parallel WEKA data calls (D-05)
@@ -1086,8 +1085,17 @@ async def get_weka_overview(
             asyncio.to_thread(_weka_get_json, f"{base}/api/v2/containers", headers),
             return_exceptions=True,
         )
+
+        # The cluster call is essential. If it failed, the token was rejected or the
+        # cluster is unreachable — surface a clear 502 instead of an empty overview.
+        if isinstance(results[1], Exception):
+            return JSONResponse(
+                {"ok": False, "error": "WEKA authentication failed or cluster unreachable"},
+                status_code=502,
+            )
+
         fs_resp = results[0] if not isinstance(results[0], Exception) else []
-        cluster_resp = results[1] if not isinstance(results[1], Exception) else {}
+        cluster_resp = results[1]
         containers_resp = results[2] if not isinstance(results[2], Exception) else []
 
         # 5g-h: Assemble response
@@ -1258,6 +1266,169 @@ async def list_storage_classes():
         return JSONResponse({"ok": True, "items": names})
     except ApiException as e:
         return JSONResponse({"ok": False, "error": f"Kubernetes API error: {e.reason}", "status": e.status}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+_QTY_FACTORS = {
+    "Ki": 1024, "Mi": 1024 ** 2, "Gi": 1024 ** 3, "Ti": 1024 ** 4, "Pi": 1024 ** 5, "Ei": 1024 ** 6,
+    "k": 1000, "M": 1000 ** 2, "G": 1000 ** 3, "T": 1000 ** 4, "P": 1000 ** 5, "E": 1000 ** 6,
+}
+
+
+def _parse_k8s_quantity_bytes(qty: str) -> int:
+    """Best-effort parse of a Kubernetes storage quantity (e.g. '10Gi') to bytes. Returns 0 on failure."""
+    if not qty:
+        return 0
+    qty = qty.strip()
+    for suffix in ("Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "k", "M", "G", "T", "P", "E"):
+        if qty.endswith(suffix):
+            try:
+                return int(float(qty[:-len(suffix)]) * _QTY_FACTORS[suffix])
+            except ValueError:
+                return 0
+    try:
+        return int(float(qty))
+    except ValueError:
+        return 0
+
+
+@app.get("/api/weka/storage-classes")
+async def list_weka_storage_classes():
+    """Return WEKA CSI StorageClasses (provisioner csi.weka.io) with admin detail and live PVC usage.
+
+    Used by the Settings admin page. Distinct from /storage-classes, which returns a flat
+    name list for blueprint deploy forms — that endpoint's shape is left unchanged.
+    """
+    try:
+        load_kube_config()
+        storage_api = client.StorageV1Api()
+        core_api = client.CoreV1Api()
+        sc_list = await asyncio.to_thread(storage_api.list_storage_class)
+        pvc_list = await asyncio.to_thread(core_api.list_persistent_volume_claim_for_all_namespaces)
+
+        # Aggregate live PVC usage per storage class (count + bound capacity).
+        usage: Dict[str, Dict[str, int]] = {}
+        for pvc in (pvc_list.items or []):
+            sc_name = pvc.spec.storage_class_name if pvc.spec else None
+            if not sc_name:
+                continue
+            entry = usage.setdefault(sc_name, {"count": 0, "bytes": 0})
+            entry["count"] += 1
+            cap = (pvc.status.capacity or {}).get("storage") if pvc.status else None
+            if not cap and pvc.spec and pvc.spec.resources and pvc.spec.resources.requests:
+                cap = pvc.spec.resources.requests.get("storage")
+            entry["bytes"] += _parse_k8s_quantity_bytes(cap or "")
+
+        items = []
+        for sc in (sc_list.items or []):
+            if (sc.provisioner or "") != "csi.weka.io":
+                continue
+            md = sc.metadata
+            ann = md.annotations or {}
+            params = sc.parameters or {}
+            u = usage.get(md.name, {"count": 0, "bytes": 0})
+            items.append({
+                "name": md.name,
+                "isDefault": ann.get("storageclass.kubernetes.io/is-default-class") == "true",
+                "provisioner": sc.provisioner,
+                "reclaimPolicy": sc.reclaim_policy,
+                "volumeBindingMode": sc.volume_binding_mode,
+                "allowVolumeExpansion": bool(sc.allow_volume_expansion),
+                "filesystemName": params.get("filesystemName"),
+                "filesystemGroupName": params.get("filesystemGroupName"),
+                "volumeType": params.get("volumeType"),
+                "capacityEnforcement": params.get("capacityEnforcement"),
+                "pvcCount": u["count"],
+                "boundBytes": u["bytes"],
+            })
+        # Default class first, then alphabetical.
+        items.sort(key=lambda x: (not x["isDefault"], x["name"]))
+        return JSONResponse({"ok": True, "items": items})
+    except ApiException as e:
+        return JSONResponse({"ok": False, "error": f"Kubernetes API error: {e.reason}", "status": e.status}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/wekaappstore-exists")
+async def wekaappstore_exists(
+    name: str = Query(..., description="WekaAppStore CR name to check"),
+    namespace: str = Query("default", description="Namespace to look in"),
+):
+    """Return whether a named WekaAppStore CR exists in a namespace, and its phase.
+
+    Used for blueprint dependency gating — e.g. the semantic-search blueprint requires the
+    AIDP blueprint (CR 'weka-aidp') to already be present in the target namespace.
+    """
+    ns = (namespace or "default").strip() or "default"
+    if not _CREDENTIAL_NAME_RE.match(name):
+        return JSONResponse({"ok": False, "error": "invalid name"}, status_code=400)
+    try:
+        load_kube_config()
+        custom_api = client.CustomObjectsApi()
+        cr = await asyncio.to_thread(
+            custom_api.get_namespaced_custom_object,
+            group="warp.io", version="v1alpha1",
+            namespace=ns, plural="wekaappstores", name=name,
+        )
+        phase = (cr.get("status", {}) or {}).get("appStackPhase")
+        return JSONResponse({"ok": True, "exists": True, "phase": phase})
+    except ApiException as e:
+        if e.status == 404:
+            return JSONResponse({"ok": True, "exists": False, "phase": None})
+        return JSONResponse({"ok": False, "error": f"Kubernetes API error: {e.reason}"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/refresh-blueprints")
+async def refresh_blueprints():
+    """Re-sync the warp-blueprints checkout that BLUEPRINTS_DIR is served from.
+
+    git-sync runs once as an init container; this re-pulls the current worktree in place
+    (fetch + reset --hard) so newly published blueprints appear without restarting the pod.
+    BLUEPRINTS_DIR is a read-only bind mount pinned to this worktree, so updating files here
+    is reflected immediately for blueprint listing.
+    """
+    root = os.getenv("GIT_SYNC_ROOT", "/manifests")
+    link = os.getenv("GIT_SYNC_LINK", "manifests")
+    branch = os.getenv("GIT_SYNC_BRANCH", "main") or "main"
+    worktree = os.path.join(root, link)
+
+    # The git-sync worktree has a `.git` file (gitdir pointer). Absence means this
+    # environment is not git-sync-managed (e.g. local dev) — nothing to refresh.
+    if not os.path.exists(os.path.join(worktree, ".git")):
+        return JSONResponse(
+            {"ok": False, "error": "Blueprints are not managed by git-sync in this environment"},
+            status_code=400,
+        )
+
+    def _run(args):
+        return subprocess.run(["git", "-C", worktree, *args], capture_output=True, text=True, timeout=60)
+
+    def _rev():
+        r = _run(["rev-parse", "--short", "HEAD"])
+        return r.stdout.strip() if r.returncode == 0 else None
+
+    try:
+        before = await asyncio.to_thread(_rev)
+        fetch = await asyncio.to_thread(_run, ["fetch", "--depth=1", "origin", branch])
+        if fetch.returncode != 0:
+            logger.warning("refresh-blueprints fetch failed: %s", fetch.stderr.strip())
+            return JSONResponse(
+                {"ok": False, "error": "git fetch failed; check cluster network access to the blueprints repo"},
+                status_code=502,
+            )
+        reset = await asyncio.to_thread(_run, ["reset", "--hard", "FETCH_HEAD"])
+        if reset.returncode != 0:
+            logger.warning("refresh-blueprints reset failed: %s", reset.stderr.strip())
+            return JSONResponse({"ok": False, "error": "git reset failed"}, status_code=500)
+        after = await asyncio.to_thread(_rev)
+        logger.info("refresh-blueprints: %s -> %s (branch=%s)", before, after, branch)
+        return JSONResponse({"ok": True, "changed": before != after, "before": before, "after": after})
+    except subprocess.TimeoutExpired:
+        return JSONResponse({"ok": False, "error": "git operation timed out"}, status_code=504)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -1578,34 +1749,34 @@ def _weka_post_json(url: str, payload: Dict[str, Any], timeout: float = 15.0) ->
         raise RuntimeError(f"WEKA login failed: {exc.reason}") from exc
 
 
-def _weka_login(endpoint: str, username: str, token: str) -> str:
-    """Exchange WEKA API username + token for a short-lived Bearer access token.
+def _weka_resolve_bearer_token(endpoint: str, token: str) -> str:
+    """Resolve the Bearer token to use against the WEKA REST API from a stored API token.
 
-    Tries the following response field paths in order (PRD note: verify against
-    /api/v2/docs Swagger UI for the deployed WEKA version):
-      1. resp["access_token"]
-      2. resp["data"]["access_token"]
-      3. resp["token"]
+    WEKA `weka user generate-api-token` produces a long-lived JWT that is used
+    directly as a Bearer token — no login exchange. Older refresh-style tokens must
+    first be exchanged via POST /api/v2/login/refresh for a short-lived access token.
 
-    Raises RuntimeError if none are present.  Never logs the returned token.
+    Strategy: attempt the refresh exchange; if WEKA rejects the token there (it is not
+    a refresh token) the stored token is used directly as the Bearer token. This is the
+    common case for generated API tokens. Never logs the token.
+
+    The token is NOT validated here — the caller surfaces auth failures from the
+    subsequent data calls. Never logs the token or the returned access token.
     """
     endpoint = endpoint.rstrip("/")
-    resp = _weka_post_json(f"{endpoint}/api/v2/login", {"username": username, "password": token})
+    try:
+        resp = _weka_post_json(f"{endpoint}/api/v2/login/refresh", {"refresh_token": token})
+    except RuntimeError:
+        # Not a refresh token (or refresh endpoint unreachable) — long-lived API
+        # tokens are used directly as the Bearer token.
+        return token
 
     access_token = resp.get("access_token")
-    if access_token is None:
-        data_block = resp.get("data")
-        if isinstance(data_block, dict):
-            access_token = data_block.get("access_token")
+    if access_token is None and isinstance(resp.get("data"), dict):
+        access_token = resp["data"].get("access_token")
     if access_token is None:
         access_token = resp.get("token")
-
-    if access_token is None:
-        raise RuntimeError(
-            "WEKA login response missing access token field; confirm field name against "
-            "/api/v2/docs Swagger UI for the deployed WEKA version"
-        )
-    return str(access_token)
+    return str(access_token) if access_token is not None else token
 
 
 def _resolve_weka_credential_secret(credential_name: str, namespace: str) -> Tuple[str, str, str]:
@@ -2276,12 +2447,27 @@ def get_blueprint_components(file_path: str) -> List[str]:
         for idx, c in enumerate(comps):
             if not isinstance(c, dict):
                 continue
+            # Mirror the operator's filter (handle_appstack_deployment): disabled components
+            # are never deployed and never report status, so don't render a section for them.
+            if not c.get('enabled', True):
+                continue
             name = str(c.get('name') or f"component-{idx+1}")
             items.append(name)
     except Exception:
         # fallback single item
         items = ["Submitting blueprint"]
     return items
+
+
+def _extract_wekaappstore_name(rendered: str) -> Optional[str]:
+    """Return metadata.name of the first WekaAppStore doc in rendered multi-doc YAML, or None."""
+    try:
+        for doc in yaml.safe_load_all(rendered):
+            if isinstance(doc, dict) and doc.get("kind") == "WekaAppStore":
+                return ((doc.get("metadata") or {}).get("name"))
+    except Exception:
+        return None
+    return None
 
 
 # Support both query-style and path-style app selection
@@ -2347,26 +2533,9 @@ async def deploy_stream(
             "message": f"Initializing {len(items)} components"
         })
 
-        # Stream a simple progress over the items while we submit the blueprint
+        # Render the blueprint, apply it, then track REAL per-component progress by polling
+        # the WekaAppStore .status that the operator patches as each component finishes.
         try:
-            for i, item in enumerate(items):
-                # If client disconnected, stop
-                if await request.is_disconnected():
-                    return
-                logger.info("Deploy-stream progress: %s (%d/%d)", item, i+1, len(items))
-                yield sse_event({
-                    "type": "progress",
-                    "currentIndex": i,
-                    "name": item,
-                    "message": f"Applying {item} ({i+1}/{len(items)})"
-                })
-                # Small delay to allow UI to render progression
-                try:
-                    await asyncio.sleep(0.15)
-                except Exception:
-                    # Fallback (shouldn't block event loop often)
-                    time.sleep(0.1)
-
             # Load and render blueprint YAML as Jinja2 template with provided variables
             if not os.path.isabs(yaml_path):
                 bp_path = os.path.join(PROJECT_ROOT, yaml_path)
@@ -2389,12 +2558,58 @@ async def deploy_stream(
             )
             ns_for_apply = "" if app_name == "cluster-init" else namespace
             result = apply_blueprint_content_with_namespace(rendered, namespace=ns_for_apply)
-            yield sse_event({
-                "type": "complete",
-                "ok": True,
-                "result": result,
-                "message": "Deployment complete"
-            })
+
+            # cluster-init and non-appStack blueprints have no per-component operator status
+            # to poll — report submission complete immediately.
+            cr_name = _extract_wekaappstore_name(rendered)
+            if not cr_name or app_name == "cluster-init":
+                yield sse_event({"type": "complete", "ok": True, "result": result, "message": "Deployment complete"})
+                return
+
+            # Poll the operator's real componentStatus until the stack reaches a terminal phase.
+            load_kube_config()
+            custom_api = client.CustomObjectsApi()
+            emitted: Dict[str, str] = {}
+            deadline = time.time() + 900  # 15-minute cap
+            while True:
+                if await request.is_disconnected():
+                    return
+                try:
+                    cr = await asyncio.to_thread(
+                        custom_api.get_namespaced_custom_object,
+                        group="warp.io", version="v1alpha1",
+                        namespace=namespace, plural="wekaappstores", name=cr_name,
+                    )
+                except ApiException:
+                    cr = None
+                status = (cr or {}).get("status", {}) or {}
+                comp_statuses = status.get("componentStatus", []) or []
+                # Emit a per-component event whenever a component's phase changes.
+                for comp in comp_statuses:
+                    cname = comp.get("name")
+                    cphase = comp.get("phase")
+                    if cname and emitted.get(cname) != cphase:
+                        emitted[cname] = cphase
+                        yield sse_event({
+                            "type": "component",
+                            "name": cname,
+                            "phase": cphase,
+                            "message": comp.get("message", ""),
+                        })
+                phase = status.get("appStackPhase")
+                if phase == "Ready":
+                    yield sse_event({"type": "complete", "ok": True, "result": result, "message": "Deployment complete"})
+                    return
+                if phase == "Failed":
+                    failed = next((c for c in comp_statuses if c.get("phase") in ("Failed", "Error")), None)
+                    msg = (f"{failed.get('name')}: {failed.get('message', 'failed')}"
+                           if failed else "Deployment failed")
+                    yield sse_event({"type": "complete", "ok": False, "result": result, "message": msg})
+                    return
+                if time.time() > deadline:
+                    yield sse_event({"type": "error", "message": "Timed out waiting for components to become ready"})
+                    return
+                await asyncio.sleep(2)
         except FileNotFoundError as e:
             yield sse_event({"type": "error", "message": str(e)})
         except ApiException as e:

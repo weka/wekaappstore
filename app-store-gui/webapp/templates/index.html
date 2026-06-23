@@ -67,6 +67,8 @@
       </div>
       <nav class="flex items-center gap-6 text-sm">
         <a href="/" class="text-white/80 hover:text-white">Home</a>
+        <span id="refresh-blueprints-status" class="text-xs text-white/50"></span>
+        <a href="#" id="refresh-blueprints-link" class="text-white/80 hover:text-white" title="Re-sync blueprints from the catalog repo">↻ Refresh</a>
         <a href="/settings" class="text-white/80 hover:text-white">Settings</a>
       </nav>
     </div>
@@ -504,6 +506,35 @@
       const res = await fetch(url);
       return res.json();
     }
+
+    // Refresh link: re-sync the blueprints catalog (git fetch + reset in the git-sync worktree).
+    (function wireRefreshBlueprints() {
+      const link = document.getElementById('refresh-blueprints-link');
+      const status = document.getElementById('refresh-blueprints-status');
+      if (!link) return;
+      link.addEventListener('click', async (e) => {
+        e.preventDefault();
+        if (link.dataset.busy === '1') return;
+        link.dataset.busy = '1';
+        const prev = link.textContent;
+        link.textContent = '↻ Refreshing…';
+        if (status) status.textContent = '';
+        try {
+          const data = await post('/api/refresh-blueprints');
+          if (data && data.ok) {
+            if (status) status.textContent = data.changed ? 'Updated — reloading…' : 'Already up to date';
+            if (data.changed) { setTimeout(() => location.reload(), 600); }
+          } else {
+            if (status) status.textContent = (data && data.error) ? data.error : 'Refresh failed';
+          }
+        } catch (err) {
+          if (status) status.textContent = 'Refresh failed';
+        } finally {
+          link.textContent = prev;
+          link.dataset.busy = '0';
+        }
+      });
+    })();
 
     async function refreshAuthStatus() {
       try {

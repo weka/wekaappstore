@@ -377,8 +377,8 @@ def _patch_weka_overview(monkeypatch, call_count: dict, credential_name="primary
         lambda cred, namespace: ("https://w:14000", "admin", "weka-tok"),
     )
     monkeypatch.setattr(
-        main, "_weka_login",
-        lambda endpoint, username, token: "BEARER-TOKEN-DO-NOT-LEAK",
+        main, "_weka_resolve_bearer_token",
+        lambda endpoint, token: "BEARER-TOKEN-DO-NOT-LEAK",
     )
 
     def fake_get_json(url: str, headers: dict, timeout: float = 15.0):
@@ -462,7 +462,7 @@ def test_weka_overview_invalid_credential_name_returns_400_without_io(monkeypatc
 
     monkeypatch.setattr(main, "load_kube_config", lambda: None)
     monkeypatch.setattr(main, "_resolve_weka_credential_secret", _raise_if_called)
-    monkeypatch.setattr(main, "_weka_login", _raise_if_called)
+    monkeypatch.setattr(main, "_weka_resolve_bearer_token", _raise_if_called)
     monkeypatch.setattr(main, "_weka_get_json", _raise_if_called)
 
     response = asyncio.run(main.get_weka_overview(credential="Bad..Name", namespace="default", bust=0))
@@ -470,7 +470,8 @@ def test_weka_overview_invalid_credential_name_returns_400_without_io(monkeypatc
     assert called["count"] == 0
 
 
-def test_weka_overview_login_failure_returns_502_without_leak(monkeypatch):
+def test_weka_overview_auth_failure_returns_502_without_leak(monkeypatch):
+    """A rejected token / unreachable cluster makes the cluster call fail → 502, no leak."""
     main._weka_overview_cache.clear()
     monkeypatch.setattr(main, "load_kube_config", lambda: None)
     monkeypatch.setattr(
@@ -478,16 +479,21 @@ def test_weka_overview_login_failure_returns_502_without_leak(monkeypatch):
         lambda cred, ns: ("https://w:14000", "admin", "weka-tok"),
     )
     monkeypatch.setattr(
-        main, "_weka_login",
-        lambda endpoint, username, token: (_ for _ in ()).throw(
-            RuntimeError("WEKA login failed: 401 Unauthorized https://w:14000/api/v2/login?session=verysecret")
-        ),
+        main, "_weka_resolve_bearer_token",
+        lambda endpoint, token: "BEARER-TOKEN-DO-NOT-LEAK",
     )
+
+    def fake_get_json(url: str, headers: dict, timeout: float = 15.0):
+        # Simulate the cluster (and all) calls failing on a rejected token.
+        raise RuntimeError("WEKA API call failed: HTTP 401 https://w:14000?session=verysecret")
+
+    monkeypatch.setattr(main, "_weka_get_json", fake_get_json)
 
     response = asyncio.run(main.get_weka_overview(credential="primary", namespace="default", bust=0))
     assert response.status_code == 502
     body_str = response.body.decode("utf-8")
     assert "verysecret" not in body_str
+    assert "BEARER-TOKEN-DO-NOT-LEAK" not in body_str
     assert json.loads(body_str)["ok"] is False
 
 

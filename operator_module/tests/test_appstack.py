@@ -192,6 +192,45 @@ def test_kubernetes_manifest_substitutes_namespace():
     assert "${" not in captured[0]
 
 
+def test_delete_renders_namespace_in_manifest():
+    """Delete path renders ${VAR} so kubectl delete's manifest namespace matches (regression).
+
+    Without rendering, kubectl delete receives a manifest with metadata.namespace: ${namespace},
+    which fails: 'the namespace from the provided object "${namespace}" does not match ...'.
+    """
+    from main import delete_warrpappstore_function
+
+    components = [{
+        "name": "ingress",
+        "kubernetesManifest": (
+            "apiVersion: v1\n"
+            "kind: Service\n"
+            "metadata:\n"
+            "  name: web\n"
+            "  namespace: ${namespace}\n"
+        ),
+    }]
+    spec = {"appStack": {"components": components}}
+
+    captured: list[str] = []
+
+    def _run(cmd, *args, **kwargs):
+        if isinstance(cmd, list) and len(cmd) >= 4 and cmd[0] == "kubectl" and cmd[1] == "delete" and cmd[2] == "-f":
+            try:
+                captured.append(Path(cmd[3]).read_text(encoding="utf-8"))
+            except OSError:
+                pass
+        return _real_subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok", stderr="")
+
+    with patch("main.subprocess.run", side_effect=_run), \
+         patch("main.HelmOperator"):
+        delete_warrpappstore_function(spec=spec, name="ai-research", namespace="rag")
+
+    assert len(captured) == 1
+    assert "namespace: rag" in captured[0]
+    assert "${" not in captured[0]
+
+
 def test_unknown_variable_in_manifest_left_untouched():
     """Allowlist contract (supersedes OP-07/DOC-04): an unprovided ${VAR} in a
     manifest is NOT an error — it is preserved verbatim, since it is

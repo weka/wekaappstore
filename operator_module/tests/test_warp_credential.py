@@ -123,11 +123,22 @@ def _make_secret_class_mock():
 
 
 def test_ngc_apikey_data_is_b64_encoded():
-    """OPS-04, D-12: _derive_ngc_payloads returns NGC_API_KEY as standard padded base64."""
+    """OPS-04, D-12: _derive_ngc_payloads returns all NGC key aliases as standard padded base64.
+
+    The Opaque secret mirrors the canonical ngc-api / ngc-api-key secrets that NVIDIA
+    AIDP/NIM charts consume: NGC_API_KEY, NGC_CLI_API_KEY, NVIDIA_API_KEY, and apiKey,
+    all holding the same key value.
+    """
     from main import _derive_ngc_payloads
 
     apikey, _docker = _derive_ngc_payloads('my-secret-key')
-    assert apikey == {'NGC_API_KEY': base64.b64encode(b'my-secret-key').decode('ascii')}
+    expected = base64.b64encode(b'my-secret-key').decode('ascii')
+    assert apikey == {
+        'NGC_API_KEY': expected,
+        'NGC_CLI_API_KEY': expected,
+        'NVIDIA_API_KEY': expected,
+        'apiKey': expected,
+    }
 
 
 def test_ngc_docker_auth_is_oauthtoken_b64():

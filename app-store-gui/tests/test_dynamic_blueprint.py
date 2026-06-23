@@ -158,6 +158,23 @@ async def _collect_sse(streaming_response):
     return events
 
 
+def _mock_appstack_ready(monkeypatch, phase="Ready", components=None):
+    """Make deploy_stream's status polling return a terminal CR immediately.
+
+    Without this, deploy_stream polls the WekaAppStore .status until appStackPhase is
+    Ready/Failed — which never happens against a test's stubbed cluster — so the SSE
+    generator would loop until its 15-minute cap.
+    """
+    monkeypatch.setattr(main, "load_kube_config", lambda: None)
+    comp = components if components is not None else []
+
+    class _StubCustomObjectsApi:
+        def get_namespaced_custom_object(self, **kwargs):
+            return {"status": {"appStackPhase": phase, "componentStatus": comp}}
+
+    monkeypatch.setattr(main.client, "CustomObjectsApi", lambda: _StubCustomObjectsApi())
+
+
 def test_deploy_stream_signature_uses_variables_param():
     """Test 1: deploy_stream signature contains variables: str = '{}' and no per-variable positional params."""
     sig = inspect.signature(main.deploy_stream)
@@ -283,6 +300,7 @@ def test_deploy_stream_namespace_from_variables(tmp_path, monkeypatch):
         captured_ns.append(namespace)
         return {"applied": []}
     monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", mock_apply)
+    _mock_appstack_ready(monkeypatch)
 
     async def run():
         request = _make_request_stub()
@@ -320,6 +338,7 @@ def test_deploy_stream_namespace_defaults_to_default_when_absent(tmp_path, monke
         captured_ns.append(namespace)
         return {"applied": []}
     monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", mock_apply)
+    _mock_appstack_ready(monkeypatch)
 
     async def run():
         request = _make_request_stub()
@@ -362,6 +381,7 @@ def test_deploy_stream_render_uses_full_variables_dict(tmp_path, monkeypatch):
         rendered_content.append(rendered)
         return {"applied": []}
     monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", mock_apply)
+    _mock_appstack_ready(monkeypatch)
 
     async def run():
         request = _make_request_stub()
@@ -371,6 +391,50 @@ def test_deploy_stream_render_uses_full_variables_dict(tmp_path, monkeypatch):
         assert rendered_content, "apply should have been called with rendered content"
         assert "prod" in rendered_content[0]
         assert "weka-sc" in rendered_content[0]
+
+    asyncio.run(run())
+
+
+def test_deploy_stream_emits_component_events_from_operator_status(tmp_path, monkeypatch):
+    """deploy_stream emits per-component events from the operator's componentStatus and
+    completes (ok) when appStackPhase is Ready."""
+    yaml_content = (
+        "x-variables:\n"
+        "  namespace:\n"
+        "    type: string\n"
+        "    required: false\n"
+        "\n"
+        "apiVersion: warp.io/v1alpha1\n"
+        "kind: WekaAppStore\n"
+        "metadata:\n"
+        "  name: test-app\n"
+        "  namespace: [[namespace]]\n"
+        "spec:\n"
+        "  appStack:\n"
+        "    components:\n"
+        "      - name: comp-a\n"
+        "      - name: comp-b\n"
+    )
+    bp_file = tmp_path / "test-app.yaml"
+    bp_file.write_text(yaml_content)
+
+    monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
+    monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", lambda *a, **kw: {"applied": ["WekaAppStore"]})
+    _mock_appstack_ready(monkeypatch, phase="Ready", components=[
+        {"name": "comp-a", "phase": "Ready"},
+        {"name": "comp-b", "phase": "Ready"},
+    ])
+
+    async def run():
+        request = _make_request_stub()
+        resp = await main.deploy_stream(request, app_name="test-app", variables=_json.dumps({"namespace": "ns1"}))
+        events = await _collect_sse(resp)
+        comp_events = [e for e in events if e.get("type") == "component"]
+        names = {e["name"] for e in comp_events}
+        assert names == {"comp-a", "comp-b"}, f"Expected per-component events, got: {events}"
+        assert all(e["phase"] == "Ready" for e in comp_events)
+        complete = [e for e in events if e.get("type") == "complete"]
+        assert complete and complete[-1].get("ok") is True, f"Expected ok complete, got: {events}"
 
     asyncio.run(run())
 
@@ -458,6 +522,7 @@ def test_deploy_stream_optional_variables_pass_validation(tmp_path, monkeypatch)
 
     monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
     monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", lambda *a, **kw: {"applied": []})
+    _mock_appstack_ready(monkeypatch)
 
     async def run():
         request = _make_request_stub()

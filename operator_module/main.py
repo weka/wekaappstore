@@ -29,6 +29,44 @@ def get_warrpappstore_class():
     return kr8s.objects.new_class(kind='WekaAppStore', version='warp.io/v1alpha1', namespaced=True)
 
 
+@lru_cache(maxsize=1)
+def _get_custom_objects_api():
+    """Return a configured CustomObjectsApi, or None if the kubernetes client is unavailable.
+
+    Config is loaded once (in-cluster first, then local kubeconfig fallback).
+    """
+    if k8s_client is None:
+        return None
+    try:
+        k8s_config.load_incluster_config()
+    except Exception:
+        try:
+            k8s_config.load_kube_config()
+        except Exception:
+            pass
+    return k8s_client.CustomObjectsApi()
+
+
+def _patch_appstack_progress(namespace, name, component_statuses, overall_phase, logger):
+    """Best-effort patch of a WekaAppStore .status so deploy progress is observable mid-reconcile.
+
+    Writes via the /status subresource, so it does not bump metadata.generation and does
+    not re-trigger the spec-filtered update handler. Failures are logged and ignored — the
+    final kopf patch on handler return remains the source of truth.
+    """
+    api = _get_custom_objects_api()
+    if api is None:
+        return
+    body = {'status': {'appStackPhase': overall_phase, 'componentStatus': component_statuses}}
+    try:
+        api.patch_namespaced_custom_object_status(
+            group='warp.io', version='v1alpha1', namespace=namespace,
+            plural='wekaappstores', name=name, body=body,
+        )
+    except Exception as e:
+        logger.warning(f"Incremental status patch failed for {namespace}/{name}: {e}")
+
+
 class HelmOperator:
     """Handles Helm chart operations for the WARRP operator"""
     
@@ -359,7 +397,9 @@ def _derive_ngc_payloads(key: str) -> tuple[dict, dict]:
     Both dicts contain already-base64-encoded values (D-13) ready to drop into
     the 'data' field of a kr8s Secret object.
 
-    apikey_data  = {'NGC_API_KEY': _b64(key)}  (Opaque secret, OPS-04)
+    apikey_data  = {NGC_API_KEY, NGC_CLI_API_KEY, NVIDIA_API_KEY, apiKey}  (Opaque secret, OPS-04)
+                   All four keys hold the same key value; this mirrors the canonical
+                   ngc-api / ngc-api-key secrets that NVIDIA AIDP/NIM charts consume.
     docker_data  = {'.dockerconfigjson': _b64(json.dumps(...))}  (dockerconfigjson secret, OPS-04)
 
     The dockerconfigjson payload uses the nvcr.io convention:
@@ -370,7 +410,13 @@ def _derive_ngc_payloads(key: str) -> tuple[dict, dict]:
     D-13 (return already-encoded data), OPS-04 (NGC apikey + docker secrets).
     NEVER log or reference the `key` parameter value in any log call or docstring.
     """
-    apikey_data = {'NGC_API_KEY': _b64(key)}
+    key_b64 = _b64(key)
+    apikey_data = {
+        'NGC_API_KEY': key_b64,
+        'NGC_CLI_API_KEY': key_b64,
+        'NVIDIA_API_KEY': key_b64,
+        'apiKey': key_b64,
+    }
     docker_auth_b64 = _b64(f'$oauthtoken:{key}')
     docker_config = {
         'auths': {
@@ -951,7 +997,10 @@ def handle_appstack_deployment(body, spec, name, namespace, status, **kwargs):
             'message': f'Installing component {comp_name}',
             'lastTransitionTime': datetime.utcnow().isoformat() + 'Z'
         }
-        
+
+        # Publish "Installing" for this component so the GUI reflects real progress.
+        _patch_appstack_progress(namespace, name, component_statuses + [comp_status], 'Installing', logging)
+
         try:
             # Check if it's a Helm chart or Kubernetes manifest
             if 'helmChart' in component and component['helmChart']:
@@ -1123,7 +1172,11 @@ def handle_appstack_deployment(body, spec, name, namespace, status, **kwargs):
             logging.error(f"Error deploying component {comp_name}: {str(e)}")
         
         component_statuses.append(comp_status)
-        
+
+        # Publish this component's terminal phase (Ready/Failed) for live GUI progress.
+        _patch_appstack_progress(namespace, name, component_statuses,
+                                 'Failed' if failed else 'Installing', logging)
+
         # Stop if a component failed
         if failed:
             logging.error(f"Component {comp_name} failed, stopping deployment")
@@ -1394,7 +1447,14 @@ def delete_warrpappstore_function(spec, name, namespace, **kwargs):
         app_stack = spec['appStack']
         components = app_stack.get('components', [])
         enabled_components = [comp for comp in components if comp.get('enabled', True)]
-        
+
+        # ${VAR} substitution variables, mirroring the deploy path
+        # (handle_appstack_deployment). Without this, kubectl delete receives raw
+        # ${namespace}/${VAR} tokens and rejects the manifest ("the namespace from the
+        # provided object ${namespace} does not match ..."). render() is best-effort and
+        # never raises, so deletion is not blocked.
+        stack_vars = {'namespace': namespace, **(app_stack.get('variables') or {})}
+
         # Resolve dependencies to get proper order
         try:
             ordered_components = resolve_dependencies(enabled_components)
@@ -1422,8 +1482,9 @@ def delete_warrpappstore_function(spec, name, namespace, **kwargs):
                 else:
                     logging.warning(f"Failed to uninstall component {comp_name}: {message}")
             elif 'kubernetesManifest' in component and component['kubernetesManifest']:
-                # For raw manifests, attempt to delete using kubectl
-                manifest_yaml = component['kubernetesManifest']
+                # For raw manifests, attempt to delete using kubectl.
+                # Render ${VAR} substitutions first so the manifest namespace matches (OP-07).
+                manifest_yaml = render(component['kubernetesManifest'], stack_vars)
                 target_namespace = component.get('targetNamespace', namespace)
                 
                 with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
