@@ -287,23 +287,7 @@
       <div class="space-y-6">
         <div class="card rounded-lg p-6">
           <h2 class="text-lg font-semibold mb-4">Cluster Compatibility</h2>
-          <div class="space-y-3 text-sm">
-            {# TEMPORARY (demo override): CPU and GPU badges hardcoded to green "ok". Revert by restoring the Jinja meets.cpu / meets.gpu conditionals from git history. #}
-            <div class="flex items-center justify-between">
-              <div>CPU worker nodes</div>
-              <div class="flex items-center gap-2">
-                <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need ≥ {{ requirements.cpu_nodes }}</span>
-                <span class="badge" style="background: #065f46; color: #d1fae5;">ok</span>
-              </div>
-            </div>
-            <div class="flex items-center justify-between">
-              <div>GPU worker nodes</div>
-              <div class="flex items-center gap-2">
-                <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need ≥ {{ requirements.gpu_nodes }}</span>
-                <span class="badge" style="background: #065f46; color: #d1fae5;">ok</span>
-              </div>
-            </div>
-          </div>
+          {% include '_cluster_compat.html' %}
         </div>
 
         <div class="card rounded-lg p-6">
@@ -360,7 +344,8 @@
                       {{ var_name | replace("_", " ") | title }}
                     </label>
                     <input id="field-{{ var_name }}" name="{{ var_name }}"
-                           placeholder="{{ var_meta.get('placeholder', '') }}"
+                           type="{{ var_meta.get('_input_type', 'text') }}"
+                           {% if var_meta.get('_input_type') == 'url' %}placeholder="{{ var_meta.get('placeholder', 'https://host.example.com') }}" title="Enter a full URL, e.g. https://host.example.com (no spaces)"{% else %}placeholder="{{ var_meta.get('placeholder', '') }}"{% endif %}
                            {% if var_meta.get("required") %}required{% endif %}
                            class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
                     {% if var_meta.get("description") %}
@@ -485,7 +470,18 @@
       const url = `/deploy-stream?${params.toString()}`;
       const es = new EventSource(url);
 
-      let currentIndex = -1;
+      // Map an operator component phase to a section style.
+      const sectionClass = (phase) => {
+        const base = 'px-3 py-2 rounded border ';
+        switch ((phase || '').toLowerCase()) {
+          case 'ready':
+          case 'healthy':    return base + 'border-green-500/60 bg-green-500/10 text-green-300';
+          case 'failed':
+          case 'error':      return base + 'border-red-500/60 bg-red-500/10 text-red-300';
+          case 'installing': return base + 'border-yellow-400 bg-yellow-500/10 text-yellow-300';
+          default:           return base + 'border-white/10 bg-gray-800/40'; // pending / not started
+        }
+      };
       es.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
@@ -494,24 +490,32 @@
             (msg.items || []).forEach((item, idx) => {
               const li = document.createElement('li');
               li.textContent = item;
-              li.className = 'px-3 py-2 rounded border border-white/10 bg-gray-800/40';
+              li.className = sectionClass('pending');
               li.dataset.idx = idx;
+              li.dataset.name = item;
               listEl.appendChild(li);
             });
-            resEl.textContent = 'Applying manifest to cluster...';
-          } else if (msg.type === 'progress') {
-            if (currentIndex >= 0) {
-              const prev = listEl.querySelector(`li[data-idx="${currentIndex}"]`);
-              if (prev) prev.className = 'px-3 py-2 rounded border border-white/10 bg-gray-800/40';
+            resEl.textContent = 'Applying manifest to cluster…';
+          } else if (msg.type === 'component') {
+            // Flip this section's colour to match the operator's real per-component phase.
+            // If the operator reports a component the blueprint list didn't include, add it.
+            let li = Array.from(listEl.children).find(el => el.dataset.name === msg.name);
+            if (!li) {
+              li = document.createElement('li');
+              li.dataset.name = msg.name;
+              li.textContent = msg.name;
+              listEl.appendChild(li);
             }
-            currentIndex = msg.currentIndex ?? -1;
-            const cur = listEl.querySelector(`li[data-idx="${currentIndex}"]`);
-            if (cur) cur.className = 'px-3 py-2 rounded border border-yellow-400 bg-yellow-500/10 text-yellow-300';
+            li.className = sectionClass(msg.phase);
+            if (msg.message) li.title = msg.message;
           } else if (msg.type === 'complete') {
-            listEl.querySelectorAll('li').forEach(li => {
-              li.className = 'px-3 py-2 rounded border border-green-500/60 bg-green-500/10 text-green-300';
-            });
-            resEl.textContent = 'Deployment submitted. Applied: ' + ((msg.result && msg.result.applied && msg.result.applied.join(', ')) || 'OK');
+            if (msg.ok !== false) {
+              listEl.querySelectorAll('li').forEach(li => { li.className = sectionClass('ready'); });
+              const applied = (msg.result && msg.result.applied && msg.result.applied.length) ? ' Applied: ' + msg.result.applied.join(', ') : '';
+              resEl.textContent = 'Deployment complete.' + applied;
+            } else {
+              resEl.textContent = 'Deployment failed: ' + (msg.message || 'a component failed');
+            }
             es.close();
           } else if (msg.type === 'error') {
             resEl.textContent = 'Error: ' + (msg.message || 'Unknown error');
@@ -528,5 +532,7 @@
       };
     });
   </script>
+  <script>window.WARP_INSTALL = {crName: {{ (cr_name or "") | tojson }}, appName: {{ name | tojson }}, defaultNamespace: {{ (cr_namespace or "default") | tojson }}};</script>
+  <script src="/static/install_state.js"></script>
 </body>
 </html>

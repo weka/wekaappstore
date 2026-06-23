@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aurora - Blueprint</title>
+  {% if logo_b64 %}
+    <link rel="icon" type="image/png" href="data:image/png;base64,{{ logo_b64 }}">
+  {% endif %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@emotion/react@11.11.4/dist/emotion-react.umd.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@emotion/styled@11.11.0/dist/emotion-styled.umd.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@mui/material@5.15.14/umd/material-ui.development.js" crossorigin></script>
+  <style>
+    :root { --weka-purple: #6b2fb3; --weka-purple-dark: #552695; --weka-dark: #0B0C10; }
+    body { background: #0b0c10; color: #e5e7eb; font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; }
+    .brand-grad { background: linear-gradient(135deg, #1f2937 0%, #0b0c10 100%); }
+    .card { background: rgba(31, 41, 55, 0.6); border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(6px); }
+    .btn-purple { background: var(--weka-purple); color: white; }
+    .btn-purple:hover { background: var(--weka-purple-dark); }
+    .muted { color: #9ca3af; }
+    .badge { padding: 2px 8px; border-radius: 9999px; font-size: 12px; }
+    /* Make permission badges smaller only within the Blueprint Permissions section */
+    .perm-card .badge { padding: 1px 6px; font-size: 10px; line-height: 1.2; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <header class="brand-grad border-b border-white/10">
+    <div class="max-w-6xl mx-auto px-4 py-6 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        {% if logo_b64 %}
+          <img src="data:image/png;base64,{{ logo_b64 }}" alt="WEKA App Store" class="w-12 h-12 rounded-sm object-contain bg-white/0" />
+        {% else %}
+          <div class="w-12 h-12 rounded-sm" style="background: var(--weka-purple);"></div>
+        {% endif %}
+        <a href="/" class="text-2xl font-semibold tracking-tight hover:underline">WEKA App Store</a>
+      </div>
+      <a href="/" class="text-sm text-white/80 hover:text-white">Back</a>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+      <div class="lg:col-span-2 space-y-6">
+        <div class="card rounded-lg p-6">
+          <h1 class="text-2xl font-semibold mb-2">Aurora</h1>
+          <div class="flex items-center gap-2 mb-3">
+            <span class="badge" style="background: rgba(168,85,247,0.15); border: 1px solid rgba(168,85,247,0.3); color: #e9d5ff;">Partner</span>
+          </div>
+          <p class="muted">Flood intelligence platform that delivers real-time analysis to operators, leveraging WEKA's NeuralMesh AIDP, NVIDIA NIM inference, and a multi-modal RAG pipeline for disaster response.</p>
+          {% if yaml_path %}
+          <div class="mt-3 text-xs muted">Manifest: {{ yaml_path }}</div>
+          {% endif %}
+        </div>
+
+        <div class="card rounded-lg p-6">
+          <h2 class="text-xl font-semibold mb-3">Introduction</h2>
+          <p class="text-sm text-white/90 leading-relaxed">
+            GC360-AURORA is Glocomp / Keppel's Autonomous Unified Response Operations and Real-time Analysis platform for disaster response and flood management. It combines IoT ingestion (flood gauges, weather stations, drone telemetry), NVIDIA NIM language and vision models, multi-modal RAG, and an H2O.ai flood intelligence agent into a single Kubernetes-native stack.
+          </p>
+          <p class="text-sm text-white/90 leading-relaxed mt-3">
+            All AI workloads are backed by WEKA NeuralMesh AIDP through a dedicated <code class="text-white/95">aurora-weka-sc</code> StorageClass, providing high-throughput parallel storage to Milvus, Triton, NIM model caches, Kafka, TimescaleDB, and the OpenMetadata governance catalog. Identity is centralised in Keycloak, observability runs through the Prometheus + Grafana stack with NVIDIA DCGM telemetry, and ingress is served by Envoy Gateway via Kubernetes Gateway API HTTPRoutes.
+          </p>
+        </div>
+
+        {% if glocomp_logo_b64 %}
+        <div class="card rounded-lg p-6 flex items-center justify-center">
+          <img src="data:image/png;base64,{{ glocomp_logo_b64 }}" alt="Glocomp / Keppel" class="w-full max-w-md object-contain" style="max-height: 160px;" />
+        </div>
+        {% endif %}
+
+        <!-- Blueprint Permissions -->
+        <div class="card rounded-lg p-6 perm-card">
+          <h2 class="text-xl font-semibold mb-4">Blueprint Permissions</h2>
+          <p class="text-sm muted mb-5">The WARP operator reconciles the WekaAppStore CR and applies all Helm releases and manifests. The in-blueprint <code class="text-white/95">aurora-gateway-api-crds-installer</code> ServiceAccount is bound to <code class="text-white/95">cluster-admin</code> only to install the Kubernetes Gateway API CRDs.</p>
+
+          <div class="grid md:grid-cols-2 gap-6 text-base md:text-lg leading-7">
+            <!-- warp-operator -->
+            <div>
+              <h3 class="text-lg md:text-xl font-semibold mb-3">warp-operator <span class="muted text-sm font-normal">(reconciles CR)</span></h3>
+
+              <div class="space-y-4">
+                <div>
+                  <div class="muted text-xs font-semibold uppercase tracking-wide mb-2">Cluster-scoped</div>
+                  <div class="space-y-3">
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">Namespaces</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">CustomResourceDefinitions</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#1e40af; color:#dbeafe;">UPDATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">ClusterRoles, ClusterRoleBindings</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                        <span class="badge" style="background:#4c1d95; color:#ede9fe;">BIND</span>
+                        <span class="badge" style="background:#4c1d95; color:#ede9fe;">ESCALATE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">StorageClasses, PersistentVolumes</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">GatewayClasses, Gateways</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">Mutating / Validating WebhookConfigurations</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">Nodes</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="muted text-xs font-semibold uppercase tracking-wide mb-2">Namespaced</div>
+                  <div class="space-y-3">
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">Deployments, StatefulSets, DaemonSets</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">Services, HTTPRoutes</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">PVCs, ConfigMaps, Secrets</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">ServiceAccounts, Roles, RoleBindings</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">Jobs</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">ServiceMonitors, PodMonitors, PrometheusRules</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">Issuers, Certificates</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">DELETE</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- aurora-gateway-api-crds-installer -->
+            <div>
+              <h3 class="text-lg md:text-xl font-semibold mb-3">aurora-gateway-api-crds-installer <span class="muted text-sm font-normal">(install Job)</span></h3>
+
+              <div class="space-y-4">
+                <div>
+                  <div class="muted text-xs font-semibold uppercase tracking-wide mb-2">Cluster-scoped</div>
+                  <div class="space-y-3">
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">cluster-admin</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#7f1d1d; color:#fee2e2;">* / *</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">CustomResourceDefinitions</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                        <span class="badge" style="background:#4338ca; color:#e0e7ff;">PATCH</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">GatewayClasses, Gateways, HTTPRoutes</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="muted text-xs font-semibold uppercase tracking-wide mb-2">Namespaced <span class="muted text-xs font-normal">(kube-system)</span></div>
+                  <div class="space-y-3">
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">Pods, Pod Logs</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">Jobs</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#92400e; color:#ffedd5;">WATCH</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">ConfigMaps</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#374151;">GET</span>
+                        <span class="badge" style="background:#374151;">LIST</span>
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-white font-semibold text-base md:text-lg mb-1">Events</div>
+                      <div class="flex flex-wrap gap-1">
+                        <span class="badge" style="background:#065f46; color:#d1fae5;">CREATE</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card rounded-lg p-6">
+          <h2 class="text-xl font-semibold mb-3">What this blueprint installs</h2>
+          <ul class="list-disc ml-6 space-y-1 text-sm grid grid-cols-1 sm:grid-cols-2 gap-x-6">
+            <li>cert-manager <span class="muted">v1.14.0</span></li>
+            <li>NVIDIA GPU Operator <span class="muted">v25.3.0</span></li>
+            <li>Kubernetes Gateway API CRDs <span class="muted">v1.2.0</span></li>
+            <li>Envoy Gateway <span class="muted">v1.5.6</span></li>
+            <li>Prometheus Adapter <span class="muted">4.10.0</span></li>
+            <li>kube-prometheus-stack <span class="muted">55.5.0</span></li>
+            <li>Keycloak <span class="muted">21.0.0</span></li>
+            <li>Apache Kafka <span class="muted">28.0.0</span></li>
+            <li>EMQX MQTT Broker <span class="muted">5.8.0</span></li>
+            <li>TimescaleDB <span class="muted">0.33.0</span></li>
+            <li>Milvus <span class="muted">4.2.0</span></li>
+            <li>NVIDIA NV-EmbedQA-E5-v5 NIM <span class="muted">1.0.0</span></li>
+            <li>NVIDIA Nemotron-Super-49B NIM <span class="muted">latest</span></li>
+            <li>NVIDIA Nemotron-70B NIM <span class="muted">latest</span></li>
+            <li>NVIDIA Triton Inference Server <span class="muted">24.12-py3</span></li>
+            <li>NVIDIA Cosmos-Reason2 NIM <span class="muted">latest</span></li>
+            <li>NVIDIA Metropolis VSS <span class="muted">1.0.0</span></li>
+            <li>Hayhooks <span class="muted">latest</span></li>
+            <li>H2O.ai Flood Intelligence Agent <span class="muted">latest</span></li>
+            <li>OpenMetadata Dependencies <span class="muted">1.5.0</span></li>
+            <li>OpenMetadata <span class="muted">1.5.0</span></li>
+            <li>Open WebUI <span class="muted">3.0.0</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="space-y-6">
+        <div class="card rounded-lg p-6">
+          <form id="deploy-form" class="space-y-4">
+            <input type="hidden" id="namespace" name="namespace" value="default" />
+            <button type="submit" class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium">Deploy Blueprint</button>
+            <div id="deploy-result" class="text-xs mt-2"></div>
+          </form>
+
+          <div id="progress" class="mt-4 hidden">
+            <h3 class="text-sm font-semibold mb-2">Installation Progress</h3>
+            <ul id="progress-list" class="space-y-1 text-sm"></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="max-w-6xl mx-auto px-4 py-8 muted text-xs"></footer>
+
+  <script>
+    async function get(url) { const res = await fetch(url); return res.json(); }
+    function resolveNamespaceSync() { const saved = localStorage.getItem('selectedNamespace'); return saved && saved.trim() ? saved.trim() : null; }
+    async function syncNamespaceField() {
+      const nsInput = document.getElementById('namespace'); if (!nsInput) return 'default';
+      let ns = resolveNamespaceSync();
+      if (!ns) { try { const data = await get('/auth-status'); ns = (data && data.details && data.details.namespace) ? String(data.details.namespace) : null; if (ns && !localStorage.getItem('selectedNamespace')) { localStorage.setItem('selectedNamespace', ns); } } catch (_) {} }
+      if (!ns) ns = 'default'; nsInput.value = ns; return ns;
+    }
+    document.addEventListener('DOMContentLoaded', async () => {
+      await syncNamespaceField();
+    });
+    const form = document.getElementById('deploy-form');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const ns = (document.getElementById('namespace').value || (await syncNamespaceField()) || 'default');
+      const resEl = document.getElementById('deploy-result');
+      const progressEl = document.getElementById('progress');
+      const listEl = document.getElementById('progress-list');
+      resEl.textContent = 'Starting deployment...';
+      listEl.innerHTML = '';
+      progressEl.classList.remove('hidden');
+      try {
+        const resp = await fetch(`/deploy-stream/{{ name }}?namespace=${encodeURIComponent(ns)}`);
+        const reader = resp.body.getReader();
+        const dec = new TextDecoder();
+        while (true) {
+          const { value, done } = await reader.read(); if (done) break; const chunk = dec.decode(value);
+          for (const line of chunk.split('\n')) {
+            if (!line.startsWith('data:')) continue; const jsonStr = line.substring(5).trim(); if (!jsonStr) continue;
+            try { const evt = JSON.parse(jsonStr); if (evt.message) { const li = document.createElement('li'); li.textContent = evt.message; listEl.appendChild(li); listEl.scrollTop = listEl.scrollHeight; } } catch (_) {}
+          }
+        }
+        resEl.textContent = 'Deployment stream finished.';
+      } catch (err) {
+        resEl.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+      }
+    });
+  </script>
+  <script>window.WARP_INSTALL = {crName: {{ (cr_name or "") | tojson }}, appName: {{ name | tojson }}, defaultNamespace: {{ (cr_namespace or "default") | tojson }}};</script>
+  <script src="/static/install_state.js"></script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Video Search and Summary - Blueprint</title>
+  <title>TokenVisor Enterprise - Blueprint</title>
   {% if logo_b64 %}
     <link rel="icon" type="image/png" href="data:image/png;base64,{{ logo_b64 }}">
   {% endif %}
@@ -46,65 +46,37 @@
     <section class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
       <div class="lg:col-span-2 space-y-6">
         <div class="card rounded-lg p-6">
-          <h1 class="text-2xl font-semibold mb-2">Video Search and Summary</h1>
+          <h1 class="text-2xl font-semibold mb-2">TokenVisor Enterprise</h1>
           <div class="flex items-center gap-2 mb-3">
-            <span class="badge" style="background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.25); color: #bfdbfe;">NVIDIA</span>
+            <span class="badge" style="background: rgba(168,85,247,0.15); border: 1px solid rgba(168,85,247,0.3); color: #e9d5ff;">Partner</span>
           </div>
-          <p class="muted">Video search catalog and summarisation with NVIDIA NIM framework. With added customisation for NeuralMesh by WEKA to support high stream counts.</p>
+          <p class="muted">Provide self-service access to approved AI while enforcing routing, budgets, rate limits, and guardrails across external models and self-hosted inference managed by TokenVisor.</p>
           {% if yaml_path %}
           <div class="mt-3 text-xs muted">Manifest: {{ yaml_path }}</div>
           {% endif %}
         </div>
 
         <div class="card rounded-lg p-6">
-          <h2 class="text-xl font-semibold mb-3">What this blueprint installs</h2>
-          <ul class="list-disc ml-6 space-y-2 text-sm">
-            <li>NVIDIA NIM components for video understanding</li>
-            <li>Vector search backend and indexing services</li>
-            <li>Observability (Prometheus + Grafana)</li>
-          </ul>
+          <h2 class="text-xl font-semibold mb-3">Introduction</h2>
+          <p class="text-sm text-white/90 leading-relaxed">
+            TokenVisor Enterprise is the access and control plane for enterprise AI. It sits between users, applications, and model endpoints, providing a single governed entry point to approved external LLM providers or self-hosted inference managed by TokenVisor. With policy-based routing, identity-aware access, audit logging, and budget controls, TokenVisor helps organisations standardise how AI is consumed across teams without sacrificing flexibility.
+          </p>
+          <p class="text-sm text-white/90 leading-relaxed mt-3">
+            Instead of forcing users through slow IT tickets or pushing them toward unmanaged tools, TokenVisor provides a self-service portal where teams can request and obtain AI API keys under project-level guardrails. IT and project owners can enforce rate limits, spend limits, model policies, and safety controls, while every request remains tracked and attributable. The result is faster adoption, lower shadow AI risk, and a governed foundation for production AI.
+          </p>
         </div>
+
+        {% if tokenvisor_arch_b64 %}
+        <div class="card rounded-lg p-6">
+          <img src="data:image/png;base64,{{ tokenvisor_arch_b64 }}" alt="TokenVisor architecture diagram" class="w-full rounded-md" />
+        </div>
+        {% endif %}
       </div>
 
       <div class="space-y-6">
         <div class="card rounded-lg p-6">
-          <h2 class="text-lg font-semibold mb-4">Cluster Compatibility</h2>
-          {% include '_cluster_compat.html' %}
-        </div>
-
-        <div class="card rounded-lg p-6">
-          <h2 class="text-lg font-semibold mb-3">Configure</h2>
           <form id="deploy-form" class="space-y-4">
-            <div>
-              <label class="block text-sm mb-1" for="namespace">Namespace</label>
-              <input id="namespace" name="namespace" placeholder="default" value="default" readonly
-                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400 cursor-not-allowed opacity-80" title="Namespace is managed from the main page" />
-              <div class="muted text-xs mt-1">Namespace is managed from the main page (Home).</div>
-            </div>
-
-            <div>
-              <label class="block text-sm mb-1" for="storageClass">Storage Class</label>
-              <select id="storageClass" name="storageClass"
-                      class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400">
-                <option value="">Select a StorageClass...</option>
-              </select>
-              <div class="muted text-xs mt-1">Choose from available Kubernetes StorageClasses.</div>
-            </div>
-
-            <div>
-              <label class="block text-sm mb-1" for="vllmChatModel">vLLM Chat Model</label>
-              <input id="vllmChatModel" name="vllmChatModel" placeholder="e.g. meta-llama/Meta-Llama-3-8B-Instruct" 
-                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-              <div class="muted text-xs mt-1">Enter the chat model identifier to use with vLLM.</div>
-            </div>
-
-            <div>
-              <label class="block text-sm mb-1" for="vllmEmbedModel">vLLM Embedding Model</label>
-              <input id="vllmEmbedModel" name="vllmEmbedModel" placeholder="e.g. intfloat/e5-mistral-7b-instruct" 
-                     class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-              <div class="muted text-xs mt-1">Enter the embedding model identifier to use with vLLM.</div>
-            </div>
-
+            <input type="hidden" id="namespace" name="namespace" value="default" />
             <button type="submit" class="btn-purple w-full px-4 py-2 rounded-md text-sm font-medium">Deploy Blueprint</button>
             <div id="deploy-result" class="text-xs mt-2"></div>
           </form>
@@ -131,7 +103,6 @@
     }
     document.addEventListener('DOMContentLoaded', async () => {
       await syncNamespaceField();
-      try { const data = await get('/storage-classes'); const sel = document.getElementById('storageClass'); if (sel && data && data.ok && Array.isArray(data.items)) { sel.innerHTML = '<option value="">Select a StorageClass...</option>' + data.items.map(n => `<option value="${n}">${n}</option>`).join(''); const saved = localStorage.getItem('selectedStorageClass'); if (saved && data.items.includes(saved)) sel.value = saved; } } catch (_) {}
     });
     const form = document.getElementById('deploy-form');
     form.addEventListener('submit', async (e) => {

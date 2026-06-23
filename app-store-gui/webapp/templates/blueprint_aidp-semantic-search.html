@@ -96,23 +96,7 @@
       <div class="space-y-6">
         <div class="card rounded-lg p-6">
           <h2 class="text-lg font-semibold mb-4">Cluster Compatibility</h2>
-          <div class="space-y-3 text-sm">
-            {# TEMPORARY (demo override): CPU and GPU badges hardcoded to green "ok". Revert by restoring the Jinja meets.cpu / meets.gpu conditionals from git history. #}
-            <div class="flex items-center justify-between">
-              <div>CPU worker nodes</div>
-              <div class="flex items-center gap-2">
-                <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need ≥ {{ requirements.cpu_nodes }}</span>
-                <span class="badge" style="background: #065f46; color: #d1fae5;">ok</span>
-              </div>
-            </div>
-            <div class="flex items-center justify-between">
-              <div>GPU worker nodes</div>
-              <div class="flex items-center gap-2">
-                <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need ≥ {{ requirements.gpu_nodes }}</span>
-                <span class="badge" style="background: #065f46; color: #d1fae5;">ok</span>
-              </div>
-            </div>
-          </div>
+          {% include '_cluster_compat.html' %}
         </div>
 
         <div class="card rounded-lg p-6">
@@ -389,5 +373,7 @@
       };
     });
   </script>
+  <script>window.WARP_INSTALL = {crName: {{ (cr_name or "") | tojson }}, appName: {{ name | tojson }}, defaultNamespace: {{ (cr_namespace or "default") | tojson }}};</script>
+  <script src="/static/install_state.js"></script>
 </body>
 </html>

@@ -28,6 +28,7 @@ from kubernetes import client, config, utils
 from kubernetes.client.rest import ApiException
 from jinja2 import Environment
 from webapp.inspection import collect_cluster_inspection, collect_weka_inspection, flatten_cluster_status
+from webapp.inspection.cluster import _cpu_to_millicores, _memory_to_bytes, _safe_int
 from webapp.planning import ApplyGateway
 
 # Setup logging
@@ -468,37 +469,294 @@ def apply_blueprint_content_with_namespace(content: str, namespace: str) -> Dict
     return PLANNING_APPLY_GATEWAY.apply_content(content, namespace)
 
 
+def apply_blueprint_documents_with_namespace(documents, namespace: str) -> Dict[str, Any]:
+    return PLANNING_APPLY_GATEWAY.apply_documents(documents, namespace)
+
+
 def install_warrp_crd() -> Dict[str, Any]:
     crd_path = os.path.join(PROJECT_ROOT, "warrp-crd.yaml")
     return apply_yaml(crd_path, namespace=None)
 
 
-def infer_requirements_from_yaml(file_path: str) -> Dict[str, int]:
-    """Infer minimal CPU/GPU node requirements from a blueprint YAML.
-    Heuristic:
-    - If NVIDIA GPU Operator (or component naming suggesting GPU) is enabled -> require >=1 GPU node.
-    - Always require >=1 CPU node.
-    """
-    if not os.path.isabs(file_path):
-        file_path = os.path.join(PROJECT_ROOT, file_path)
-    req = {"cpu_nodes": 1, "gpu_nodes": 0}
-    try:
-        with open(file_path, 'r') as f:
-            docs = list(yaml.safe_load_all(f))
-        data = docs[0] if docs else {}
-        spec = (data or {}).get('spec', {})
-        comps = ((spec.get('appStack') or {}).get('components')) or []
-        for c in comps:
-            name = (c or {}).get('name', '') or ''
-            desc = (c or {}).get('description', '') or ''
-            helm = (c or {}).get('helmChart', {}) or {}
-            chart_name = str(helm.get('name') or helm.get('repository') or '').lower()
-            if any(s in name.lower() for s in ['nvidia', 'gpu-operator', 'gpu']) or 'nvidia' in chart_name:
-                req['gpu_nodes'] = max(req['gpu_nodes'], 1)
-    except Exception:
-        # If parsing fails, fall back to defaults
-        pass
+# ---------------------------------------------------------------------------
+# Blueprint resource requirements (declared-first, inferred-fallback)
+# ---------------------------------------------------------------------------
+
+_GPU_RESOURCE_KEYS = ("nvidia.com/gpu", "amd.com/gpu", "gpu.intel.com/i915")
+_WORKLOAD_KINDS = {
+    "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob",
+    "ReplicaSet", "ReplicationController", "Pod",
+}
+
+
+def _empty_requirements() -> Dict[str, Any]:
+    return {
+        "cpu_cores": None,
+        "memory_gib": None,
+        "gpu_devices": None,
+        "gpu_required": False,
+        "gpu_count_known": False,
+        "gpu_model": None,
+        "source": "none",
+    }
+
+
+def _requirements_from_declaration(x_req: Any) -> Optional[Dict[str, Any]]:
+    """Map an x-requirements block to the normalized requirements dict, or None."""
+    if not isinstance(x_req, dict):
+        return None
+    req = _empty_requirements()
+    req["source"] = "declared"
+
+    cpu = x_req.get("cpu")
+    if isinstance(cpu, dict) and cpu.get("cores") is not None:
+        try:
+            req["cpu_cores"] = float(cpu["cores"])
+        except (TypeError, ValueError):
+            pass
+
+    mem = x_req.get("memory")
+    if isinstance(mem, dict) and mem.get("gib") is not None:
+        try:
+            req["memory_gib"] = float(mem["gib"])
+        except (TypeError, ValueError):
+            pass
+
+    gpu = x_req.get("gpu")
+    if isinstance(gpu, dict):
+        req["gpu_required"] = True
+        if gpu.get("model"):
+            req["gpu_model"] = str(gpu["model"])
+        if gpu.get("count") is not None:
+            try:
+                req["gpu_devices"] = int(gpu["count"])
+                req["gpu_count_known"] = True
+                if req["gpu_devices"] <= 0:
+                    req["gpu_required"] = False
+            except (TypeError, ValueError):
+                pass
     return req
+
+
+def _pod_specs_in_doc(doc: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], int]:
+    """Return (pod_specs, replicas) for a k8s workload doc.
+
+    Handles the nesting differences between Deployment/StatefulSet/Job/CronJob/Pod.
+    replicas defaults to 1 (DaemonSet/CronJob are treated as 1 — node fan-out is unknown).
+    """
+    spec = doc.get("spec") or {}
+    kind = doc.get("kind")
+    if kind == "Pod":
+        return ([spec], 1)
+    if kind == "CronJob":
+        job_spec = ((spec.get("jobTemplate") or {}).get("spec")) or {}
+        pod_spec = ((job_spec.get("template") or {}).get("spec")) or {}
+        return ([pod_spec] if pod_spec else [], 1)
+    # Deployment / StatefulSet / DaemonSet / Job / ReplicaSet / ReplicationController
+    pod_spec = ((spec.get("template") or {}).get("spec")) or {}
+    replicas = spec.get("replicas")
+    try:
+        replicas = int(replicas) if replicas is not None else 1
+    except (TypeError, ValueError):
+        replicas = 1
+    if kind in ("DaemonSet", "Job", "CronJob"):
+        replicas = 1
+    return ([pod_spec] if pod_spec else [], replicas)
+
+
+def _accumulate_workload(doc: Dict[str, Any], acc: Dict[str, Any]) -> None:
+    """Sum container resource requests/limits from a workload doc into acc."""
+    pod_specs, replicas = _pod_specs_in_doc(doc)
+    for pod_spec in pod_specs:
+        if not isinstance(pod_spec, dict):
+            continue
+        if str(pod_spec.get("runtimeClassName") or "").lower() == "nvidia":
+            acc["gpu_required"] = True
+        containers = (pod_spec.get("containers") or []) + (pod_spec.get("initContainers") or [])
+        for c in containers:
+            if not isinstance(c, dict):
+                continue
+            res = c.get("resources") or {}
+            requests = res.get("requests") or {}
+            limits = res.get("limits") or {}
+            # CPU/memory: prefer requests, fall back to limits.
+            cpu_q = requests.get("cpu", limits.get("cpu"))
+            mem_q = requests.get("memory", limits.get("memory"))
+            if cpu_q is not None:
+                acc["cpu_milli"] += _cpu_to_millicores(cpu_q) * replicas
+            if mem_q is not None:
+                acc["mem_bytes"] += _memory_to_bytes(mem_q) * replicas
+            # GPU: only ever expressed as a limit.
+            for key in _GPU_RESOURCE_KEYS:
+                if key in limits or key in requests:
+                    count = _safe_int(limits.get(key, requests.get(key)))
+                    if count > 0:
+                        acc["gpu_devices"] += count * replicas
+                        acc["gpu_required"] = True
+                        acc["gpu_count_known"] = True
+
+
+def _scavenge_gpu(obj: Any, acc: Dict[str, Any]) -> None:
+    """Best-effort recursive scan for GPU signals in arbitrary structures (e.g. helm values).
+
+    Sets gpu_required when a GPU resource key appears; sums counts when they are numeric.
+    Does not attempt CPU/memory summation here (no reliable replica/container context).
+    """
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in _GPU_RESOURCE_KEYS:
+                acc["gpu_required"] = True
+                count = _safe_int(v)
+                if count > 0:
+                    acc["gpu_devices"] += count
+                    acc["gpu_count_known"] = True
+            else:
+                _scavenge_gpu(v, acc)
+    elif isinstance(obj, list):
+        for item in obj:
+            _scavenge_gpu(item, acc)
+
+
+def _parse_embedded_docs(text: Any) -> List[Dict[str, Any]]:
+    """Parse a YAML string (inline kubernetesManifest / valuesContent) into doc dicts."""
+    if not isinstance(text, str) or not text.strip():
+        return []
+    try:
+        return [d for d in yaml.safe_load_all(text) if isinstance(d, dict)]
+    except yaml.YAMLError:
+        return []
+
+
+# Last-resort markers that a blueprint needs GPUs even when no countable
+# nvidia.com/gpu resource is visible (e.g. GPU workloads packaged in external
+# Helm charts referenced via valuesFiles). Low-false-positive, NVIDIA/NIM-centric.
+_GPU_NAME_MARKERS = ("nvidia", "nim", "triton", "tensorrt", "gpu-operator", "-gpu", "cuda")
+_GPU_TEXT_MARKERS = ("weka.io/nim-role", "nvidia.com/gpu", "runtimeclassname: nvidia", "gpu.nvidia.com")
+
+
+def _heuristic_gpu_required(docs: List[Dict[str, Any]], raw: str) -> bool:
+    """Conservative detection of GPU need from names/charts/labels when no
+    countable GPU resource was found."""
+    low = (raw or "").lower()
+    if any(marker in low for marker in _GPU_TEXT_MARKERS):
+        return True
+    for top in docs:
+        if not isinstance(top, dict):
+            continue
+        components = (((top.get("spec") or {}).get("appStack")) or {}).get("components") or []
+        for comp in components:
+            if not isinstance(comp, dict):
+                continue
+            name = str(comp.get("name") or "").lower()
+            helm = comp.get("helmChart") or {}
+            chart = " ".join(str(helm.get(k) or "") for k in ("name", "chart", "repository")).lower()
+            if any(mk in name or mk in chart for mk in _GPU_NAME_MARKERS):
+                return True
+    return False
+
+
+def _infer_requirements(docs: List[Dict[str, Any]], raw: str = "") -> Dict[str, Any]:
+    """Deep-infer resource requirements by walking appStack components, embedded
+    manifests, and helm valuesContent. Returns a normalized requirements dict."""
+    acc = {"cpu_milli": 0, "mem_bytes": 0, "gpu_devices": 0,
+           "gpu_required": False, "gpu_count_known": False}
+
+    def handle_workload_docs(workload_docs: List[Dict[str, Any]]) -> None:
+        for d in workload_docs:
+            if d.get("kind") in _WORKLOAD_KINDS:
+                _accumulate_workload(d, acc)
+
+    for top in docs:
+        if not isinstance(top, dict):
+            continue
+        # Top-level doc may itself be a workload (legacy/standalone manifests).
+        if top.get("kind") in _WORKLOAD_KINDS:
+            _accumulate_workload(top, acc)
+        app_stack = ((top.get("spec") or {}).get("appStack")) or {}
+        components = app_stack.get("components") or []
+        for comp in components:
+            if not isinstance(comp, dict):
+                continue
+            handle_workload_docs(_parse_embedded_docs(comp.get("kubernetesManifest")))
+            helm = comp.get("helmChart") or {}
+            if isinstance(helm, dict):
+                for vc_doc in _parse_embedded_docs(helm.get("valuesContent")):
+                    _scavenge_gpu(vc_doc, acc)
+        # Single helmChart mode at spec level.
+        helm = (top.get("spec") or {}).get("helmChart") or {}
+        if isinstance(helm, dict):
+            for vc_doc in _parse_embedded_docs(helm.get("valuesContent")):
+                _scavenge_gpu(vc_doc, acc)
+
+    req = _empty_requirements()
+    req["source"] = "inferred"
+    req["cpu_cores"] = round(acc["cpu_milli"] / 1000.0, 2) if acc["cpu_milli"] else None
+    req["memory_gib"] = round(acc["mem_bytes"] / float(1024 ** 3), 2) if acc["mem_bytes"] else None
+    req["gpu_required"] = acc["gpu_required"]
+    req["gpu_count_known"] = acc["gpu_count_known"]
+    req["gpu_devices"] = acc["gpu_devices"] if acc["gpu_count_known"] else None
+    # Last resort: flag GPU need from names/charts/labels (count stays unknown).
+    if not req["gpu_required"] and _heuristic_gpu_required(docs, raw):
+        req["gpu_required"] = True
+        req["gpu_count_known"] = False
+    return req
+
+
+def compute_blueprint_requirements(yaml_path: Optional[str]) -> Dict[str, Any]:
+    """Determine a blueprint's resource needs.
+
+    Strategy: an explicit `x-requirements` block is authoritative; otherwise infer
+    from container resources across all docs, embedded manifests, and helm values.
+    When GPU is clearly required but the count can't be determined, gpu_count_known
+    is False so the UI can show an honest "count unknown".
+    """
+    if not yaml_path:
+        return _empty_requirements()
+    path = yaml_path if os.path.isabs(yaml_path) else os.path.join(PROJECT_ROOT, yaml_path)
+    try:
+        with open(path, "r") as f:
+            raw = f.read()
+    except Exception:
+        return _empty_requirements()
+
+    try:
+        docs = [d for d in yaml.safe_load_all(raw) if isinstance(d, dict)]
+    except yaml.YAMLError:
+        docs = []
+
+    # 1) Declared block wins.
+    for d in docs:
+        declared = _requirements_from_declaration(d.get("x-requirements"))
+        if declared:
+            return declared
+
+    # 2) Inference fallback.
+    return _infer_requirements(docs, raw)
+
+
+def _compute_requirement_meets(reqs: Dict[str, Any], status: Dict[str, Any]) -> Dict[str, Any]:
+    """Compare requirements against the cluster's FREE capacity.
+
+    Each value is True (fits), False (insufficient), or None (unknown — either the
+    requirement or the cluster figure is unavailable).
+    """
+    def fits(need, free):
+        if need is None or free is None:
+            return None
+        try:
+            return float(free) >= float(need)
+        except (TypeError, ValueError):
+            return None
+
+    cpu = fits(reqs.get("cpu_cores"), status.get("cpu_cores_free"))
+    memory = fits(reqs.get("memory_gib"), status.get("memory_gib_free"))
+    if not reqs.get("gpu_required"):
+        gpu = True  # blueprint needs no GPU
+    elif not reqs.get("gpu_count_known"):
+        gpu = None  # GPU needed but count unknown
+    else:
+        gpu = fits(reqs.get("gpu_devices"), status.get("gpu_devices_free"))
+    return {"cpu": cpu, "memory": memory, "gpu": gpu}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1373,7 +1631,7 @@ async def wekaappstore_exists(
             namespace=ns, plural="wekaappstores", name=name,
         )
         phase = (cr.get("status", {}) or {}).get("appStackPhase")
-        return JSONResponse({"ok": True, "exists": True, "phase": phase})
+        return JSONResponse({"ok": True, "exists": True, "phase": phase, "variables": _cr_gui_variables(cr)})
     except ApiException as e:
         if e.status == 404:
             return JSONResponse({"ok": True, "exists": False, "phase": None})
@@ -1449,6 +1707,74 @@ def parse_x_variables(yaml_text: str) -> dict:
         return {}
 
 
+def _blueprint_cr_identity(yaml_path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """Return (cr_name, cr_namespace) of the WekaAppStore doc in a blueprint file, else (None, None)."""
+    if not yaml_path:
+        return (None, None)
+    path = yaml_path if os.path.isabs(yaml_path) else os.path.join(PROJECT_ROOT, yaml_path)
+    try:
+        with open(path, "r") as f:
+            for doc in yaml.safe_load_all(f):
+                if isinstance(doc, dict) and doc.get("kind") == "WekaAppStore":
+                    md = doc.get("metadata") or {}
+                    return (md.get("name"), md.get("namespace"))
+    except Exception:
+        return (None, None)
+    return (None, None)
+
+
+def _cr_gui_variables(cr: dict) -> dict:
+    """Recall the variables submitted when a WekaAppStore CR was deployed.
+
+    Prefers the warp.io/gui-variables annotation stamped at deploy time; falls back
+    to spec.appStack.variables for CRs deployed before stamping existed.
+    """
+    md = (cr or {}).get("metadata", {}) or {}
+    raw = (md.get("annotations", {}) or {}).get("warp.io/gui-variables")
+    if raw:
+        try:
+            v = json.loads(raw)
+            if isinstance(v, dict):
+                return v
+        except Exception:
+            pass
+    spec_vars = (((cr.get("spec") or {}).get("appStack") or {}).get("variables")) or {}
+    return spec_vars if isinstance(spec_vars, dict) else {}
+
+
+# Variable names that should hold a URL/endpoint even when the blueprint only
+# declares them as a plain string (most blueprints predate a dedicated url type).
+_URL_FIELD_RE = re.compile(r"(?:^|_)(url|uri|endpoint|host|server|address)(?:_|$)", re.I)
+
+
+def _is_url_field(var_name: str, meta: dict) -> bool:
+    """True if this variable is expected to contain a URL/endpoint."""
+    if not isinstance(meta, dict):
+        meta = {}
+    if (meta.get("type") or "").lower() == "url" or (meta.get("format") or "").lower() == "url":
+        return True
+    return bool(_URL_FIELD_RE.search(var_name or ""))
+
+
+def _validate_variable_value(var_name: str, meta: dict, value: str) -> Optional[str]:
+    """Return a human-readable error if value is malformed for this variable, else None.
+
+    Empty values are accepted here — required-ness is enforced separately. The
+    checks are intentionally narrow (URL fields only) to avoid rejecting values
+    that legitimately contain spaces.
+    """
+    value = (value or "").strip()
+    if not value:
+        return None
+    if _is_url_field(var_name, meta):
+        if any(ch.isspace() for ch in value):
+            return f"{var_name}: URL must not contain spaces"
+        parsed = urllib.parse.urlparse(value)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return f"{var_name}: must be a valid URL (e.g. https://host.example.com)"
+    return None
+
+
 def find_blueprint(app_name: str, blueprints_dir: str = None) -> Optional[str]:
     """Scan BLUEPRINTS_DIR for a blueprint YAML file with an x-variables block matching app_name. Returns absolute path or None."""
     if blueprints_dir is None:
@@ -1485,12 +1811,10 @@ def find_blueprint(app_name: str, blueprints_dir: str = None) -> Optional[str]:
 async def blueprint_detail(request: Request, name: str):
     yaml_path = find_blueprint(name)
     status = await asyncio.to_thread(get_cluster_status)
-    # If there is no YAML mapped for this blueprint, use safe defaults
-    reqs = infer_requirements_from_yaml(yaml_path) if yaml_path else {"cpu_nodes": 1, "gpu_nodes": 0}
-    meets = {
-        "cpu": None if status.get('cpu_nodes') is None else status.get('cpu_nodes', 0) >= reqs.get('cpu_nodes', 0),
-        "gpu": None if status.get('gpu_nodes') is None else status.get('gpu_nodes', 0) >= reqs.get('gpu_nodes', 0),
-    }
+    # Determine the blueprint's resource needs (declared x-requirements first, else
+    # deep inference) and compare against the cluster's free capacity.
+    reqs = compute_blueprint_requirements(yaml_path)
+    meets = _compute_requirement_meets(reqs, status)
     # Prepare embedded image for OSS RAG blueprint
     oss_img_b64 = None
     if name == 'oss-rag':
@@ -1534,6 +1858,14 @@ async def blueprint_detail(request: Request, name: str):
                 variable_schema = parse_x_variables(_f.read())
         except Exception:
             variable_schema = {}
+    # Annotate URL fields so the template can render an HTML5 url input that
+    # rejects malformed values (e.g. a stray space) before submit.
+    for _vname, _vmeta in (variable_schema or {}).items():
+        if isinstance(_vmeta, dict) and _vmeta.get("type") != "credential" and _is_url_field(_vname, _vmeta):
+            _vmeta["_input_type"] = "url"
+
+    # CR identity for install-state detection (Deploy↔Uninstall toggle, read-only fields).
+    cr_name, cr_namespace = _blueprint_cr_identity(yaml_path)
 
     return templates.TemplateResponse(
         request,
@@ -1554,6 +1886,8 @@ async def blueprint_detail(request: Request, name: str):
             "credentials_by_type": credentials_by_type,
             "variable_schema": variable_schema,
             "available_creds": credentials_by_type,
+            "cr_name": cr_name,
+            "cr_namespace": cr_namespace or "default",
         },
     )
 
@@ -2520,8 +2854,13 @@ async def deploy_stream(
                 raw_schema_text = ""
             schema = parse_x_variables(raw_schema_text)
             for var_name, meta in schema.items():
-                if meta.get("required") and not str(user_vars.get(var_name, "") or "").strip():
+                raw_val = str(user_vars.get(var_name, "") or "")
+                if meta.get("required") and not raw_val.strip():
                     yield sse_event({"type": "error", "message": f"Required variable missing: {var_name}"})
+                    return
+                fmt_err = _validate_variable_value(var_name, meta, raw_val)
+                if fmt_err:
+                    yield sse_event({"type": "error", "message": f"Invalid value — {fmt_err}"})
                     return
 
         # Initial items
@@ -2551,17 +2890,32 @@ async def deploy_stream(
             template = env.from_string(raw_tpl)
             rendered = template.render(**user_vars)
 
-            # Apply manifest with namespace overrides using rendered content
+            try:
+                docs = list(yaml.safe_load_all(rendered))
+            except yaml.YAMLError as ye:
+                yield sse_event({"type": "error", "message": f"Rendered blueprint is not valid YAML: {ye}"})
+                return
+
+            # Stamp the submitted variables onto the WekaAppStore CR so the blueprint
+            # page can later show them in read-only fields and offer Uninstall.
+            cr_name = None
+            for d in docs:
+                if isinstance(d, dict) and d.get("kind") == "WekaAppStore":
+                    md = d.setdefault("metadata", {})
+                    anns = md.setdefault("annotations", {})
+                    anns["warp.io/gui-variables"] = json.dumps(user_vars, separators=(",", ":"))
+                    cr_name = cr_name or md.get("name")
+
+            # Apply manifest with namespace overrides using the rendered documents
             logger.info(
                 "Deploy-stream start: app=%s namespace=%s blueprint=%s items=%d",
                 app_name, namespace, bp_path, len(items)
             )
             ns_for_apply = "" if app_name == "cluster-init" else namespace
-            result = apply_blueprint_content_with_namespace(rendered, namespace=ns_for_apply)
+            result = apply_blueprint_documents_with_namespace(docs, namespace=ns_for_apply)
 
             # cluster-init and non-appStack blueprints have no per-component operator status
             # to poll — report submission complete immediately.
-            cr_name = _extract_wekaappstore_name(rendered)
             if not cr_name or app_name == "cluster-init":
                 yield sse_event({"type": "complete", "ok": True, "result": result, "message": "Deployment complete"})
                 return
@@ -2574,6 +2928,10 @@ async def deploy_stream(
             while True:
                 if await request.is_disconnected():
                     return
+                # Keepalive comment: without periodic bytes an ingress/proxy will
+                # drop an idle SSE connection between component phase changes,
+                # surfacing as "Stream connection error" in the browser.
+                yield ": ping\n\n"
                 try:
                     cr = await asyncio.to_thread(
                         custom_api.get_namespaced_custom_object,

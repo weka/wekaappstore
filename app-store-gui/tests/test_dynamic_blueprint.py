@@ -225,7 +225,7 @@ def test_deploy_stream_missing_required_variable_yields_error(tmp_path, monkeypa
 
     monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
     apply_called = []
-    monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", lambda *a, **kw: apply_called.append(True) or {"applied": []})
+    monkeypatch.setattr(main, "apply_blueprint_documents_with_namespace", lambda *a, **kw: apply_called.append(True) or {"applied": []})
 
     async def run():
         request = _make_request_stub()
@@ -260,7 +260,7 @@ def test_deploy_stream_cluster_init_exempt_from_required_validation(tmp_path, mo
     bp_file.write_text(yaml_content)
 
     monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
-    monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", lambda *a, **kw: {"applied": []})
+    monkeypatch.setattr(main, "apply_blueprint_documents_with_namespace", lambda *a, **kw: {"applied": []})
 
     async def run():
         request = _make_request_stub()
@@ -299,7 +299,7 @@ def test_deploy_stream_namespace_from_variables(tmp_path, monkeypatch):
     def mock_apply(rendered, namespace=""):
         captured_ns.append(namespace)
         return {"applied": []}
-    monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", mock_apply)
+    monkeypatch.setattr(main, "apply_blueprint_documents_with_namespace", mock_apply)
     _mock_appstack_ready(monkeypatch)
 
     async def run():
@@ -337,7 +337,7 @@ def test_deploy_stream_namespace_defaults_to_default_when_absent(tmp_path, monke
     def mock_apply(rendered, namespace=""):
         captured_ns.append(namespace)
         return {"applied": []}
-    monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", mock_apply)
+    monkeypatch.setattr(main, "apply_blueprint_documents_with_namespace", mock_apply)
     _mock_appstack_ready(monkeypatch)
 
     async def run():
@@ -376,11 +376,11 @@ def test_deploy_stream_render_uses_full_variables_dict(tmp_path, monkeypatch):
     bp_file.write_text(yaml_content)
 
     monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
-    rendered_content = []
-    def mock_apply(rendered, namespace=""):
-        rendered_content.append(rendered)
+    applied_docs = []
+    def mock_apply(docs, namespace=""):
+        applied_docs.append(list(docs))
         return {"applied": []}
-    monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", mock_apply)
+    monkeypatch.setattr(main, "apply_blueprint_documents_with_namespace", mock_apply)
     _mock_appstack_ready(monkeypatch)
 
     async def run():
@@ -388,9 +388,52 @@ def test_deploy_stream_render_uses_full_variables_dict(tmp_path, monkeypatch):
         variables = {"namespace": "prod", "storage_class": "weka-sc"}
         resp = await main.deploy_stream(request, app_name="test-app", variables=_json.dumps(variables))
         await _collect_sse(resp)
-        assert rendered_content, "apply should have been called with rendered content"
-        assert "prod" in rendered_content[0]
-        assert "weka-sc" in rendered_content[0]
+        assert applied_docs, "apply should have been called with rendered documents"
+        cr = next(d for d in applied_docs[0] if d.get("kind") == "WekaAppStore")
+        assert cr["metadata"]["namespace"] == "prod"
+        assert cr["spec"]["appStack"]["storageClass"] == "weka-sc"
+
+    asyncio.run(run())
+
+
+def test_deploy_stream_stamps_gui_variables_annotation(tmp_path, monkeypatch):
+    """deploy_stream stamps submitted variables onto the WekaAppStore CR as an annotation."""
+    yaml_content = (
+        "x-variables:\n"
+        "  namespace:\n"
+        "    type: string\n"
+        "    required: false\n"
+        "  keycloak_url:\n"
+        "    type: string\n"
+        "    required: false\n"
+        "\n"
+        "apiVersion: warp.io/v1alpha1\n"
+        "kind: WekaAppStore\n"
+        "metadata:\n"
+        "  name: test-app\n"
+        "  namespace: [[namespace]]\n"
+        "spec:\n"
+        "  appStack:\n"
+        "    components: []\n"
+    )
+    bp_file = tmp_path / "test-app.yaml"
+    bp_file.write_text(yaml_content)
+
+    monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
+    applied_docs = []
+    monkeypatch.setattr(main, "apply_blueprint_documents_with_namespace",
+                        lambda docs, namespace="": applied_docs.append(list(docs)) or {"applied": []})
+    _mock_appstack_ready(monkeypatch)
+
+    async def run():
+        request = _make_request_stub()
+        variables = {"namespace": "ns1", "keycloak_url": "https://kc.example.com"}
+        resp = await main.deploy_stream(request, app_name="test-app", variables=_json.dumps(variables))
+        await _collect_sse(resp)
+        assert applied_docs, "apply should have been called"
+        cr = next(d for d in applied_docs[0] if d.get("kind") == "WekaAppStore")
+        raw = cr["metadata"]["annotations"]["warp.io/gui-variables"]
+        assert _json.loads(raw) == variables
 
     asyncio.run(run())
 
@@ -419,7 +462,7 @@ def test_deploy_stream_emits_component_events_from_operator_status(tmp_path, mon
     bp_file.write_text(yaml_content)
 
     monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
-    monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", lambda *a, **kw: {"applied": ["WekaAppStore"]})
+    monkeypatch.setattr(main, "apply_blueprint_documents_with_namespace", lambda *a, **kw: {"applied": ["WekaAppStore"]})
     _mock_appstack_ready(monkeypatch, phase="Ready", components=[
         {"name": "comp-a", "phase": "Ready"},
         {"name": "comp-b", "phase": "Ready"},
@@ -481,7 +524,7 @@ def test_deploy_stream_validates_required_variables(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
     apply_called = []
-    monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", lambda *a, **kw: apply_called.append(True) or {"applied": []})
+    monkeypatch.setattr(main, "apply_blueprint_documents_with_namespace", lambda *a, **kw: apply_called.append(True) or {"applied": []})
 
     async def run():
         request = _make_request_stub()
@@ -521,7 +564,7 @@ def test_deploy_stream_optional_variables_pass_validation(tmp_path, monkeypatch)
     bp_file.write_text(yaml_content)
 
     monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
-    monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", lambda *a, **kw: {"applied": []})
+    monkeypatch.setattr(main, "apply_blueprint_documents_with_namespace", lambda *a, **kw: {"applied": []})
     _mock_appstack_ready(monkeypatch)
 
     async def run():
@@ -556,7 +599,7 @@ def test_deploy_stream_cluster_init_exemption(tmp_path, monkeypatch):
     bp_file.write_text(yaml_content)
 
     monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
-    monkeypatch.setattr(main, "apply_blueprint_content_with_namespace", lambda *a, **kw: {"applied": []})
+    monkeypatch.setattr(main, "apply_blueprint_documents_with_namespace", lambda *a, **kw: {"applied": []})
 
     async def run():
         request = _make_request_stub()

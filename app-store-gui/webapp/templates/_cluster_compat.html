@@ -1,0 +1,80 @@
+{# Shared Cluster Compatibility rows. Expects: requirements, meets, status.
+   Requirements come from compute_blueprint_requirements(); meets compares against
+   the cluster's FREE capacity (True=ok, False=insufficient, None=unknown). #}
+<div class="space-y-3 text-sm">
+  {# ---- CPU ---- #}
+  <div class="flex items-center justify-between">
+    <div>CPU cores</div>
+    <div class="flex items-center gap-2">
+      {% if requirements.cpu_cores is not none %}
+        <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need {{ requirements.cpu_cores }}</span>
+        {% if meets.cpu is none %}
+          <span class="badge" style="background: #374151;">unknown</span>
+        {% elif meets.cpu %}
+          <span class="badge" style="background: #065f46; color: #d1fae5;">ok ({{ status.cpu_cores_free }} free)</span>
+        {% else %}
+          <span class="badge" style="background: #7f1d1d; color: #fee2e2;">insufficient ({{ status.cpu_cores_free }} free)</span>
+        {% endif %}
+      {% else %}
+        <span class="badge" style="background: #374151;">not specified</span>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ---- GPU ---- #}
+  <div class="flex items-center justify-between">
+    <div>GPU devices{% if requirements.gpu_model %} <span class="muted">({{ requirements.gpu_model }})</span>{% endif %}</div>
+    <div class="flex items-center gap-2">
+      {% if not requirements.gpu_required %}
+        <span class="badge" style="background: #374151;">not required</span>
+      {% elif not requirements.gpu_count_known %}
+        <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">required</span>
+        <span class="badge" style="background: #92400e; color: #fde68a;">count unknown ({{ status.gpu_devices_free }} free)</span>
+      {% else %}
+        <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need {{ requirements.gpu_devices }}</span>
+        {% if meets.gpu is none %}
+          <span class="badge" style="background: #374151;">unknown</span>
+        {% elif meets.gpu %}
+          <span class="badge" style="background: #065f46; color: #d1fae5;">ok ({{ status.gpu_devices_free }} free)</span>
+        {% else %}
+          <span class="badge" style="background: #7f1d1d; color: #fee2e2;">insufficient ({{ status.gpu_devices_free }} free)</span>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+  {# ---- Memory (only when known) ---- #}
+  {% if requirements.memory_gib is not none %}
+  <div class="flex items-center justify-between">
+    <div>Memory (GiB)</div>
+    <div class="flex items-center gap-2">
+      <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need {{ requirements.memory_gib }}</span>
+      {% if meets.memory is none %}
+        <span class="badge" style="background: #374151;">unknown</span>
+      {% elif meets.memory %}
+        <span class="badge" style="background: #065f46; color: #d1fae5;">ok ({{ status.memory_gib_free }} free)</span>
+      {% else %}
+        <span class="badge" style="background: #7f1d1d; color: #fee2e2;">insufficient ({{ status.memory_gib_free }} free)</span>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# ---- NVIDIA GPU Operator ---- #}
+  <div class="flex items-center justify-between">
+    <div>NVIDIA GPU Operator</div>
+    <div>
+      {% if status.gpu_operator_installed is true %}
+        <span class="badge" style="background: #065f46; color: #d1fae5;">installed</span>
+      {% elif status.gpu_operator_installed is false %}
+        <span class="badge" style="background: #7f1d1d; color: #fee2e2;">not installed</span>
+      {% else %}
+        <span class="badge" style="background: #374151;">unknown</span>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if requirements.source == 'inferred' %}
+  <div class="muted" style="font-size: 11px;">Requirements inferred from blueprint resources; may be incomplete for Helm-packaged workloads.</div>
+  {% endif %}
+</div>
