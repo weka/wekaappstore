@@ -1,80 +1,103 @@
 {# Shared Cluster Compatibility rows. Expects: requirements, meets, status.
    Requirements come from compute_blueprint_requirements(); meets compares against
    the cluster's FREE capacity (True=ok, False=insufficient, None=unknown). #}
-<div class="space-y-3 text-sm">
-  {# ---- CPU ---- #}
-  <div class="flex items-center justify-between">
-    <div>CPU cores</div>
-    <div class="flex items-center gap-2">
-      {% if requirements.cpu_cores is not none %}
-        <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need {{ requirements.cpu_cores }}</span>
-        {% if meets.cpu is none %}
-          <span class="badge" style="background: #374151;">unknown</span>
-        {% elif meets.cpu %}
-          <span class="badge" style="background: #065f46; color: #d1fae5;">ok ({{ status.cpu_cores_free }} free)</span>
-        {% else %}
-          <span class="badge" style="background: #7f1d1d; color: #fee2e2;">insufficient ({{ status.cpu_cores_free }} free)</span>
-        {% endif %}
-      {% else %}
-        <span class="badge" style="background: #374151;">not specified</span>
-      {% endif %}
-    </div>
-  </div>
+<div class="compat text-sm">
+  <style>
+    .compat .compat-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .5rem 0; border-top: 1px solid rgba(255,255,255,0.06); }
+    .compat .compat-row:first-of-type { border-top: 0; }
+    .compat .compat-label { color: #e5e7eb; font-weight: 500; }
+    .compat .compat-sub { color: #9ca3af; font-weight: 400; font-size: 12px; }
+    .compat .compat-vals { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; }
+    /* GPU gets its own stacked block so the declaration sits on the next line. */
+    .compat .compat-gpu { display: block; padding: .6rem 0; border-top: 1px solid rgba(255,255,255,0.06); }
+    .compat .compat-gpu .compat-vals { justify-content: flex-start; margin-top: .45rem; }
+    .compat .cbadge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 9999px; font-size: 12px; line-height: 1.4; font-weight: 500; border: 1px solid transparent; white-space: nowrap; }
+    .compat .cbadge-need { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.14); color: #cbd5e1; }
+    .compat .cbadge-ok { background: rgba(16,185,129,0.14); border-color: rgba(16,185,129,0.40); color: #6ee7b7; }
+    .compat .cbadge-bad { background: rgba(239,68,68,0.14); border-color: rgba(239,68,68,0.40); color: #fca5a5; }
+    .compat .cbadge-warn { background: rgba(245,158,11,0.14); border-color: rgba(245,158,11,0.42); color: #fcd34d; }
+    .compat .cbadge-muted { background: rgba(148,163,184,0.12); border-color: rgba(148,163,184,0.28); color: #cbd5e1; }
+    /* Emphasised GPU count "balloon". */
+    .compat .cbadge-gpu { padding: 5px 14px; font-size: 13px; font-weight: 600; background: rgba(107,47,179,0.18); border-color: rgba(107,47,179,0.55); color: #d7c2f0; }
+    .compat .cbadge-gpu .cbadge-unit { font-weight: 400; opacity: .8; margin-left: 4px; }
+  </style>
 
-  {# ---- GPU ---- #}
-  <div class="flex items-center justify-between">
-    <div>GPU devices{% if requirements.gpu_model %} <span class="muted">({{ requirements.gpu_model }})</span>{% endif %}</div>
-    <div class="flex items-center gap-2">
-      {% if not requirements.gpu_required %}
-        <span class="badge" style="background: #374151;">not required</span>
-      {% elif not requirements.gpu_count_known %}
-        <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">required</span>
-        <span class="badge" style="background: #92400e; color: #fde68a;">count unknown ({{ status.gpu_devices_free }} free)</span>
-      {% else %}
-        <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need {{ requirements.gpu_devices }}</span>
-        {% if meets.gpu is none %}
-          <span class="badge" style="background: #374151;">unknown</span>
-        {% elif meets.gpu %}
-          <span class="badge" style="background: #065f46; color: #d1fae5;">ok ({{ status.gpu_devices_free }} free)</span>
+  {# ---- CPU ---- #}
+  <div class="compat-row">
+    <span class="compat-label">CPU cores</span>
+    <span class="compat-vals">
+      {% if requirements.cpu_cores is not none %}
+        <span class="cbadge cbadge-need">need {{ requirements.cpu_cores }}</span>
+        {% if meets.cpu is none %}
+          <span class="cbadge cbadge-muted">unknown</span>
+        {% elif meets.cpu %}
+          <span class="cbadge cbadge-ok">{{ status.cpu_cores_free }} free</span>
         {% else %}
-          <span class="badge" style="background: #7f1d1d; color: #fee2e2;">insufficient ({{ status.gpu_devices_free }} free)</span>
+          <span class="cbadge cbadge-bad">only {{ status.cpu_cores_free }} free</span>
         {% endif %}
+      {% else %}
+        <span class="cbadge cbadge-muted">not specified</span>
       {% endif %}
-    </div>
+    </span>
   </div>
 
   {# ---- Memory (only when known) ---- #}
   {% if requirements.memory_gib is not none %}
-  <div class="flex items-center justify-between">
-    <div>Memory (GiB)</div>
-    <div class="flex items-center gap-2">
-      <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);">need {{ requirements.memory_gib }}</span>
+  <div class="compat-row">
+    <span class="compat-label">Memory <span class="compat-sub">GiB</span></span>
+    <span class="compat-vals">
+      <span class="cbadge cbadge-need">need {{ requirements.memory_gib }}</span>
       {% if meets.memory is none %}
-        <span class="badge" style="background: #374151;">unknown</span>
+        <span class="cbadge cbadge-muted">unknown</span>
       {% elif meets.memory %}
-        <span class="badge" style="background: #065f46; color: #d1fae5;">ok ({{ status.memory_gib_free }} free)</span>
+        <span class="cbadge cbadge-ok">{{ status.memory_gib_free }} free</span>
       {% else %}
-        <span class="badge" style="background: #7f1d1d; color: #fee2e2;">insufficient ({{ status.memory_gib_free }} free)</span>
+        <span class="cbadge cbadge-bad">only {{ status.memory_gib_free }} free</span>
       {% endif %}
-    </div>
+    </span>
   </div>
   {% endif %}
 
-  {# ---- NVIDIA GPU Operator ---- #}
-  <div class="flex items-center justify-between">
-    <div>NVIDIA GPU Operator</div>
-    <div>
-      {% if status.gpu_operator_installed is true %}
-        <span class="badge" style="background: #065f46; color: #d1fae5;">installed</span>
-      {% elif status.gpu_operator_installed is false %}
-        <span class="badge" style="background: #7f1d1d; color: #fee2e2;">not installed</span>
+  {# ---- GPU (stacked: label, then the declaration on the next line) ---- #}
+  <div class="compat-gpu">
+    <div class="compat-label">
+      GPU devices
+      {% if requirements.gpu_model %}<span class="compat-sub">· {{ requirements.gpu_model }}</span>{% endif %}
+    </div>
+    <div class="compat-vals">
+      {% if not requirements.gpu_required %}
+        <span class="cbadge cbadge-muted">not required</span>
+      {% elif not requirements.gpu_count_known %}
+        <span class="cbadge cbadge-gpu">GPU required</span>
+        <span class="cbadge cbadge-warn">count unknown · {{ status.gpu_devices_free }} free</span>
       {% else %}
-        <span class="badge" style="background: #374151;">unknown</span>
+        <span class="cbadge cbadge-gpu">{{ requirements.gpu_devices }}<span class="cbadge-unit">GPUs</span></span>
+        {% if meets.gpu is none %}
+          <span class="cbadge cbadge-muted">unknown</span>
+        {% elif meets.gpu %}
+          <span class="cbadge cbadge-ok">{{ status.gpu_devices_free }} free</span>
+        {% else %}
+          <span class="cbadge cbadge-bad">only {{ status.gpu_devices_free }} free</span>
+        {% endif %}
       {% endif %}
     </div>
   </div>
 
+  {# ---- NVIDIA GPU Operator ---- #}
+  <div class="compat-row">
+    <span class="compat-label">NVIDIA GPU Operator</span>
+    <span class="compat-vals">
+      {% if status.gpu_operator_installed is true %}
+        <span class="cbadge cbadge-ok">installed</span>
+      {% elif status.gpu_operator_installed is false %}
+        <span class="cbadge cbadge-bad">not installed</span>
+      {% else %}
+        <span class="cbadge cbadge-muted">unknown</span>
+      {% endif %}
+    </span>
+  </div>
+
   {% if requirements.source == 'inferred' %}
-  <div class="muted" style="font-size: 11px;">Requirements inferred from blueprint resources; may be incomplete for Helm-packaged workloads.</div>
+  <div class="compat-sub" style="padding-top:.5rem;">Requirements inferred from blueprint resources; may be incomplete for Helm-packaged workloads.</div>
   {% endif %}
 </div>

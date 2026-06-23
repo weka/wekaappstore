@@ -43,3 +43,12 @@ def test_empty_value_passes_format_check():
 def test_non_url_field_allows_spaces():
     # Non-URL fields are not whitespace-checked (may legitimately contain spaces).
     assert main._validate_variable_value("description", {}, "hello world") is None
+
+
+def test_validate_false_disables_url_validation():
+    # A host/IP field opted out via `validate: false` accepts a bare IP.
+    meta = {"validate": False}
+    assert main._is_url_field("weka_api_host", meta) is False
+    assert main._validate_variable_value("weka_api_host", meta, "172.3.4.248") is None
+    # Without the opt-out, the same field is treated as a URL and rejected.
+    assert main._validate_variable_value("weka_api_host", {}, "172.3.4.248") is not None

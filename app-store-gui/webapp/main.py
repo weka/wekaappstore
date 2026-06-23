@@ -1747,10 +1747,17 @@ def _cr_gui_variables(cr: dict) -> dict:
 _URL_FIELD_RE = re.compile(r"(?:^|_)(url|uri|endpoint|host|server|address)(?:_|$)", re.I)
 
 
+def _validation_disabled(meta: dict) -> bool:
+    """A blueprint can opt a variable out of format validation with `validate: false`."""
+    return isinstance(meta, dict) and meta.get("validate") is False
+
+
 def _is_url_field(var_name: str, meta: dict) -> bool:
     """True if this variable is expected to contain a URL/endpoint."""
     if not isinstance(meta, dict):
         meta = {}
+    if _validation_disabled(meta):
+        return False
     if (meta.get("type") or "").lower() == "url" or (meta.get("format") or "").lower() == "url":
         return True
     return bool(_URL_FIELD_RE.search(var_name or ""))
@@ -1761,8 +1768,11 @@ def _validate_variable_value(var_name: str, meta: dict, value: str) -> Optional[
 
     Empty values are accepted here — required-ness is enforced separately. The
     checks are intentionally narrow (URL fields only) to avoid rejecting values
-    that legitimately contain spaces.
+    that legitimately contain spaces. A blueprint may set `validate: false` on a
+    variable to skip these checks entirely (e.g. a bare host/IP, not a URL).
     """
+    if _validation_disabled(meta):
+        return None
     value = (value or "").strip()
     if not value:
         return None
