@@ -205,6 +205,8 @@ spec:
         waitForReady: true
         readinessCheck:
           type: job
+          name: weka-node-label
+          namespace: kube-system
           timeout: 300
         targetNamespace: kube-system
         kubernetesManifest: |
@@ -303,6 +305,8 @@ spec:
         waitForReady: true
         readinessCheck:
           type: job
+          name: storageclass-demote
+          namespace: kube-system
           timeout: 300
         targetNamespace: kube-system
         kubernetesManifest: |
