@@ -1742,6 +1742,35 @@ def parse_deploy_timeout(yaml_text: str) -> int:
         return DEFAULT_DEPLOY_TIMEOUT_SECONDS
 
 
+def build_quay_dockerconfigjson(user: str, password: str) -> str:
+    """Build the .dockerconfigjson value for a quay.io pull secret.
+
+    Returns a compact JSON string suitable for a Kubernetes Secret stringData field.
+    The auth value uses base64.b64encode which produces no trailing newlines —
+    auths["quay.io"]["auth"] base64-decodes to exactly "user:password" with no
+    trailing bytes (D-04, T-29-04 mitigate).
+    """
+    auth = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
+    return json.dumps({"auths": {"quay.io": {"auth": auth}}}, separators=(",", ":"))
+
+
+def split_endpoints(join_ip_ports: str) -> dict:
+    """Split a comma-delimited host:port string into both forms needed by the blueprint.
+
+    Returns a dict with two keys:
+    - join_ip_ports_list: a json.dumps'd string of the list (double-quoted JSON array),
+      suitable for `joinIpPorts: [[ join_ip_ports_list ]]` in the WekaClient CR.
+    - endpoints_csv: the comma-joined normalized string for the CSI API secret.
+
+    Whitespace around each entry is stripped; empty entries are dropped (D-05, T-29-05).
+    """
+    entries = [e.strip() for e in (join_ip_ports or "").split(",") if e.strip()]
+    return {
+        "join_ip_ports_list": json.dumps(entries),
+        "endpoints_csv": ",".join(entries),
+    }
+
+
 def _blueprint_cr_identity(yaml_path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Return (cr_name, cr_namespace) of the WekaAppStore doc in a blueprint file, else (None, None)."""
     if not yaml_path:
