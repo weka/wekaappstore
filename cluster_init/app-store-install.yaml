@@ -26,6 +26,7 @@ x-variables:
     required: true
     description: "WEKA cluster password"
   quay_dockerconfigjson:
+    required: true
     validate: false
     description: "GUI-built dockerconfigjson string for quay.io pull secret (injected by server)"
 ---
