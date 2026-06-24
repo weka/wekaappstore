@@ -2981,6 +2981,19 @@ async def deploy_stream(
             # Only change variable delimiters; keep block/comment delimiters default
             env = Environment(variable_start_string="[[", variable_end_string="]]")
             template = env.from_string(raw_tpl)
+
+            # Derive server-side vars before render so the blueprint can reference
+            # them via [[ ]] even though they are not in x-variables.
+            # Guard: only derive when the source keys are present so blueprints that
+            # do not use these vars (e.g. cluster-init) are unaffected.
+            if user_vars.get("quay_username") or user_vars.get("quay_password"):
+                user_vars["quay_dockerconfigjson"] = build_quay_dockerconfigjson(
+                    user_vars.get("quay_username", ""),
+                    user_vars.get("quay_password", ""),
+                )
+            if user_vars.get("join_ip_ports"):
+                user_vars.update(split_endpoints(user_vars.get("join_ip_ports", "")))
+
             rendered = template.render(**user_vars)
 
             try:
