@@ -834,3 +834,132 @@ def test_split_endpoints_join_ip_ports_list_is_valid_yaml():
     assert parsed == {"joinIpPorts": ["a:1", "b:2"]}, (
         f"Expected list, got: {parsed!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 29 Plan 03: secret-key predicate + _safe_gui_variables + SSE redaction
+# ---------------------------------------------------------------------------
+
+
+def test_is_secret_key_matches_password():
+    """Test 28: _is_secret_key returns True for keys containing 'password' (case-insensitive)."""
+    assert main._is_secret_key("weka_password")
+    assert main._is_secret_key("quay_password")
+    assert main._is_secret_key("PASSWORD")
+    assert main._is_secret_key("my_Password_field")
+
+
+def test_is_secret_key_matches_token():
+    """Test 29: _is_secret_key returns True for keys containing 'token'."""
+    assert main._is_secret_key("api_token")
+    assert main._is_secret_key("TOKEN")
+    assert main._is_secret_key("auth_token_value")
+
+
+def test_is_secret_key_matches_secret():
+    """Test 30: _is_secret_key returns True for keys containing 'secret'."""
+    assert main._is_secret_key("client_secret")
+    assert main._is_secret_key("SECRET")
+    assert main._is_secret_key("my_secret_key")
+
+
+def test_is_secret_key_matches_quay_dockerconfigjson():
+    """Test 31: _is_secret_key returns True for exact match 'quay_dockerconfigjson'."""
+    assert main._is_secret_key("quay_dockerconfigjson")
+
+
+def test_is_secret_key_non_secret_keys():
+    """Test 32: _is_secret_key returns False for non-secret keys."""
+    assert not main._is_secret_key("weka_username")
+    assert not main._is_secret_key("namespace")
+    assert not main._is_secret_key("operator_version")
+    assert not main._is_secret_key("join_ip_ports")
+    assert not main._is_secret_key("quay_username")
+    assert not main._is_secret_key("storage_class")
+
+
+def test_safe_gui_variables_drops_secret_keys():
+    """Test 33: _safe_gui_variables removes all secret keys from the dict."""
+    user_vars = {
+        "weka_password": "hunter2",
+        "quay_password": "qpass",
+        "quay_dockerconfigjson": '{"auths":{}}',
+        "api_token": "abc123",
+        "client_secret": "xyz",
+        "namespace": "default",
+        "weka_username": "admin",
+        "operator_version": "1.0.0",
+    }
+    result = main._safe_gui_variables(user_vars)
+    assert "weka_password" not in result
+    assert "quay_password" not in result
+    assert "quay_dockerconfigjson" not in result
+    assert "api_token" not in result
+    assert "client_secret" not in result
+
+
+def test_safe_gui_variables_preserves_non_secret_keys():
+    """Test 34: _safe_gui_variables keeps all non-secret keys intact."""
+    user_vars = {
+        "weka_password": "hunter2",
+        "namespace": "default",
+        "weka_username": "admin",
+        "operator_version": "1.0.0",
+        "join_ip_ports": "10.0.0.1:14000",
+    }
+    result = main._safe_gui_variables(user_vars)
+    assert result["namespace"] == "default"
+    assert result["weka_username"] == "admin"
+    assert result["operator_version"] == "1.0.0"
+    assert result["join_ip_ports"] == "10.0.0.1:14000"
+
+
+def test_safe_gui_variables_does_not_mutate_input():
+    """Test 35: _safe_gui_variables does not modify the original dict."""
+    user_vars = {"weka_password": "secret", "namespace": "default"}
+    _ = main._safe_gui_variables(user_vars)
+    assert "weka_password" in user_vars, "original dict must not be mutated"
+
+
+def test_redact_secrets_replaces_secret_values_with_stars():
+    """Test 36: _redact_secrets replaces each secret value with *** in the message."""
+    user_vars = {
+        "weka_password": "hunter2",
+        "namespace": "default",
+    }
+    msg = "Error: failed to connect with password hunter2 to cluster"
+    result = main._redact_secrets(msg, user_vars)
+    assert "hunter2" not in result
+    assert "***" in result
+
+
+def test_redact_secrets_leaves_clean_message_unchanged():
+    """Test 37: _redact_secrets returns an unchanged message when no secrets present."""
+    user_vars = {"weka_password": "s3cr3t", "namespace": "default"}
+    msg = "Component weka-operator reached Ready phase"
+    result = main._redact_secrets(msg, user_vars)
+    assert result == msg
+
+
+def test_redact_secrets_redacts_multiple_secret_values():
+    """Test 38: _redact_secrets replaces all distinct secret values in a message."""
+    user_vars = {
+        "weka_password": "wpass",
+        "quay_password": "qpass",
+        "quay_dockerconfigjson": "someconfigjson",
+        "namespace": "default",
+    }
+    msg = "Applying manifest with wpass and qpass and someconfigjson embedded"
+    result = main._redact_secrets(msg, user_vars)
+    assert "wpass" not in result
+    assert "qpass" not in result
+    assert "someconfigjson" not in result
+    assert result.count("***") == 3
+
+
+def test_redact_secrets_ignores_empty_secret_values():
+    """Test 39: _redact_secrets does not replace empty string secret values."""
+    user_vars = {"weka_password": "", "namespace": "default"}
+    msg = "Some message with no secret"
+    result = main._redact_secrets(msg, user_vars)
+    assert result == msg
