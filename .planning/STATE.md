@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v7.0
-milestone_name: Secret Management, WEKA Storage Integration & Dynamic Blueprint System
-status: milestone_archived
-stopped_at: v7.0 milestone archived 2026-06-17
-last_updated: "2026-06-17T00:00:00.000Z"
-last_activity: 2026-06-17 -- v7.0 milestone archived
+milestone: v8.0
+milestone_name: Guided Install Wizard — WEKA Operator, CSI & Storage Classes
+status: planning
+last_updated: "2026-06-24T02:24:31.392Z"
+last_activity: 2026-06-24
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 18
-  completed_plans: 18
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,10 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-06-17 — milestone v7.0 archived)
 
 ## Current Position
 
-Phase: 26 (complete)
-Plan: All complete
-Status: Milestone archived
-Last activity: 2026-06-17
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-24 — Milestone v8.0 started
 
 ## Accumulated Context
 

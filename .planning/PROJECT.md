@@ -31,6 +31,19 @@ v7.0 shipped 2026-06-17. v3.1 deferred E2E chat work remains tracked separately 
 - `mcp-server/server.py`: 57 lines (tools registered in `mcp-server/tools/`)
 - Total test suite: 103+ MCP tests + operator tests + GUI credential API tests + dynamic blueprint tests
 
+## Current Milestone: v8.0 Guided Install Wizard — WEKA Operator, CSI & Storage Classes
+
+**Goal:** Extend the App Store install wizard to collect customer-specific variables in a multi-step web form and install the full WEKA storage stack (operator, CSI driver, WekaClient, secrets, StorageClasses) via a parameterized AppStack CR with live per-stage progress, then run the existing cluster-init last and redirect to the App Store.
+
+**Target features:**
+- Multi-step wizard form in `welcome.html` collecting: worker-node prereq confirmation (A1), quay registry credentials, WEKA connection (joinIpPorts, image version, scheme dropdown), and WEKA cluster credentials (org/user/pass)
+- New parameterized `cluster_init/app-store-install.yaml` AppStack `WekaAppStore` blueprint encoding the ordered install: quay pull secrets → WEKA operator (+CRDs, OCI from quay) → node labels → WekaClient CR + secret → CSI driver → CSI API secret → three StorageClasses (dir-api as default)
+- Live per-stage install progress, reusing the existing `componentStatus` SSE stream in `/deploy-stream`
+- Two chained CRs: `app-store-install` runs to `Ready`, then the untouched `app-store-cluster-init` runs last; redirect when cluster-init reaches `Ready`
+- Parameterized `weka-csi-config/` templates using `stringData` (eliminates the base64 trailing-newline bug class) and GUI-built `dockerconfigjson` for the quay secret
+
+**Authoritative spec:** `.planning/PRD-install-wizard-weka-storage-stack.md` (resolved decisions A1, GUI-built quay secret, no helm registry login, two chained CRs, cluster-init `Ready` as redirect gate).
+
 ## Recent Milestones
 
 **v7.0 Secret Management, WEKA Storage Integration & Dynamic Blueprint System — Shipped 2026-06-17**
@@ -73,6 +86,7 @@ Infrastructure delivered: HTTP transport, EKS deployment via agent-sandbox CRD, 
 
 ### Active
 
+- [ ] v8.0 Guided Install Wizard — multi-step form + parameterized `app-store-install` AppStack blueprint installs WEKA operator/CSI/StorageClasses with live progress; cluster-init runs last (see `.planning/PRD-install-wizard-weka-storage-stack.md`)
 - [ ] v3.1 E2E Chat Validation — inspect tool `load_incluster_config`, init container config gap, NIM model reliability, OpenClaw upgrade (see `.planning/v3.0-KNOWN-ISSUES.md`)
 - [ ] v5.0 Phase 19: Validator Soft-Warning — MCP `validate_yaml` soft-warns on hardcoded DNS / namespace literals; portable fixture
 - [ ] v5.0 Phase 20: AIDP Migration Smoke Test — separate `aidp` repo; end-to-end cluster verification
@@ -144,4 +158,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-17 after v7.0 milestone*
+*Last updated: 2026-06-24 — v8.0 Guided Install Wizard milestone started*
