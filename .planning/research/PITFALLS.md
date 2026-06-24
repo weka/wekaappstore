@@ -1,342 +1,358 @@
-# Pitfalls Research: AppStack Variable Substitution
+# Pitfalls Research
 
-**Domain:** Adding `${VAR}` substitution to a Kopf-based Kubernetes operator
-**Researched:** 2026-05-06
-**Confidence:** HIGH — all pitfalls verified by executing the actual code paths against the real operator source
+**Domain:** Guided install-wizard automation for the WEKA storage stack (operator + CSI + WekaClient + secrets + StorageClasses) installed via the existing AppStack `WekaAppStore` mechanism, fronted by an SSE-streamed multi-step web form.
+**Researched:** 2026-06-24
+**Confidence:** HIGH (most findings verified against the repo's own code and official Helm/WEKA/Kubernetes docs; the few WebSearch-only items are flagged inline)
+
+These are the failure modes specific to *adding* this install automation to the brownfield App Store. The single most important finding — verified against the repo's operator code and the WEKA/Helm docs — is that **Decision C ("no `helm registry login`") is wrong as written**: the dockerconfigjson pull secrets cover *image* pulls but not the operator's *chart* pull. That is Pitfall 1 below and should be treated as the highest-risk item in v8.0.
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: Auto-Default Destroys Backward Compatibility
+### Pitfall 1: `helm registry login` is required for the operator's chart pull — pull secrets do NOT cover it (Decision C is incorrect)
 
-**What goes wrong:** The PRD claims substitution is opt-in and "existing CRs without `variables:` produce byte-identical output." This claim is false as implemented. The proposed code builds `variables = {'namespace': namespace, **(app_stack.get('variables') or {})}` and then calls `render(text, variables)`. Because `variables` is always non-empty (it always contains at least `{'namespace': cr_namespace}`), the guard `if not variables` in `render()` is never True. `Template(text).substitute(variables)` runs on every `kubernetesManifest` string and every `valuesFiles` content — regardless of whether the CR uses `${...}` at all.
+**What goes wrong:**
+The operator installs the WEKA operator chart by shelling out to `helm install <name> oci://quay.io/weka.io/helm/weka-operator --version vX.Y.Z` and, before that, runs `helm show crds oci://...` to discover CRDs (`operator_module/main.py:679`, `discover_chart_crds`). Both commands run **inside the operator pod's own helm process**, which authenticates using the helm registry config (`~/.config/helm/registry/config.json`) — populated only by `helm registry login`. The quay `kubernetes.io/dockerconfigjson` secrets that Decision B/C create are consumed by the **kubelet** when pulling *container images* referenced by pods (the operator Deployment image, the weka-in-container image). They have **zero effect** on `helm pull` / `helm show crds`. Verified facts: (a) the operator's `_install_chart`/`_upgrade_chart`/`discover_chart_crds` pass **no** `--registry-config` and no credentials (`operator_module/main.py:136-178`, `:673-703`); (b) the WEKA operator chart on quay.io is **not anonymous-pullable** — WEKA's own docs require `QUAY_USERNAME`/`QUAY_PASSWORD` and a `helm registry login quay.io` step before pulling the chart.
 
-**Root cause:** The PRD conflates "user did not set `variables:`" with "variables dict is empty." The auto-default injection (`${namespace}` to CR namespace) is correct behavior, but it invalidates the backward-compat guard.
+So on a fresh cluster the operator install component fails at the `helm show crds` / `helm install` step with a `401 Unauthorized` / `unauthorized: access to the requested resource is not authorized` from quay — **before any pod, and therefore before any pull secret, is ever consulted.**
 
-**Concrete break already in the repo:** `cluster_init/app-store-cluster-init.yaml` has shell scripts in multiple `kubernetesManifest:` blocks (lines 143-158) containing `$CRDS`, `$CRD`, `$MISSING`, `$GATEWAY_API_URL`. These are shell environment variables — not substitution references. `string.Template.substitute()` raises `KeyError('CRDS')` on the first one. This CR will fail to deploy the instant the operator upgrade is applied, with no user action required to trigger the break.
+**Why it happens:**
+Conflation of two distinct auth surfaces that *look* identical (both consume a dockerconfigjson). "We put a quay pull secret in the namespace, so quay auth is handled" is intuitively true for images and intuitively (but wrongly) extended to chart pulls. Helm chart pull auth and Kubernetes image pull auth are separate subsystems (verified — Helm docs: "use `helm registry login`"; Kubernetes imagePullSecrets are for kubelet image pulls only).
 
-**Prevention:** Replace `if not variables` with a pre-scan for `${...}` patterns using `re.search(r'\$\{[^}]+\}', text)`. This makes render a pure no-op on texts that contain no `${...}` patterns, regardless of what is in the variables dict.
+**How to avoid:**
+The operator (which runs helm) must authenticate to quay before the OCI chart pull. Options, in order of preference:
+1. **Have the operator run `helm registry login quay.io -u <user> -p <pass>` (or write `~/.config/helm/registry/config.json`) using the quay creds, immediately before any `oci://quay.io/...` chart operation.** This is a real operator change — it directly contradicts Decision C's "no operator change required for auth." Pass the creds to the operator via the same quay secret (mounted/read by the operator pod), not via the manifest text.
+2. Alternatively, pass `--registry-config <path>` pointing at a config.json the operator materializes from the quay secret, on every `helm install`/`helm upgrade`/`helm show crds` invocation for OCI refs. This is more surgical than a global `helm registry login` and avoids mutating shared helm home state.
+3. Have the GUI/operator detect a pre-existing `helm registry login` on the operator pod (rare) and skip — but do not *rely* on it.
 
-```python
-_SUBST_RE = re.compile(r'\$\{[^}]+\}')
+Whatever the mechanism, the quay password must reach the operator's helm process, and `discover_chart_crds` (the very first quay touch, and `@lru_cache`d) must use the same auth or it will cache an empty CRD set on the first auth failure and never retry (see Pitfall 8).
 
-def render(text: str, variables: dict) -> str:
-    if not text or not _SUBST_RE.search(text):
-        return text  # fast path: no ${...} patterns present
-    return Template(text).substitute(variables)
-```
+**Warning signs:**
+- Operator-install component goes `Failed` with `unauthorized` / `401` / `denied` in the operator log, on a cluster where the dockerconfigjson secrets are present and correct.
+- `helm show crds` silently returns `{}` (it swallows `CalledProcessError`, `:685`), so CRD discovery quietly does nothing and the install proceeds without CRDs — then the WekaClient apply 404s later (Pitfall 4). The empty result is then cached.
 
-Shell scripts, PromQL, regex, env references all pass through untouched unless they contain `${...}` brace syntax. Note: bare `$IDENTIFIER` (without braces) is NOT a substitution pattern in this design — only `${IDENTIFIER}` is.
-
-**Warning signs:** `KeyError` on an ALL-CAPS name in `kopf.PermanentError` message (shell env vars are uppercase by convention). Any component that embeds bash, PromQL series queries, or annotation values containing `$`.
-
-**Phase to address:** Operator core — before any code is written. The guard logic is the foundation of backward compat.
-
----
-
-### Pitfall 2: `$oauthtoken` in NVIDIA NGC Credentials Breaks the "JSON is Safe" Claim
-
-**What goes wrong:** The PRD states "`string.Template` only matches `$identifier` and `${identifier}`. It leaves `{...}` alone." This is incomplete. The full truth is that `string.Template` leaves bare `{...}` alone but DOES match bare `$identifier` patterns — and `$oauthtoken` is a valid Python identifier. NVIDIA NGC's Docker credential format uses the literal string `$oauthtoken` as the username: `{"auths":{"nvcr.io":{"username":"$oauthtoken","password":"TOKEN"}}}`. If this JSON is stored in a `kubernetesManifest:` using `stringData:` (plaintext), `Template.substitute()` raises `KeyError('oauthtoken')`.
-
-**Confirmed by experiment:** `Template('{"auths":{"nvcr.io":{"username":"$oauthtoken"}}}').substitute({'namespace': 'foo'})` raises `KeyError: 'oauthtoken'`.
-
-**Root cause:** The PRD's "JSON-safe" reasoning only accounts for curly-brace interference, not for `$identifier` patterns embedded in JSON string values.
-
-**Prevention (two layers):**
-1. If the fast-path guard from Pitfall 1 is implemented (only run Template when `${...}` is present), this issue is fully mitigated — `$oauthtoken` without braces is a bare `$identifier` pattern which the `_SUBST_RE` fast-path does not match, so Template is never called on such content.
-2. As a defense-in-depth migration strategy: store the `.dockerconfigjson` value as base64 in the Secret's `data:` field rather than plaintext in `stringData:`. Base64 character set (A-Za-z0-9+/=) contains no `$`, so there is zero collision regardless of engine choice.
-
-**Warning signs:** A `kubernetesManifest` component creating a `kubernetes.io/dockerconfigjson` Secret using `stringData:` and NGC registry URL. Add a unit test: render the full AIDP `aidp-bootstrap-secrets` manifest with `variables = {'namespace': 'foo'}` and assert no exception and byte-identical output.
-
-**Phase to address:** Operator core (fast-path guard covers this) + AIDP migration (prefer `data:` not `stringData:` for NGC secrets as defense-in-depth).
+**Phase to address:**
+**Operator phase** (PRD "Phase 2 — Operator"). This phase is currently scoped as "confirm ordering, no auth change needed." That scope is wrong — re-scope it to *implement operator-side helm registry auth for OCI quay charts*. Flag for deeper research/spike before committing the v8.0 roadmap.
 
 ---
 
-### Pitfall 3: Variable VALUES Containing `${namespace}` Are Not Recursively Resolved
+### Pitfall 2: `echo "x" | base64` trailing-newline corruption (the just-fixed bug) reappearing in any hand-encoded path
 
-**What goes wrong:** The PRD Product Outcome shows `variables: {milvusHost: "milvus.${namespace}.svc.cluster.local"}` as a recommended pattern. Users reading this assume `milvusHost` resolves to `milvus.rag.svc.cluster.local`. It does not. The operator builds the variables dict once — `{'namespace': 'rag', 'milvusHost': 'milvus.${namespace}.svc.cluster.local'}` — and substitutes into the TEXT. When `${milvusHost}` in the text is replaced, it becomes the literal string `milvus.${namespace}.svc.cluster.local`. The `${namespace}` inside the value is never resolved because `Template.substitute` is single-pass.
+**What goes wrong:**
+`echo "value" | base64` encodes a trailing `\n`, so the decoded secret value is `value\n`. For WEKA creds this silently breaks auth: the CSI driver and WekaClient send `password\n` / `username\n` / a scheme of `http\n` to the WEKA API and get rejected, or the endpoints string parses with a stray newline. This already bit the committed templates (`weka-client-cluster-dev.yaml`, `csi-wekafs-api-secret.yaml`) and was fixed 2026-06-24 by re-encoding `username`/`password`/`endpoints`/`scheme`. The failure is *silent at apply time* — the secret applies cleanly; only the runtime WEKA login fails, far downstream and with an opaque "authentication failed" error.
 
-**Confirmed by experiment:** `Template('url: ${milvusHost}').substitute({'namespace': 'rag', 'milvusHost': 'milvus.${namespace}.svc.cluster.local'})` returns `'url: milvus.${namespace}.svc.cluster.local'` — the inner `${namespace}` is not resolved.
+**Why it happens:**
+`echo` appends a newline by default; `base64` faithfully encodes it. The base64 string still *looks* valid and the Secret object is well-formed, so nothing flags it until WEKA rejects the credential.
 
-**Root cause:** `string.Template.substitute` is single-pass, not recursive. The PRD's usage example implies cross-variable resolution that the implementation does not provide.
+**How to avoid:**
+- **Generated secrets must use `stringData`, not `data`** (PRD Decision; Goal 5). With `stringData`, the GUI puts the raw form value in and the API server base64-encodes it exactly — no manual `base64`, no `echo`, no newline class of bug. This is the correct call.
+- For the *one* field that still requires hand-assembled base64 — the quay `.dockerconfigjson` `auth` value (Pitfall 3) — never use shell `echo|base64`. Reuse the operator's `_b64()` helper (`operator_module/main.py:441`, `base64.b64encode(s.encode()).decode()`), which has no newline. The GUI builds the whole dockerconfigjson in Python and injects it as one `[[ quay_dockerconfigjson ]]` var (Decision B) — keep it that way.
+- Add a unit/round-trip test: for each generated secret, `base64decode(rendered) == raw_form_value` exactly (byte-for-byte, no trailing `\n`).
 
-**Prevention:** Either (a) implement a pre-resolution pass on the variables dict itself before substituting into text, or (b) remove the cross-referencing example from the PRD and README and require fully-resolved values: `milvusHost: milvus.rag.svc.cluster.local`. Option (b) is correct for v1. Cross-variable resolution is a v2 feature. Add a unit test asserting single-pass behavior so the limitation is intentional and documented.
+**Warning signs:**
+- WEKA API auth failures at WekaClient / CSI runtime despite "correct" credentials.
+- Any `| base64` in a script, Makefile, or template. Any committed `data:` field whose decode ends in a `\n` (e.g. base64 ending in `Cg==`).
 
-**Warning signs:** A user reports their DNS names contain literal `${namespace}` after deployment. The AIDP migration must use fully-resolved variable values or use `${namespace}` directly in the text, not inside another variable's value.
-
-**Phase to address:** Operator core + docs. README example must show fully-resolved variable values.
-
----
-
-### Pitfall 4: Bare `$identifier` Patterns Raise `ValueError` (Not `KeyError`) — Catch Both
-
-**What goes wrong:** When a manifest contains a malformed placeholder like `${}` or `${123}` (digit-start), `Template.substitute()` raises `ValueError: Invalid placeholder`, not `KeyError`. The proposed error handler only catches `KeyError` and re-raises as `kopf.PermanentError`. A `ValueError` propagates as a bare `Exception`, gets caught by the outer `except Exception as e` in the component loop (line 762), and produces `comp_status['message'] = "Error deploying component: Invalid placeholder in string: line X, col Y"` — no component name, no guidance on what to fix.
-
-Also affects: `$[regex]` patterns in PromQL queries embedded in ConfigMaps (e.g., the Prometheus adapter config in `cluster_init/`) — `$[A-Z]+` raises `ValueError` not `KeyError`. However, the Pitfall 1 fast-path guard prevents this if the ConfigMap content contains no `${...}` patterns.
-
-**Confirmed by experiment:** `Template('pattern: $[A-Z]+').substitute({'namespace': 'foo'})` raises `ValueError: Invalid placeholder in string: line 1, col 10`.
-
-**Root cause:** `string.Template` has two failure modes (`KeyError` for undefined vars, `ValueError` for syntactically invalid placeholders), and the PRD's error handler only accounts for one.
-
-**Prevention:** Catch both at the call sites where component name is in scope:
-
-```python
-try:
-    manifest_yaml = render(component['kubernetesManifest'], variables)
-except KeyError as e:
-    raise kopf.PermanentError(
-        f"Undefined ${{{e.args[0]}}} in component {comp_name}.kubernetesManifest")
-except ValueError as e:
-    raise kopf.PermanentError(
-        f"Invalid placeholder syntax in component {comp_name}.kubernetesManifest: {e}")
-```
-
-**Warning signs:** `PermanentError` whose message contains "Invalid placeholder" without a variable name. Unit test: `render('$[A-Z]+', {'namespace': 'foo'})` where text contains `${foo}` (so fast-path activates) should raise a catchable error, not silently return.
-
-**Phase to address:** Operator core.
+**Phase to address:**
+**Blueprint phase** (parameterize `weka-csi-config/` to `stringData`) + a guard test. **Backend phase** for the `quay_dockerconfigjson` builder.
 
 ---
 
-### Pitfall 5: `load_values_from_reference` Silently Swallows Fetch Errors While Render Errors Are Permanent — Asymmetry
+### Pitfall 3: dockerconfigjson `auth` field assembled wrong (the field that actually authenticates)
 
-**What goes wrong:** Currently `load_values_from_reference` catches all exceptions and returns `{}`. After this change, a `KeyError` from `render()` inside `load_values_from_reference` is re-raised as `kopf.PermanentError`. But a transient Kubernetes API error (ConfigMap temporarily unavailable, network blip, Secret not yet created) is still caught and returns `{}` silently — it does not raise. This creates an asymmetry: a typo in a variable name causes the CR to enter permanent Failed state with no retries, while a missing ConfigMap silently no-ops and produces a Helm install with empty values. The Helm install may succeed with wrong configuration.
+**What goes wrong:**
+A Kubernetes `kubernetes.io/dockerconfigjson` secret authenticates via `auths."quay.io".auth`, which must be `base64("username:password")` — and the *outer* `.dockerconfigjson` value is itself `base64(json)`. Three independent ways to get this wrong: (a) forget the inner `auth` and only set `username`/`password` (older Docker/containerd ignore them and fail to auth); (b) build `auth` with a newline (Pitfall 2) so `username:password\n` is sent and rejected; (c) double-encode or single-encode the wrong layer (forget the outer base64, or base64 the JSON twice). The reference implementation in this repo for NGC (`_derive_ngc_payloads`, `:499-509`) shows the correct shape: `auth = _b64(f"{user}:{pass}")`, then `.dockerconfigjson = _b64(json.dumps({"auths": {host: {username, password, auth}}}))`.
 
-**Root cause:** The existing error handling in `load_values_from_reference` prioritizes leniency over correctness. Adding strict substitution on top of lenient fetch creates a confusing failure mode.
+**Why it happens:**
+The two-layer base64 + the `user:password` concatenation is fiddly and easy to half-remember. The image-pull failure it produces (`ImagePullBackOff: 401 unauthorized`) is generic and doesn't point at the encoding.
 
-**Prevention:** Distinguish fetch errors from render errors:
+**How to avoid:**
+- Build the dockerconfigjson in Python by analogy to `_derive_ngc_payloads`, substituting host `quay.io`, `username = QUAY_USERNAME`, `password = QUAY_PASSWORD`, `auth = _b64(f"{QUAY_USERNAME}:{QUAY_PASSWORD}")`. Include all three of `username`, `password`, `auth`.
+- Inject the finished base64 dockerconfigjson as `[[ quay_dockerconfigjson ]]` into a `data:` field (it's already base64). Do **not** put it in `stringData` (that would double-encode).
+- Create both copies (`weka-operator-system` and `default`) from the same computed value.
+- Test: decode outer → JSON parses; `auths["quay.io"]["auth"]` decodes to exactly `QUAY_USERNAME:QUAY_PASSWORD` with no trailing bytes.
 
-```python
-# In load_values_from_reference, after the fetch:
-try:
-    values_yaml = render(values_yaml, variables)
-except KeyError as e:
-    raise kopf.PermanentError(
-        f"Undefined ${{{e.args[0]}}} in {kind}/{name} key={key}")
-except Exception as fetch_e:
-    logging.error(f"Error loading {kind}/{name}: {fetch_e}")
-    raise kopf.TemporaryError(
-        f"Could not fetch {kind}/{name}: {fetch_e}", delay=30)
-```
+**Warning signs:**
+- `ImagePullBackOff` / `401 unauthorized` pulling `quay.io/weka.io/...` images on the operator or WekaClient pods, despite a present `quay-pull-secret`.
+- `kubectl get secret quay-pull-secret -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d` shows missing `auth` or malformed JSON.
 
-`TemporaryError` causes kopf to retry with backoff — appropriate for transient Kubernetes API issues.
-
-**Warning signs:** Operator log showing `Error loading values from ConfigMap/X: ...` followed by a successful but wrong Helm install. Unit test: mock `kr8s.NotFound` exception and assert `TemporaryError` is raised, not silent `{}` return.
-
-**Phase to address:** Operator core.
+**Phase to address:**
+**Backend phase** (GUI dockerconfigjson builder) with a dedicated round-trip test.
 
 ---
 
-## Moderate Pitfalls
+### Pitfall 4: Applying the `WekaClient` CR before its CRD exists → 404 / "no matches for kind"
 
-### Pitfall 6: Variable Key Names With Hyphens or Leading Digits Produce `ValueError`
+**What goes wrong:**
+The `WekaClient` CR (`weka.weka.io/v1alpha1`, `wekaClientCR-online.yaml`) can only be applied after the WEKA operator's CRDs are installed *and registered in the API server's discovery cache*. If the AppStack applies it too early, `apply_gateway` gets a `404 NotFound` / `the server could not find the requested resource` / `no matches for kind "WekaClient"`. Note `apply_gateway` only special-cases `409` (already-exists → patch) for custom objects (`apply_gateway.py:301,323`); a `404` from a missing CRD is **not** handled and surfaces as a hard error, failing the component.
 
-**What goes wrong:** CRD `additionalProperties: { type: string }` constrains values to strings but imposes no restriction on key names. A user who names a variable `my-host` (hyphen) and writes `${my-host}` in a manifest gets `ValueError: Invalid placeholder` from `string.Template`, not `KeyError`. The variable is declared but unreachable by the template engine. Python `string.Template` identifiers must match `[_a-zA-Z][_a-zA-Z0-9]*`.
+**Why it happens:**
+CRD registration is asynchronous: even after `helm install` of the operator returns, the apiserver discovery cache can lag by seconds, and the operator Deployment (which may run conversion/validation webhooks) must be Ready. `dependsOn` alone (ordering the helm install before the CR) is necessary but **not sufficient** — you also need a readiness gate on the operator Deployment *and* ideally a poll that the CRD `weka.weka.io` is Established.
 
-**Root cause:** CRD schema permits arbitrary YAML map keys; `string.Template` is restricted to Python-valid identifiers.
+**How to avoid:**
+- `dependsOn: [weka-operator]` on the `weka-client` component (PRD already plans this).
+- Add `readinessCheck: { type: deployment, name: <operator deployment>, namespace: weka-operator-system }` so the WekaClient apply waits for operator pods Ready, not just for `helm install` to return.
+- Belt-and-suspenders: a short poll that the `WekaClient` CRD is present/Established before applying the CR (the operator already has `list_existing_crds()`, `:707`, and `discover_chart_crds()` for exactly this). Since the operator installs CRDs from the chart, confirm those two are wired into the gating.
+- Ensure the `weka-client-secret` (`wekaSecretRef: weka-client-cluster-dev`, step 6) and the `quay-pull-secret` (`imagePullSecret: quay-io-secret`) exist **before** the WekaClient CR — a WekaClient referencing a missing secret will sit unready.
 
-**Prevention:** Add key-name validation in the operator when building the variables dict:
+**Warning signs:**
+- Component `weka-client` `Failed` with `no matches for kind "WekaClient"` / `404` shortly after operator install "succeeded."
+- Intermittent failures that pass on retry (classic discovery-cache lag).
 
-```python
-_VALID_VAR_NAME = re.compile(r'^[_a-zA-Z][_a-zA-Z0-9]*$')
-for k in (app_stack.get('variables') or {}):
-    if not _VALID_VAR_NAME.match(k):
-        raise kopf.PermanentError(
-            f"Variable name '{k}' is not a valid identifier "
-            f"(must match [_a-zA-Z][_a-zA-Z0-9]*)")
-```
-
-**Warning signs:** User reports `ValueError: Invalid placeholder` on a manifest that has no obvious bad placeholders. Unit test: variables dict with key `my-host` triggers PermanentError before any substitution.
-
-**Phase to address:** Operator core + docs. Mention valid identifier requirement prominently in README.
+**Phase to address:**
+**Operator phase** (confirm CRD-Established + Deployment-Ready gating) and **Blueprint phase** (`dependsOn` + `readinessCheck` wiring).
 
 ---
 
-### Pitfall 7: `$$` Escape Semantics Are Counter-Intuitive — Doc Strategy
+### Pitfall 5: Default-StorageClass conflict — two default StorageClasses on the cluster
 
-**What goes wrong:** `string.Template` treats `$$` as an escape for a single literal `$`. So a YAML value `p$$w0rd` renders to `p$w0rd`. Users with a real password containing `$$` must write `p$$$$w0rd` to get `p$$w0rd`. Users who have a password `p$w0rd` and don't know about escaping will write it literally — `$w0rd` matches as a `$identifier` pattern, raising `KeyError('w0rd')`. The behavior is correct per the stdlib spec but non-obvious.
+**What goes wrong:**
+The wizard marks `storageclass-wekafs-dir-api` with `storageclass.kubernetes.io/is-default-class: "true"` (`storageclass-wekafs-dir-api.yaml:6`). On a brownfield cluster that already has a default StorageClass (EKS `gp2`/`gp3`, AKS `default`, etc.), this creates **two** defaults. Kubernetes does not reject this — it tolerates multiple defaults but the behavior for a PVC with no explicit `storageClassName` becomes effectively undefined (newer apiservers pick the most-recently-created, older ones may warn/error). The result is non-deterministic PVC binding that surfaces much later, in workloads, not in the install.
 
-**Confirmed by experiment:** `Template('password: p$$word').substitute({'namespace': 'foo'})` returns `'password: p$word'`.
+**Why it happens:**
+The template hard-codes `is-default-class: "true"` and the install just applies it; nobody checks the cluster's current default.
 
-**Root cause:** The `$$` escape is standard Python `string.Template` behavior but is not widely known among Kubernetes operators.
+**How to avoid:**
+- Before applying, **detect an existing default StorageClass** (the App Store already has `inspect_cluster` / MCP storage-class listing; `apply_gateway` handles `StorageClass` as cluster-scoped, `:24`). If one exists, either: (a) surface a wizard warning and ask the user to confirm switching the default to wekafs, then patch the old default's annotation to `"false"` as part of install; or (b) install wekafs as non-default and let the user opt in.
+- Because StorageClass is cluster-scoped and `apply_gateway` does create→409→patch, **re-running the wizard re-patches** the annotation — fine, but make sure a re-run doesn't flip a user's manual choice back (Pitfall 9).
+- Also verify the StorageClass `provisioner-secret-name`/`-namespace` (`csi-wekafs-api-secret` / `csi-wekafs`, `:22-31`) match the secret actually created in step 7 — a name/namespace mismatch yields PVCs stuck `Pending` with `secret not found`, again only visible at first PVC, not at install.
 
-**Prevention:** The README must include an explicit escape table:
+**Warning signs:**
+- `kubectl get sc` shows two classes annotated `is-default-class: true`.
+- Later: PVCs with no `storageClassName` bind to the wrong provisioner, or the apiserver logs "multiple default StorageClasses."
+- PVCs `Pending` with `failed to provision volume ... secret "csi-wekafs-api-secret" not found`.
 
-| In YAML source | Rendered value |
-|----------------|----------------|
-| `p$$word` | `p$word` (one dollar — the intended result for most passwords) |
-| `p$$$$word` | `p$$word` (two dollars) |
-| `p$word` | `KeyError('word')` — must escape the `$` |
-
-Recommend that `valuesFiles:` Secret content with literal `$` characters use the Secret's `data:` field (base64-encoded), which has no `$` and requires no escaping.
-
-Unit tests needed: `render('p$$w0rd', {'namespace': 'x'}) == 'p$w0rd'` and `render('p$$$$w0rd', {'namespace': 'x'}) == 'p$$w0rd'`.
-
-**Phase to address:** Docs + tests. No code change required — behavior is correct, only documentation and test coverage needed.
-
----
-
-### Pitfall 8: Validator Soft-Warning on `*.svc.cluster.local` Triggers on Legitimate External Hostnames
-
-**What goes wrong:** The PRD proposes a soft-warning when a CR contains hardcoded `*.svc.cluster.local` strings, suggesting `${namespace}` as a replacement. A customer whose cluster domain is not `cluster.local` (e.g., `cluster.internal`, common in GKE) or who has an intentional literal hostname will receive a spurious warning on a correctly-authored CR.
-
-**Root cause:** The pattern `*.svc.cluster.local` is a reliable heuristic for in-cluster DNS but not universal.
-
-**Prevention:** Tighten the warning message to be clearly advisory:
-
-> "Informational: detected what appears to be an in-cluster service DNS name (`milvus.rag.svc.cluster.local`). If this namespace portion should vary per deployment, consider replacing it with `${namespace}`. Safe to ignore if intentional or if your cluster DNS domain differs from `cluster.local`."
-
-Keep this strictly in the `warnings` list, never `errors`. Never block `valid=True` on this heuristic.
-
-**Phase to address:** Validator.
+**Phase to address:**
+**Backend phase** (existing-default detection + warning) and **Blueprint phase** (secret name/namespace consistency between StorageClasses and the CSI API secret).
 
 ---
 
-### Pitfall 9: Variables Map Change Between Reconciles Orphans Resources in the Prior Namespace
+### Pitfall 6: Secrets leaking into the SSE log stream / CR annotations
 
-**What goes wrong:** When a user changes `variables: {namespace: rag}` to `variables: {namespace: rag-prod}`, kopf fires `on.update` which calls `handle_appstack_deployment` with the new variables. The operator re-applies manifest components with namespace `rag-prod`. Resources previously created in `rag` remain — the operator has no record of prior deployment namespace and does not clean up. For `helmChart` components, Helm releases are scoped per-namespace; changing the namespace effectively creates a new release in the new namespace while the old release persists.
+**What goes wrong:**
+The wizard handles the most sensitive values in the system: the quay robot token and the WEKA cluster password. Several existing code paths can leak them:
+1. **CR annotation echo.** `/deploy-stream` stamps the *entire* submitted `variables` dict onto the CR as `warp.io/gui-variables` annotation (`main.py:2935`) so the blueprint page can show them later. If the wizard passes `quay_password`/`weka_password`/`quay_dockerconfigjson` as plain variables, they get written **in clear text** into a cluster annotation readable by anyone with `get wekaappstores`.
+2. **SSE component messages.** The stream emits `comp.get("message","")` from operator `componentStatus` verbatim (`:2984`). If the operator logs a failed `helm install`/`kubectl apply` command line that includes a secret (e.g., a `--set` with a password, or an apply error echoing the manifest), it flows straight to the browser log box.
+3. **Operator helm errors.** `_install_chart` returns `result.stderr or result.stdout` on failure (`:172`) into the component message — a quay 401 page or helm error can include the registry ref and sometimes credentials.
 
-**Root cause:** The operator re-renders on every reconcile but has no "previous state" for cleanup. This is a pre-existing behavior amplified by a namespace variable.
+**Why it happens:**
+The annotation-stamping and message-passthrough were built for non-secret blueprint variables in v7.0; the wizard introduces secrets into the same generic pipeline without redaction.
 
-**Prevention (scoped to this PRD):** Add a clear warning to the README: "Changing `variables.namespace` after initial deployment does not migrate or clean up resources in the prior namespace. Manual cleanup is required." Optionally record `status.appStackVariablesSnapshot` on each successful reconcile so users can see what the last applied values were. Full migration support is out of scope for v5.0.
+**How to avoid:**
+- **Do not stamp secret variables onto the CR annotation.** Maintain an allowlist (or denylist) of variable names excluded from `warp.io/gui-variables` — exclude `*password*`, `*token*`, `*secret*`, `quay_dockerconfigjson`. The blueprint-page "show submitted variables" feature must mask these.
+- **Never pass raw creds as `--set` to helm** (they'd appear in process args / logs). They go into `stringData` secrets and the `data` dockerconfigjson only.
+- **Redact component messages before emitting SSE.** Scrub the emitted `message` for anything matching the known secret values / their base64 before `yield sse_event`. At minimum, the operator must never log the secret manifests (the existing `NEVER log` discipline, `:490`,`:520`,`:538`, must extend to the new quay/weka creds).
 
-**Phase to address:** Docs (immediate). Status snapshot field is optional enhancement.
+**Warning signs:**
+- `kubectl get wekaappstore <name> -o jsonpath='{.metadata.annotations.warp\.io/gui-variables}'` shows a password.
+- A password/token visible in the browser log box, operator pod logs, or `kubectl describe`.
 
----
-
-### Pitfall 10: Bare `@kopf.on.update` Fires on Status Patches — Reconcile Storm Risk
-
-**What goes wrong:** `@kopf.on.update` (line 1015) fires on any update to the CR, including status subresource patches made by the operator itself. When `handle_appstack_deployment` writes to `patch.status`, kopf issues a status patch, which fires `on.update`, which calls `handle_appstack_deployment` again. With a fast-path guard and idempotent `helm upgrade`, this may be tolerable, but it wastes resources and creates confusing log noise. Adding a `status.appStackVariablesSnapshot` field (from Pitfall 9) worsens this if not addressed.
-
-**Root cause:** Kopf distinguishes `spec` updates from `status` updates only when the handler is filtered with `field=`. The current bare `@kopf.on.update` does not filter.
-
-**Prevention:** Add `field='spec'` to the update decorator:
-
-```python
-@kopf.on.update('warp.io', 'v1alpha1', 'wekaappstores', field='spec')
-def update_warrpappstore_function(body, spec, name, namespace, status, patch, **kwargs):
-```
-
-This is a pre-existing issue but the variables feature adds new status writes that amplify it.
-
-**Warning signs:** Operator logs showing rapid successive reconcile cycles for the same CR after a deploy completes. Unit/integration test: perform a `kubectl patch --subresource status` and assert the update handler is NOT triggered.
-
-**Phase to address:** Operator core. Worthwhile to fix regardless of the variables feature.
+**Phase to address:**
+**Backend phase** (annotation allowlist + SSE message redaction) and **Frontend phase** (mask in the review step and any replay of variables). PRD Success Criterion 4 ("No secret values appear in logs") makes this a release gate — verify explicitly.
 
 ---
 
-## Minor Pitfalls
+### Pitfall 7: Long install exceeds the 15-minute SSE deadline and/or proxy idle timeout
 
-### Pitfall 11: Validator Does Not Inspect `variables:` Keys or Values — False Negatives Before Apply
+**What goes wrong:**
+`/deploy-stream` caps the poll loop at `deadline = time.time() + 900` (15 min, `main.py:2956`) and on timeout emits `{type:"error", message:"Timed out waiting for components to become ready"}`. The v8.0 install is *much* longer than any prior blueprint: quay chart pulls, operator CRD+Deployment rollout, node-label Job across all nodes, **WekaClient pulling the multi-GB `weka-in-container:5.1.0.605` image and joining the backend**, CSI rollout, then StorageClasses. WekaClient readiness alone (image pull + cluster join + driver build) can easily exceed 15 minutes on a fresh node. When the deadline fires, the GUI shows a hard failure even though the install is still progressing successfully in the background — and the operator keeps going, so the user sees "failed" on a stack that then becomes Ready.
 
-**What goes wrong:** `_validate_yaml_impl` in `validate_yaml.py` has no awareness of `spec.appStack.variables`. A CR with `variables: {my-host: foo}` (invalid identifier key), `variables: {namespace: null}` (null value), or `variables: [list]` (wrong type) passes `validate_yaml` with `valid: True`. The user receives no feedback until the operator fails at runtime.
+Separately, even with the existing `: ping\n\n` keepalive (`:2963`), an ingress/load-balancer **idle or total-request timeout** (e.g., nginx `proxy_read_timeout` default 60s, ALB idle 60s, many ingress `proxy-read-timeout` ~300s) can sever the SSE connection between events. The 2s keepalive defends idle timeouts but **not** a hard max-request-duration cap some proxies impose.
 
-**Prevention:** Add to `_validate_yaml_impl`:
+**Why it happens:**
+The 900s constant was sized for short app-stack blueprints, not a full storage-stack bring-up including large image pulls and a cluster join. Proxy timeouts are environment-specific and invisible in dev.
 
-```python
-variables = (app_stack or {}).get('variables') or {}
-if not isinstance(variables, dict):
-    errors.append({'code': 'invalid_variables_type', 'path': '...variables',
-                   'message': 'spec.appStack.variables must be a map'})
-else:
-    for k, v in variables.items():
-        if not re.match(r'^[_a-zA-Z][_a-zA-Z0-9]*$', k):
-            errors.append({'code': 'invalid_variable_name', 'path': f'...variables.{k}',
-                           'message': f"Variable name '{k}' must match [_a-zA-Z][_a-zA-Z0-9]*"})
-        if not isinstance(v, str):
-            errors.append({'code': 'invalid_variable_value_type', 'path': f'...variables.{k}',
-                           'message': f"Variable value for '{k}' must be a string"})
-```
+**How to avoid:**
+- **Raise the deadline** for `app-store-install` specifically (e.g., 45–60 min), or make it per-blueprint configurable rather than a global 900s. The PRD already flags this.
+- Keep the 2s keepalive `: ping` (already present) and confirm it flushes (it does — it's `yield`ed). Document required ingress settings: `proxy-read-timeout` / idle timeout >= the deadline, and disable response buffering for `text/event-stream` (nginx `proxy_buffering off` / `X-Accel-Buffering: no` header).
+- **Make timeout non-destructive:** on deadline, the GUI should treat it as "still installing — reconnect" rather than "failed." Because the operator drives state on the CR, the stream is just an observer; a disconnect/timeout should reconnect and resume from current `componentStatus`, not abort. The `complete ok:false` path (`:2994`) should remain reserved for actual operator `Failed`.
+- Raise `HELM_CMD_TIMEOUT` in the operator too — `_install_chart` has its own subprocess timeout (`:161`, `helm_cmd_timeout`) that, if shorter than the chart's hook/CRD wait, fails the helm step independently of the SSE deadline.
 
-**Phase to address:** Validator.
+**Warning signs:**
+- Browser shows "Timed out waiting for components" while `kubectl get wekaappstore` still shows `appStackPhase: Pending`/progressing.
+- "Stream connection error" in the browser mid-install (proxy cut the connection).
+- Operator log: "Helm install timed out after Ns" (the operator subprocess timeout, distinct from SSE).
 
----
-
-### Pitfall 12: Tempfile Contains Rendered Secret Values — Verify Call Order
-
-**What goes wrong:** The manifest component branch writes `component['kubernetesManifest']` to a tempfile. After this change, the RENDERED manifest (with substituted values) is written. If a future refactor writes to the tempfile BEFORE calling `render()` (e.g., to avoid re-rendering on retry), unrendered content with `${...}` placeholders persists on disk without cleanup if `render()` then raises.
-
-**Prevention:** As proposed, call `render()` first, then write to tempfile, with tempfile creation inside the `try` block. Add a code comment: "render() must precede tempfile creation — prevents plaintext secret values persisting on render failure." Add a unit test that induces a `KeyError` in `render()` and asserts no tempfile exists after the exception.
-
-**Phase to address:** Operator core — code review checkpoint.
+**Phase to address:**
+**Backend phase** (raise/per-blueprint SSE deadline; reconnect-on-timeout semantics; document ingress requirements) and **Operator phase** (confirm `HELM_CMD_TIMEOUT` >= worst-case chart install).
 
 ---
 
-### Pitfall 13: Single-Helm Path (`handle_helm_deployment`) Not Patched for Substitution
+### Pitfall 8: `discover_chart_crds` LRU cache poisons CRD discovery after a transient/auth failure
 
-**What goes wrong:** `handle_helm_deployment` (line 833+) calls `load_values_from_reference` for top-level `spec.valuesFiles` (the non-AppStack, single-chart path). The variables dict is built only inside `handle_appstack_deployment`. If a user applies `${...}` in a non-AppStack `valuesFiles:` ConfigMap, no substitution occurs and the unresolved placeholder string is passed to Helm as-is — no error, silent wrong configuration.
+**What goes wrong:**
+`discover_chart_crds` is `@lru_cache(maxsize=128)` (`operator_module/main.py:673`) and returns `set()` (empty) on **any** `helm show crds` failure (`:685-688`). On a fresh install the very first call hits quay; if it fails for auth (Pitfall 1) or a transient network blip, the **empty set is cached against `(chart_ref, version)`** and every subsequent reconcile reuses the cached empty result — so the operator believes the chart ships no CRDs and never installs them, even after auth is fixed. The WekaClient apply then 404s (Pitfall 4) and the only fix is restarting the operator pod to clear the cache.
 
-**Prevention:** Either (a) thread `variables` through to `handle_helm_deployment` as well (extend the scope of v5.0), or (b) explicitly document and test that `${VAR}` substitution in `valuesFiles:` is only supported inside `appStack:` components. Add a unit test that locks whichever behavior is chosen.
+**Why it happens:**
+`lru_cache` is meant for a stable pure function, but `helm show crds` against a remote registry is neither pure nor reliably successful; caching the failure as a legitimate empty result conflates "no CRDs" with "couldn't fetch CRDs."
 
-**Phase to address:** Operator core. Scope decision should be explicit in the plan.
+**How to avoid:**
+- Don't cache failures: only memoize a **non-empty** successful result, or distinguish "fetched, empty" from "fetch failed" (raise/return sentinel on failure so it isn't cached). Since Pitfall 1 must be fixed in the same operator phase, fix the cache semantics alongside the auth fix.
+- Verify auth (Pitfall 1) happens *before* the first `discover_chart_crds` call so the first call succeeds.
+
+**Warning signs:**
+- Operator installed "successfully" but `kubectl get crd | grep weka.weka.io` shows nothing; WekaClient 404s; problem persists across reconciles until operator pod restart.
+
+**Phase to address:**
+**Operator phase** (bundle with the Pitfall 1 auth fix).
 
 ---
+
+### Pitfall 9: Non-idempotent re-run after a partial failure (node-label Job, secrets, StorageClasses, chained CRs)
+
+**What goes wrong:**
+PRD Success Criterion 5 requires re-running the wizard on a partially- or fully-installed cluster to be safe. Several components are not automatically idempotent:
+1. **Node-label Job** (`node-label-job`, `kubectl label nodes --all weka.io/supports-clients=true`). A plain `kubectl label` **fails on re-run** with `label already has value` unless `--overwrite` is passed; a `Job` object with the same name also can't be re-created (immutable `spec.template`) — the second apply gets a 409 and, unlike CRs, `apply_gateway` doesn't patch arbitrary `Job` kinds (or patching an immutable Job spec fails).
+2. **Secrets via `stringData`** re-apply fine (create→409→patch handles them), good.
+3. **StorageClass** is largely immutable (`parameters`, `provisioner` can't be patched); a create→409→patch on an SC whose parameters changed will fail — re-running with different WEKA endpoints won't update the SC.
+4. **Chained CRs** (Decision D): if `app-store-install` partially failed, re-running must re-drive the *same* CR (create→409→patch, supported for WekaAppStore) rather than spawn cluster-init prematurely. The GUI must wait for `app-store-install` Ready before applying `cluster-init` on **every** run, including re-runs.
+
+**Why it happens:**
+`kubectl label` and `Job`/`StorageClass` immutability are classic non-idempotent Kubernetes objects; the AppStack create-or-patch path is proven for CRs and Secrets but not for Jobs/immutable kinds.
+
+**How to avoid:**
+- Node-label Job: use `kubectl label nodes --all weka.io/supports-clients=true --overwrite` and give the Job a re-run strategy — delete-then-create on reconcile, `generateName`, or treat a completed Job as success and skip. Precedent: the existing `gateway-api-crds-job` (PRD step 4) — confirm *that* job is itself idempotent before copying it.
+- StorageClass: on a parameters change, delete-and-recreate (cluster-scoped, no PVCs depend on the SC object's identity) rather than patch — but guard against deleting an in-use default. For v8.0's "fresh install" target this is low risk; day-2 SC re-config is out of scope (PRD Non-Goals).
+- Make the wizard re-entrant: detect already-installed components via `/cluster-info` (operator CRDs + CSI deployment, `main.py:2361`) and offer to skip/resume rather than blindly re-apply.
+
+**Warning signs:**
+- Re-run fails at `node-label-job` with `Job already exists` / `field is immutable`, or `kubectl label` non-zero exit `already has value`.
+- Re-run with changed endpoints leaves stale StorageClass parameters (PVCs still point at old WEKA endpoints).
+
+**Phase to address:**
+**Blueprint phase** (`--overwrite` on label job; Job re-run strategy) and **Backend/Frontend phase** (resume/skip on detected install). **E2E phase** must explicitly test re-run.
+
+---
+
+### Pitfall 10: Auto-restarting kubelet to apply CPU-manager/hugepage config (why Decision A1 keeps it manual)
+
+**What goes wrong:**
+Applying the WEKA node prerequisites — CPU Manager `static` policy, `strict-cpu-reservation`, hugepages `25000` — **cannot take effect without restarting kubelet**, and changing the CPU manager policy from `none`→`static` additionally requires *deleting the kubelet CPU manager state file* (`/var/lib/kubelet/cpu_manager_state`) or kubelet refuses to start with a "policy changed" error (verified — Kubernetes docs: drain node → stop kubelet → remove state file → edit config → start kubelet). If the App Store tried to automate this (privileged DaemonSet writing kubelet config + restarting kubelet), a mistake bricks every node's kubelet simultaneously — an outage of the entire cluster, including the App Store itself and tenant workloads. There is no safe rollback once kubelet won't start.
+
+**Why it happens:**
+The temptation to "fully automate the install" extends to node config, but node-level kubelet mutation is a fundamentally different blast radius than applying namespaced manifests.
+
+**How to avoid:**
+- **Keep Decision A1: documented manual prerequisite + confirm checkbox.** The App Store displays the required `KubeletConfiguration` snippet and gates install behind "I have applied node prerequisites." It does **not** write node config or restart kubelet.
+- Optionally *verify* (read-only) that hugepages are present before declaring success — e.g., the operator/`inspect_cluster` can check `node.status.capacity["hugepages-2Mi"]` and warn if zero — verification only, never mutation.
+- If a customer skips the prereq, WekaClient pods fail to get hugepages and sit unready; surface that as a clear "node prerequisites not applied" message rather than a generic pod-pending.
+
+**Warning signs:**
+- WekaClient pods `Pending`/`CrashLoopBackOff` with `insufficient hugepages` or CPU-pinning errors.
+- Any proposal to add a privileged DaemonSet that restarts kubelet — reject for v8.0.
+
+**Phase to address:**
+**Frontend phase** (Step 1 snippet + confirm checkbox, already in PRD). Optionally **Operator/Backend** for read-only hugepage verification. Decision A1 already prevents the dangerous path — the pitfall is *re-introducing* automation later.
+
+---
+
+## Technical Debt Patterns
+
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Rely on quay pull secrets for chart pull (Decision C as written) | No operator change | Install fails 401 on every fresh cluster; feature is dead-on-arrival | **Never** — must do helm registry auth in the operator |
+| Hand-encode any secret with `echo\|base64` | Quick | Trailing-newline auth failures, silent until WEKA login (already bit twice) | Never — use `stringData` / `_b64()` |
+| Global 900s SSE deadline reused for the long install | No new config | False "timeout" failures mid-install; users abort a working install | Only as a stopgap with a clear "still installing, reconnect" UX |
+| Stamp full `variables` dict (incl. secrets) onto CR annotation | Reuse v7.0 replay feature | Cleartext creds in cluster annotations; fails Success Criterion 4 | Never for secret fields — allowlist required |
+| Plain `kubectl label` (no `--overwrite`) in node-label Job | Matches manual step | Re-run fails; non-idempotent | Never — always `--overwrite` |
+| `lru_cache` over `helm show crds` including failures | Avoids repeat remote calls | Caches an auth/network failure as "no CRDs"; needs pod restart | Only if failures are excluded from the cache |
+| StorageClass default hard-coded `true`, no existing-default check | Simpler blueprint | Dual-default ambiguity on brownfield clusters | Only if wizard warns + lets user opt out |
 
 ## Integration Gotchas
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| `kubectl apply` + `kubernetesManifest` | Rendering after tempfile write creates a race where rendered secrets could persist | Call `render()` to get a string, then write the rendered string to tempfile, then `kubectl apply` |
-| Helm + `valuesFiles` | Assuming Helm does `{{ }}` expansion on values content | Helm does NOT expand values; our `${VAR}` render happens before `yaml.safe_load`, Helm receives a resolved dict — zero collision |
-| Kubernetes API + CRD validation | `variables: {port: 5432}` — integer passes CRD `type: string` if schema is malformed | Use `additionalProperties: {type: string}` correctly; add operator-side `isinstance(v, str)` check as defense |
-| Kopf status patches + `on.update` | Status updates trigger re-deployment loop | Add `field='spec'` filter on `@kopf.on.update` |
-| NGC Docker secrets | `$oauthtoken` in `stringData:` is a bare `$identifier` pattern | Fast-path guard prevents this; defense-in-depth: store in `data:` as base64 |
+| quay.io OCI **chart** pull (operator helm) | Assuming dockerconfigjson pull secret authenticates `helm pull`/`helm show crds` | `helm registry login quay.io` or `--registry-config` in the operator before any `oci://quay.io/...` op (Pitfall 1) |
+| quay.io **image** pull (kubelet) | Wrong/missing `auth` field in dockerconfigjson; newline in `auth` | `auth = base64("user:pass")` no newline; include username/password/auth (Pitfall 3) |
+| WEKA API (CSI + WekaClient) | Trailing `\n` in creds/scheme/endpoints from `echo\|base64` | `stringData`; round-trip test decode == input (Pitfall 2) |
+| WEKA operator CRD registration | Applying `WekaClient` right after `helm install` returns | Gate on operator Deployment Ready + CRD Established, not just install order (Pitfall 4) |
+| CSI public chart (`csi-wekafs/csi-wekafsplugin`) | Treating it like the quay chart (auth) | Public repo, no auth — but it *is* a non-OCI `helm repo add` path; confirm `_add_repo` runs for it |
+| StorageClass ↔ CSI API secret | SC references a `secretName`/`secretNamespace` not yet created or mismatched | Apply `csi-wekafs-api-secret` in `csi-wekafs` ns before SCs; verify names match (`:22-31`) |
+| Ingress/LB in front of SSE | Default proxy idle/total timeout < install duration; response buffering on | `proxy-read-timeout` >= deadline; `proxy_buffering off` / `X-Accel-Buffering: no` (Pitfall 7) |
 
----
+## Performance Traps
+
+| Trap | Symptoms | Prevention | When It Breaks |
+|------|----------|------------|----------------|
+| 15-min SSE cap vs multi-GB WekaClient image pull + cluster join | "Timed out" while install still progressing | Per-blueprint deadline 45–60 min; reconnect-on-timeout | First real install on a node with cold image cache / slow registry |
+| Operator `HELM_CMD_TIMEOUT` shorter than chart hook/CRD wait | "Helm install timed out after Ns" in operator log | Raise `HELM_CMD_TIMEOUT` for operator chart | Operator chart with pre-install hooks / many CRDs |
+| Node-label Job over `--all` nodes on large clusters | Job slow / partial on big node counts | Readiness-gate the Job; `--overwrite`; idempotent re-run | Clusters with many/eventually-joining nodes |
+| `discover_chart_crds` cached empty after transient failure | CRDs never install; persists across reconciles | Exclude failures from cache | Any flaky/auth-failing first call (Pitfall 8) |
 
 ## Security Mistakes
 
 | Mistake | Risk | Prevention |
 |---------|------|------------|
-| `KeyError.args[0]` leaks variable name in error message | Variable NAME leaks (e.g., `postgresPassword`) — not the value. Acceptable. | Verified: `Template.substitute` raises `KeyError(key_name)`, not `KeyError(value)`. The error message `f"Undefined ${{{e.args[0]}}} in component X"` is safe. |
-| Rendered Secret content in `comp_status['message']` | If `ValueError` from bad placeholder propagates to the generic handler, `str(e)` contains only positional info (line/col), never variable values | Verified safe — `ValueError.__str__()` is positional only |
-| Rendered manifest written to `/tmp` | Rendered Secret `stringData` values on disk during `kubectl apply` | Python `tempfile.NamedTemporaryFile` creates mode 0600 on Linux; the `finally` block deletes the file. Acceptable risk. In-memory pipe to `kubectl apply --stdin` is a future hardening option. |
-| Logging `str(e)` for exception from `render()` | If exception carries a value reference (not possible with Template), it could log secrets | `KeyError.__str__()` returns the key name quoted. `ValueError.__str__()` returns position text. Neither contains variable values. Safe. |
+| Quay token / WEKA password stamped into `warp.io/gui-variables` CR annotation | Cleartext creds readable by anyone with `get wekaappstores` | Allowlist excludes secret vars from the annotation (Pitfall 6) |
+| Secret values flowing through SSE `message` / operator stderr to browser | Creds shown in browser log box, operator logs | Redact emitted messages; honor "NEVER log" contract for new creds |
+| Passing creds as helm `--set` | Creds in process args / `ps` / logs | Creds only via `stringData` secrets + dockerconfigjson `data` |
+| Storing WEKA creds long-term without scoping | Broad standing access | Consider `WarpCredential` pattern (existing) with least-privilege; PRD notes reuse |
+| Quay robot token with more than pull scope | Token leak → registry write access | Use a pull-only robot account for `QUAY_PASSWORD` |
 
----
+## UX Pitfalls
+
+| Pitfall | User Impact | Better Approach |
+|---------|-------------|-----------------|
+| Hard "failed" on SSE timeout of a still-running install | User re-runs / aborts a healthy install | "Still installing — reconnecting" with resume from `componentStatus` |
+| Generic pod-pending error when node prereqs were skipped | User can't tell it's a node-config issue | Detect missing hugepages; message "apply node prerequisites (Step 1)" |
+| Silent dual-default StorageClass | Later workloads bind to wrong storage, no install-time signal | Warn at review step if a default SC already exists; let user choose |
+| One endpoints field feeding both YAML-list and comma-string forms, mis-parsed | WekaClient `joinIpPorts` or CSI `endpoints` malformed | Single helper produces both forms; validate `host:port` per entry before submit |
+| Re-run blindly re-applies everything | Confusing failures on immutable Job/SC | Detect installed components via `/cluster-info`, offer skip/resume |
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **Backward compat gate:** Run `render(manifest, {'namespace': 'kube-system'})` on each of the 8 `kubernetesManifest` blocks in `cluster_init/app-store-cluster-init.yaml` and assert byte-identical output
-- [ ] **NGC secret:** Render the full `aidp-bootstrap-secrets` manifest with `variables={'namespace': 'rag'}` — assert no exception and byte-identical output (covers `$oauthtoken` in any `stringData:` form)
-- [ ] **Shell script passthrough:** Unit test `render('for X in $LIST; do echo $X; done', {'namespace': 'foo'})` returns the input unchanged (fast-path guard because no `${...}`)
-- [ ] **`$$` escape:** Unit test `render('p$$w0rd', {'namespace': 'x'}) == 'p$w0rd'`
-- [ ] **Nested variable values:** Unit test that `${milvusHost}` where `milvusHost='milvus.${namespace}.svc'` produces `'milvus.${namespace}.svc'` in output (inner `${namespace}` unresolved — single-pass documented)
-- [ ] **TypeError guard:** Unit test `variables = {'namespace': 'x', 'port': 5432}` (int value) does not crash; Template str()-coerces it
-- [ ] **Kopf update handler scope:** Verify status patch to the CR does NOT trigger re-deployment (requires `field='spec'` filter)
-- [ ] **Single-helm path decision:** Unit test or explicit doc locks whether `handle_helm_deployment` also substitutes or explicitly does not
+- [ ] **Operator chart install:** Often missing — `helm registry login`/`--registry-config` for quay; verify on a cluster that has *only* the pull secret (no host helm login) (Pitfall 1)
+- [ ] **dockerconfigjson:** Often missing the inner `auth` field or has a trailing newline — verify `auths["quay.io"]["auth"]` decodes to exactly `user:pass` (Pitfall 3)
+- [ ] **Generated secrets:** Often decode with a trailing `\n` — verify byte-for-byte round trip from `stringData` (Pitfall 2)
+- [ ] **WekaClient gating:** Often only `dependsOn`, not Deployment-Ready + CRD-Established — verify the CR apply waits, no 404 on a fresh cluster (Pitfall 4)
+- [ ] **Default StorageClass:** Often ignores a pre-existing default — verify `kubectl get sc` shows exactly one default after install (Pitfall 5)
+- [ ] **Secret redaction:** Often missing from CR annotation + SSE — verify `kubectl get wekaappstore -o yaml` and the browser log contain no creds (Pitfall 6, Success Criterion 4)
+- [ ] **SSE deadline:** Often left at 900s — verify a real cold-cache install completes without a false timeout (Pitfall 7)
+- [ ] **Idempotent re-run:** Often untested — verify a second wizard run on an installed cluster is a no-op / clean resume (Pitfall 9, Success Criterion 5)
+- [ ] **CRD cache:** Often caches failures — verify a fixed-auth retry actually installs CRDs without operator restart (Pitfall 8)
 
----
+## Recovery Strategies
+
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| Operator chart 401 (no helm login) | LOW once fixed | Add operator helm auth; restart operator pod to clear `discover_chart_crds` cache; re-reconcile CR |
+| Trailing-newline secret | LOW | Re-apply secret via `stringData`; restart/refresh the consuming pod (CSI/WekaClient) |
+| WekaClient 404 (CRD not yet ready) | LOW | Operator auto-retries (`TemporaryError`); add Deployment-Ready gate so it stops happening |
+| Dual-default StorageClass | LOW | `kubectl annotate sc <name> storageclass.kubernetes.io/is-default-class=false --overwrite` on the unwanted SC |
+| Cleartext creds in CR annotation | MEDIUM | Rotate the exposed quay token / WEKA password; strip the annotation; ship the allowlist fix |
+| Cached empty CRD set | LOW | Restart operator pod (clears `lru_cache`); ship the no-cache-on-failure fix |
+| Non-idempotent Job on re-run | LOW | Delete the failed Job; re-apply with `--overwrite`; ship the idempotent-Job fix |
+| Bricked kubelet from auto node-config | HIGH | Per-node manual recovery (delete CPU state file, fix config, restart kubelet) — avoided entirely by Decision A1 |
 
 ## Pitfall-to-Phase Mapping
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| 1. Auto-default breaks backward compat (shell scripts, env vars) | Operator core | Unit test: 8 existing manifests from `cluster_init/` return unchanged |
-| 2. `$oauthtoken` in NGC stringData | Operator core (fast-path guard covers) + AIDP migration | Unit test: AIDP bootstrap secret manifest renders unchanged |
-| 3. Variable values not recursively resolved | Docs + tests | Unit test: single-pass behavior asserted; README shows fully-resolved examples |
-| 4. `ValueError` on invalid placeholders not caught | Operator core | Unit test: `render()` call site catches `ValueError` and converts to `PermanentError` with component name |
-| 5. Fetch vs. render error asymmetry | Operator core | Unit test: mock `kr8s.NotFound` raises `TemporaryError`, not silent `{}` |
-| 6. Hyphen/digit variable key names | Operator core + docs | Unit test: `{'my-host': 'x'}` raises `PermanentError` before substitution |
-| 7. `$$` escape semantics | Docs + tests | README escape table; unit tests for `p$$w0rd` and `p$$$$w0rd` |
-| 8. Validator false-positives on svc.cluster.local | Validator | Warning message copy review; test external hostname does not produce error |
-| 9. Orphan resources on namespace change | Docs | README warning section; optional status snapshot field |
-| 10. `on.update` storm from status patches | Operator core | Add `field='spec'` filter; test that status patch does not trigger handler |
-| 11. Validator blind to `variables:` field | Validator | Unit test: `variables: {my-host: foo}` produces `errors` not just `warnings` |
-| 12. Tempfile call order | Operator core | Code review; unit test render failure leaves no tempfile |
-| 13. Single-helm path not patched | Operator core or docs | Decision explicit in plan; unit test locks chosen behavior |
-
----
+| 1. Helm chart pull needs registry login (Decision C wrong) | Operator phase (re-scope) | Fresh cluster with only pull secrets: operator chart installs (no 401) |
+| 2. `echo\|base64` trailing newline | Blueprint phase (`stringData`) | Round-trip decode == input, no `\n` |
+| 3. dockerconfigjson `auth` assembly | Backend phase (GUI builder) | `auths["quay.io"]["auth"]` decodes to `user:pass` exactly |
+| 4. WekaClient before CRD → 404 | Operator + Blueprint phase | No `no matches for kind WekaClient` on fresh install |
+| 5. Default-StorageClass conflict | Backend (detect) + Blueprint (secret match) | Exactly one default SC; PVC binds to wekafs as intended |
+| 6. Secret leakage (annotation + SSE) | Backend (redact) + Frontend (mask) | No creds in CR YAML or browser log (Success Criterion 4) |
+| 7. SSE 15-min deadline + proxy timeout | Backend phase | Cold-cache install completes without false timeout |
+| 8. CRD-discovery cache poisoning | Operator phase (with #1) | Fixed-auth retry installs CRDs without pod restart |
+| 9. Non-idempotent re-run | Blueprint + Backend/Frontend; E2E test | Second run on installed cluster is safe (Success Criterion 5) |
+| 10. Auto kubelet restart danger | Frontend phase (A1 confirm) | App Store never mutates node/kubelet; manual prereq gate present |
 
 ## Sources
 
-- Direct code inspection: `operator_module/main.py` lines 340-370, 551-803, 1015-1027 — HIGH confidence
-- Direct code inspection: `cluster_init/app-store-cluster-init.yaml` lines 107-161 (shell scripts in `kubernetesManifest`) — HIGH confidence
-- Direct code inspection: `mcp-server/tools/validate_yaml.py` full file — HIGH confidence
-- Executed experiments: Python 3.10 `string.Template` behavior verification (all pitfalls tested against actual CPython source) — HIGH confidence
-- PRD: `.planning/PRD-appstack-variable-substitution.md` (risk table cross-referenced and extended) — HIGH confidence
-- Python stdlib: `string.Template` identifier pattern confirmed via `Template.pattern.pattern` inspection: `[_a-z][_a-z0-9]*` (case-insensitive) — HIGH confidence
+- Repo code (HIGH): `operator_module/main.py` — `_install_chart`/`_upgrade_chart` pass no helm auth (`:136-178`), `discover_chart_crds` no-auth + `lru_cache` + swallow-failure (`:673-703`), `_b64`/`_derive_ngc_payloads` dockerconfigjson reference (`:441`,`:499-509`), "NEVER log" credential contract (`:490`,`:520`,`:538`); `_add_repo` skips repo add for OCI (`:115-134`)
+- Repo code (HIGH): `app-store-gui/webapp/main.py` — `/deploy-stream` 900s deadline (`:2956`), keepalive ping (`:2963`), CR annotation variable stamping (`:2935`), SSE message passthrough (`:2984`), helm-error passthrough into message; `/cluster-info` prereq detection (`:2361`)
+- Repo code (HIGH): `app-store-gui/webapp/planning/apply_gateway.py` — create→409→patch only handles 409 not 404 (`:301`,`:323`); StorageClass cluster-scoped (`:24`)
+- Repo templates (HIGH): `storageclass-wekafs-dir-api.yaml` hard-coded `is-default-class:"true"` + secret refs (`:6`,`:22-31`); `csi-wekafs-api-secret.yaml` `data:` fields; `wekaClientCR-online.yaml` `wekaSecretRef`/`imagePullSecret`/CRD `weka.weka.io/v1alpha1`
+- PRD (HIGH): `.planning/PRD-install-wizard-weka-storage-stack.md` — Decisions A1/B/C/D/E, trailing-newline fix note, risks section
+- [Use OCI-based registries — Helm](https://helm.sh/docs/topics/registries/) (HIGH) — `helm registry login` authenticates chart pulls; distinct from kubelet imagePullSecrets
+- [Pulling Helm charts from private OCI registry — argo-cd #21060](https://github.com/argoproj/argo-cd/discussions/21060) (MEDIUM) — imagePullSecrets do not authenticate helm chart pulls
+- [WEKA Operator deployments — WEKA docs](https://docs.weka.io/kubernetes/weka-operator-deployments) (HIGH) — operator chart at `oci://quay.io/weka.io/helm/weka-operator` requires QUAY creds + quay secret in `weka-operator-system` and `default`; not anonymous-pullable
+- [Best practices for WEKA stateless client and Kubernetes — WEKA docs](https://docs.weka.io/best-practice-guides/best-practices-for-weka-stateless-client-and-kubernetes) (HIGH) — hugepages + CPU manager static + strict-cpu-reservation prerequisites
+- [Control CPU Management Policies on the Node — Kubernetes](https://kubernetes.io/docs/tasks/administer-cluster/cpu-management-policies/) (HIGH) — changing CPU manager policy requires drain → stop kubelet → delete `/var/lib/kubelet/cpu_manager_state` → restart kubelet (why auto-restart is dangerous)
 
 ---
-*Pitfalls research for: AppStack Variable Substitution (`${VAR}`) in Kopf-based Kubernetes operator*
-*Researched: 2026-05-06*
+*Pitfalls research for: WEKA storage-stack guided install wizard (v8.0)*
+*Researched: 2026-06-24*
