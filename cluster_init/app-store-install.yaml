@@ -29,6 +29,12 @@ x-variables:
     required: true
     validate: false
     description: "GUI-built dockerconfigjson string for quay.io pull secret (injected by server)"
+
+# Per-blueprint SSE deploy timeout (seconds).  The full operator+CSI+WekaClient install
+# runs ~5 sequential stages each with a 300s readinessCheck, so the legacy 900s cap
+# would false-fail a healthy install.  45 minutes provides comfortable headroom for
+# a cold-cache image pull + cluster join (D-08).
+x-deploy-timeout: 2700
 ---
 apiVersion: warp.io/v1alpha1
 kind: WekaAppStore

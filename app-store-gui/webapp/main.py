@@ -1712,6 +1712,36 @@ def parse_x_variables(yaml_text: str) -> dict:
         return {}
 
 
+# Raised default deploy timeout (seconds).  Used when a blueprint has no x-deploy-timeout
+# key or the key is malformed.  Value is within the 1800–2400s band (35 minutes).
+DEFAULT_DEPLOY_TIMEOUT_SECONDS = 2100
+
+
+def parse_deploy_timeout(yaml_text: str) -> int:
+    """Read the top-level x-deploy-timeout key (seconds) from raw blueprint YAML text.
+
+    Returns the blueprint value when present and valid (positive integer).
+    Falls back to DEFAULT_DEPLOY_TIMEOUT_SECONDS on any parse failure, missing key,
+    non-positive value, or non-integer value — so a malformed blueprint cannot set an
+    unbounded or zero deadline (T-29-02 mitigate).
+    """
+    if not yaml_text:
+        return DEFAULT_DEPLOY_TIMEOUT_SECONDS
+    try:
+        data = yaml.safe_load(yaml_text)
+        if not isinstance(data, dict):
+            return DEFAULT_DEPLOY_TIMEOUT_SECONDS
+        raw = data.get("x-deploy-timeout")
+        if raw is None:
+            return DEFAULT_DEPLOY_TIMEOUT_SECONDS
+        val = int(raw)
+        if val <= 0:
+            return DEFAULT_DEPLOY_TIMEOUT_SECONDS
+        return val
+    except Exception:
+        return DEFAULT_DEPLOY_TIMEOUT_SECONDS
+
+
 def _blueprint_cr_identity(yaml_path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Return (cr_name, cr_namespace) of the WekaAppStore doc in a blueprint file, else (None, None)."""
     if not yaml_path:
@@ -2958,7 +2988,7 @@ async def deploy_stream(
             load_kube_config()
             custom_api = client.CustomObjectsApi()
             emitted: Dict[str, str] = {}
-            deadline = time.time() + 900  # 15-minute cap
+            deadline = time.time() + parse_deploy_timeout(raw_tpl)
             while True:
                 if await request.is_disconnected():
                     return
