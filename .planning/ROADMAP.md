@@ -11,7 +11,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
 ## Phases
 
 - [x] **Phase 27: Install Blueprint Authoring** - Parameterized `app-store-install.yaml` AppStack CR encoding the full ordered install with `stringData` secrets and idempotent components. (completed 2026-06-24)
-- [ ] **Phase 28: Operator Helm Auth & CRD Discovery** - Operator authenticates to quay before OCI chart pulls and stops caching empty-CRD failures — the highest-risk de-risk, built before the frontend.
+- [x] **Phase 28: Operator Helm Auth & CRD Discovery** - Operator authenticates to quay before OCI chart pulls and stops caching empty-CRD failures — the highest-risk de-risk, built before the frontend. (completed 2026-06-24)
 - [ ] **Phase 29: Backend Wiring & Secret Safety** - Server-side dockerconfigjson/endpoint derivation, raised per-blueprint SSE deadline, and secret redaction in annotation + SSE stream.
 - [ ] **Phase 30: Wizard Stepper & Live Progress** - Multi-step `welcome.html` form replacing the hard-block, with per-stage progress and chaining to cluster-init.
 - [ ] **Phase 31: End-to-End Verification** - Fresh-cluster full install, failure/retry, idempotent re-run, and secret-leak gate.
@@ -43,7 +43,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
   4. After operator install, the WEKA CRDs (`weka.weka.io`) are registered and a subsequent `WekaClient` apply does not 404.
 **Plans**: 2 plans
 - [x] 28-01-PLAN.md — Thread quay --registry-config into OCI helm ops + success-only discover_chart_crds cache (OPA-01, OPA-02) in operator_module/main.py
-- [ ] 28-02-PLAN.md — Cluster-free pytest: registry-config argv threading, credential-not-in-argv, temp-file cleanup, cache-failure non-memoization
+- [x] 28-02-PLAN.md — Cluster-free pytest: registry-config argv threading, credential-not-in-argv, temp-file cleanup, cache-failure non-memoization
 
 ### Phase 29: Backend Wiring & Secret Safety
 **Goal**: The backend locates and serves the new blueprint, derives the multi-sink variables server-side, survives a long install without false-failing, and never leaks secret values.
@@ -85,7 +85,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 27. Install Blueprint Authoring | 2/2 | Complete   | 2026-06-24 |
-| 28. Operator Helm Auth & CRD Discovery | 1/2 | In Progress|  |
+| 28. Operator Helm Auth & CRD Discovery | 2/2 | Complete   | 2026-06-24 |
 | 29. Backend Wiring & Secret Safety | 0/0 | Not started | - |
 | 30. Wizard Stepper & Live Progress | 0/0 | Not started | - |
 | 31. End-to-End Verification | 0/0 | Not started | - |
