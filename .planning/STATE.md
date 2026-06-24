@@ -4,12 +4,12 @@ milestone: v8.0
 milestone_name: Guided Install Wizard — WEKA Operator, CSI & Storage Classes
 status: executing
 stopped_at: Phase 28 context gathered (assumptions mode)
-last_updated: "2026-06-24T06:55:24.038Z"
-last_activity: 2026-06-24 -- Phase 27 execution started
+last_updated: "2026-06-24T07:14:10.742Z"
+last_activity: 2026-06-24 -- Phase 28 planning complete
 progress:
   total_phases: 5
   completed_phases: 1
-  total_plans: 2
+  total_plans: 4
   completed_plans: 2
   percent: 20
 ---
@@ -27,8 +27,8 @@ See: `.planning/PROJECT.md` (updated 2026-06-24 — milestone v8.0 started)
 
 Phase: 27 (install-blueprint-authoring) — EXECUTING
 Plan: 1 of 2
-Status: Executing Phase 27
-Last activity: 2026-06-24 -- Phase 27 execution started
+Status: Ready to execute
+Last activity: 2026-06-24 -- Phase 28 planning complete
 
 Progress: [----------] 0% (0/5 phases)
 
