@@ -8,6 +8,11 @@ x-variables:
   join_ip_ports:
     required: true
     description: "Comma-delimited host:port list for WEKA cluster join (e.g. 192.168.1.1:14000,192.168.1.2:14000)"
+    # NOTE: join_ip_ports is the user-provided comma-delimited string.
+    # The Phase 29 backend derives join_ip_ports_list (YAML-array form, e.g.
+    # ["192.168.1.1:14000","192.168.1.2:14000"]) and endpoints_csv from this
+    # value before the Jinja2 render pass. The template uses join_ip_ports_list
+    # for WekaClient joinIpPorts and endpoints_csv for the CSI API secret.
   weka_endpoint_scheme:
     default: http
     description: "HTTP scheme for WEKA API endpoint (http or https)"

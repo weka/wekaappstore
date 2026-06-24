@@ -264,3 +264,38 @@ def test_stringdata_only():
                     )
 
     assert not violations, "Secrets must use stringData, not data:\n" + "\n".join(violations)
+
+
+def test_joiniports_non_null():
+    """WekaClient CR's joinIpPorts field is non-null and non-empty after render.
+
+    Asserts that the Phase-29 server-injected join_ip_ports_list variable is
+    correctly wired into spec.joinIpPorts. SAMPLE_VARS supplies join_ip_ports_list
+    to simulate Phase-29 injection. If join_ip_ports_list is undefined at render
+    time, Jinja2 silently produces None and the WekaClient cannot join the cluster.
+    """
+    rendered = _render_blueprint()
+    docs = list(yaml.safe_load_all(rendered))
+    was_cr = next(
+        (d for d in docs if isinstance(d, dict) and d.get("kind") == "WekaAppStore"),
+        None,
+    )
+    assert was_cr is not None
+
+    components = was_cr["spec"]["appStack"]["components"]
+    weka_client_comp = next(
+        (c for c in components if c["name"] == "weka-client"),
+        None,
+    )
+    assert weka_client_comp is not None, "weka-client component not found"
+
+    manifest_docs = list(yaml.safe_load_all(weka_client_comp["kubernetesManifest"]))
+    cr = next(
+        (d for d in manifest_docs if isinstance(d, dict) and d.get("kind") == "WekaClient"),
+        None,
+    )
+    assert cr is not None, "WekaClient CR not found in weka-client manifest"
+    assert cr["spec"]["joinIpPorts"], (
+        "joinIpPorts must be non-empty; check that join_ip_ports_list is injected "
+        "by Phase 29 backend before the Jinja2 render pass"
+    )
