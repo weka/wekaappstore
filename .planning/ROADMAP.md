@@ -42,7 +42,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
   3. `discover_chart_crds` no longer memoizes an empty-CRD result on fetch failure — a transient/auth blip does not permanently cache "no CRDs," so a fixed-auth retry installs the WEKA CRDs without an operator pod restart.
   4. After operator install, the WEKA CRDs (`weka.weka.io`) are registered and a subsequent `WekaClient` apply does not 404.
 **Plans**: 2 plans
-- [ ] 28-01-PLAN.md — Thread quay --registry-config into OCI helm ops + success-only discover_chart_crds cache (OPA-01, OPA-02) in operator_module/main.py
+- [x] 28-01-PLAN.md — Thread quay --registry-config into OCI helm ops + success-only discover_chart_crds cache (OPA-01, OPA-02) in operator_module/main.py
 - [ ] 28-02-PLAN.md — Cluster-free pytest: registry-config argv threading, credential-not-in-argv, temp-file cleanup, cache-failure non-memoization
 
 ### Phase 29: Backend Wiring & Secret Safety
@@ -85,7 +85,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 27. Install Blueprint Authoring | 2/2 | Complete   | 2026-06-24 |
-| 28. Operator Helm Auth & CRD Discovery | 0/2 | Planned | - |
+| 28. Operator Helm Auth & CRD Discovery | 1/2 | In Progress|  |
 | 29. Backend Wiring & Secret Safety | 0/0 | Not started | - |
 | 30. Wizard Stepper & Live Progress | 0/0 | Not started | - |
 | 31. End-to-End Verification | 0/0 | Not started | - |
