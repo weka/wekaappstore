@@ -86,18 +86,40 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INST-01..10 | TBD | Pending |
-| OPA-01..02 | TBD | Pending |
-| WIZ-01..08 | TBD | Pending |
-| PROG-01..03 | TBD | Pending |
-| SEC-01..02 | TBD | Pending |
-| E2E-01..03 | TBD | Pending |
+| INST-01 | Phase 27 | Pending |
+| INST-02 | Phase 27 | Pending |
+| INST-03 | Phase 27 | Pending |
+| INST-04 | Phase 27 | Pending |
+| INST-05 | Phase 27 | Pending |
+| INST-06 | Phase 27 | Pending |
+| INST-07 | Phase 27 | Pending |
+| INST-08 | Phase 27 | Pending |
+| INST-09 | Phase 27 | Pending |
+| INST-10 | Phase 27 | Pending |
+| OPA-01 | Phase 28 | Pending |
+| OPA-02 | Phase 28 | Pending |
+| PROG-02 | Phase 29 | Pending |
+| SEC-01 | Phase 29 | Pending |
+| WIZ-01 | Phase 30 | Pending |
+| WIZ-02 | Phase 30 | Pending |
+| WIZ-03 | Phase 30 | Pending |
+| WIZ-04 | Phase 30 | Pending |
+| WIZ-05 | Phase 30 | Pending |
+| WIZ-06 | Phase 30 | Pending |
+| WIZ-07 | Phase 30 | Pending |
+| WIZ-08 | Phase 30 | Pending |
+| PROG-01 | Phase 30 | Pending |
+| PROG-03 | Phase 30 | Pending |
+| E2E-01 | Phase 31 | Pending |
+| E2E-02 | Phase 31 | Pending |
+| E2E-03 | Phase 31 | Pending |
+| SEC-02 | Phase 31 | Pending |
 
 **Coverage:**
 - v1 requirements: 28 total (INST 10, OPA 2, WIZ 8, PROG 3, SEC 2, E2E 3)
-- Mapped to phases: 0 (roadmap pending)
-- Unmapped: 28 ⚠️ (filled by roadmapper)
+- Mapped to phases: 28/28 ✓
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-24*
-*Last updated: 2026-06-24 after initial definition (post-research; Decision C revised — operator helm-auth in scope)*
+*Last updated: 2026-06-24 after roadmap creation (phases 27–31; 28/28 mapped)*

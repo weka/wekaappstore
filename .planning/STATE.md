@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v8.0
 milestone_name: Guided Install Wizard — WEKA Operator, CSI & Storage Classes
 status: planning
-last_updated: "2026-06-24T02:24:31.392Z"
+last_updated: "2026-06-24T13:05:00.000Z"
 last_activity: 2026-06-24
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,35 +17,38 @@ progress:
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-06-17 — milestone v7.0 archived)
+See: `.planning/PROJECT.md` (updated 2026-06-24 — milestone v8.0 started)
 
-**Core value:** OpenClaw can inspect, reason about, validate, and safely install WEKA App Store blueprints through bounded MCP tools without needing custom backend planning logic.
-**Current focus:** Planning next milestone
+**Core value:** A customer can stand up the full WEKA storage stack (operator, CSI driver, client, storage classes) from the App Store install wizard by answering a short form — no manual `kubectl`/`helm`/base64 work.
+**Current focus:** Roadmap created (phases 27–31); ready to plan Phase 27.
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 27 — Install Blueprint Authoring (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-24 — Milestone v8.0 started
+Status: Roadmap complete, awaiting phase planning
+Last activity: 2026-06-24 — v8.0 roadmap created, 28/28 requirements mapped
+
+Progress: [----------] 0% (0/5 phases)
 
 ## Accumulated Context
 
-### Key Architectural Decisions
+### Key Architectural Decisions (carried into v8.0)
 
-- **Pre-scan guard is non-negotiable:** `render()` must return text unchanged when no `${...}` pattern is present (regex check). Without the pre-scan guard, `cluster_init/app-store-cluster-init.yaml` shell scripts raise `KeyError` on first reconcile after upgrade.
-- **Single-pass only — no recursive resolution:** Variable values are taken literally. AIDP migration must use fully-resolved values. README must NOT show the cross-referencing pattern.
-- **WarpCredential multi-instance:** One CR per named credential (not per type). Multiple NGC keys, multiple WEKA clusters per namespace are all supported.
-- **Derived secrets not deleted on WarpCredential delete:** Admin must clean up `warp-<name>-*` secrets manually; avoids accidental removal of secrets in use by running workloads.
-- **`[[var]]` Jinja2 delimiters for dynamic blueprint substitution:** Avoids conflicts with shell `$VAR` expansion in YAML and operator `render()` function's `${VAR}` syntax.
-- **`parse_x_variables` returns `{}` on all failure paths:** Blueprint pages degrade to static install form rather than 500 on malformed `x-variables` block.
-- **Phase 20 is a separate repo** — all deliverables in `/Users/christopherjenkins/git/aidp`, not `wekaappstore`.
+- **Decision C REVISED (load-bearing):** the operator pod runs `helm show crds` / `helm install oci://quay.io/...` from its OWN helm process, which authenticates via the helm registry config — NOT the Kubernetes `dockerconfigjson` pull secrets (those only cover kubelet image pulls). Operator-side `helm registry login` / `--registry-config` is real work, scoped into Phase 28 (no spike — planned upfront). Bundle with the `discover_chart_crds` empty-failure cache fix.
+- **`[[var]]` Jinja2 delimiters for GUI substitution, `${VAR}` for operator substitution** — keep separate. The new blueprint is rendered once by the GUI with `[[ ]]`.
+- **`stringData` over hand-`base64` for all wizard secrets** — eliminates the trailing-newline bug class. The ONE exception is the quay `dockerconfigjson`, which is built server-side in Python and injected as one `data` var (do not double-encode in `stringData`).
+- **WekaClient 404 race** — gate the WekaClient manifest via `dependsOn: [weka-operator]` + `readinessCheck: {type: deployment}` on the operator (transitively guarantees CRDs served). Operator manifests have no readiness wait — never put a readinessCheck on the WekaClient manifest itself.
+- **Secret-leak release gate (SEC-01 / Success Criterion 4):** allowlist excludes `*password*`/`*token*`/`*secret*`/`quay_dockerconfigjson` from the `warp.io/gui-variables` annotation; redact emitted SSE messages; never pass creds as helm `--set`.
+- **SSE 900s deadline too short** — raise per-blueprint (45–60 min) and make timeout non-destructive (reconnect/resume from `componentStatus`), since a cold-cache WekaClient image pull + cluster join alone can exceed 15 min.
+- **Node prereqs stay manual (Decision A1)** — copy-paste `KubeletConfiguration` + confirm checkbox; the App Store never restarts kubelet (auto-restart can brick every node).
+- **Two chained CRs (Decision D/E)** — `app-store-install` runs to `Ready`, then the untouched `app-store-cluster-init` runs last; redirect on cluster-init `Ready` via the unchanged `ClusterInitMiddleware`.
 
-### Open Blockers / Tracked Work
+### Open Blockers / Tracked Work (pre-existing, not v8.0)
 
-- **v3.1 deferred** — E2E chat validation (E2E-01..04) plus four prerequisite fixes (inspect-tool `load_incluster_config`, init-container openclaw.json config gap, NIM model reliability, OpenClaw version upgrade). Full root-cause and fix plan in `.planning/v3.0-KNOWN-ISSUES.md`.
-- **v5.0 Phases 19-20 unstarted** — Validator Soft-Warning and AIDP Migration Smoke Test. Phase 19 has no code dependency; Phase 20 requires cluster with Phases 16-18 deployed.
-- **DYN-07 external repo** — Production blueprints (oss-rag, openfold, nvidia) in external `warp-blueprints` repo need `x-variables` migration; tracked as follow-on.
+- **v3.1 deferred** — E2E chat validation + four prerequisite fixes (see `.planning/v3.0-KNOWN-ISSUES.md`).
+- **v5.0 Phases 19-20 unstarted** — Validator Soft-Warning and AIDP Migration Smoke Test.
+- **DYN-07 external repo** — production blueprint `x-variables` migration in `warp-blueprints`.
 
 ### Pending Todos
 
@@ -53,6 +56,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-17
-Stopped at: v7.0 milestone archived
-Resume: `/gsd-new-milestone` to start next milestone
+Last session: 2026-06-24
+Stopped at: v8.0 roadmap created (phases 27–31, 28/28 requirements mapped)
+Resume: `/gsd:plan-phase 27` to plan Install Blueprint Authoring
