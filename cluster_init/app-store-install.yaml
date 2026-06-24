@@ -222,7 +222,7 @@ spec:
                 restartPolicy: OnFailure
                 containers:
                   - name: kubectl
-                    image: docker.io/bitnami/kubectl:latest
+                    image: docker.io/bitnami/kubectl:1.29
                     command: ["/bin/sh", "-c"]
                     args:
                       - |
@@ -350,7 +350,7 @@ spec:
                 restartPolicy: OnFailure
                 containers:
                   - name: kubectl
-                    image: docker.io/bitnami/kubectl:latest
+                    image: docker.io/bitnami/kubectl:1.29
                     command: ["/bin/sh", "-c"]
                     args:
                       - |
