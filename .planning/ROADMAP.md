@@ -54,7 +54,10 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
   2. The server builds `quay_dockerconfigjson` from posted quay creds such that `auths["quay.io"]["auth"]` decodes to exactly `user:pass` with no trailing bytes, and `split_endpoints` produces both the `joinIpPorts` YAML-list and comma-joined `endpoints` forms — both verified by unit tests.
   3. The SSE deadline is raised (per-blueprint as needed) and keepalive/reconnect is robust, so a long operator+CSI+WekaClient install does not surface a false "timed out" while the CR is still progressing.
   4. Quay and WEKA secret values never appear in the `warp.io/gui-variables` CR annotation (variable allowlist excludes `*password*`/`*token*`/`*secret*`/`quay_dockerconfigjson`) nor in emitted SSE component messages (redaction).
-**Plans**: TBD
+**Plans**: 3 plans
+- [ ] 29-01-PLAN.md — NAMESPACE_PRESERVING_APPS set (SC1) + parse_deploy_timeout/x-deploy-timeout raised SSE deadline (SC3, PROG-02), main.py + blueprint + tests
+- [ ] 29-02-PLAN.md — build_quay_dockerconfigjson (byte-exact) + split_endpoints (dual form, JSON-string list) merged before render (SC2) + unit tests
+- [ ] 29-03-PLAN.md — Shared secret-key predicate driving _safe_gui_variables annotation allowlist + SSE message redactor (SC4, SEC-01, E2E-03) + tests
 
 ### Phase 30: Wizard Stepper & Live Progress
 **Goal**: A customer completes a multi-step web form and watches the storage stack install stage-by-stage, then is redirected to the App Store after cluster-init.
@@ -86,7 +89,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
 |-------|----------------|--------|-----------|
 | 27. Install Blueprint Authoring | 2/2 | Complete   | 2026-06-24 |
 | 28. Operator Helm Auth & CRD Discovery | 2/2 | Complete    | 2026-06-24 |
-| 29. Backend Wiring & Secret Safety | 0/0 | Not started | - |
+| 29. Backend Wiring & Secret Safety | 0/3 | Planned | - |
 | 30. Wizard Stepper & Live Progress | 0/0 | Not started | - |
 | 31. End-to-End Verification | 0/0 | Not started | - |
 
