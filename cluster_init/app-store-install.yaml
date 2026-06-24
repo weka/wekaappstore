@@ -1,0 +1,452 @@
+x-variables:
+  operator_version:
+    default: v1.13.0
+    description: "WEKA operator Helm chart version (e.g. v1.13.0)"
+  weka_image_version:
+    required: true
+    description: "WEKA-in-container image tag (e.g. 5.1.0.605)"
+  join_ip_ports:
+    required: true
+    description: "Comma-delimited host:port list for WEKA cluster join (e.g. 192.168.1.1:14000,192.168.1.2:14000)"
+  weka_endpoint_scheme:
+    default: http
+    description: "HTTP scheme for WEKA API endpoint (http or https)"
+  weka_org:
+    default: Root
+    description: "WEKA organization name"
+  weka_username:
+    required: true
+    description: "WEKA cluster username"
+  weka_password:
+    required: true
+    description: "WEKA cluster password"
+  quay_dockerconfigjson:
+    validate: false
+    description: "GUI-built dockerconfigjson string for quay.io pull secret (injected by server)"
+---
+apiVersion: warp.io/v1alpha1
+kind: WekaAppStore
+metadata:
+  name: app-store-install
+  namespace: default
+spec:
+  appStack:
+    components:
+
+      # -----------------------------------------------------------------------
+      # STAGE 1: Quay pull secrets (parallel, no dependencies)
+      # Two components: one per namespace that needs quay.io image pulls.
+      # -----------------------------------------------------------------------
+
+      - name: quay-secret-operator-ns
+        description: "Quay.io pull secret in weka-operator-system namespace"
+        enabled: true
+        dependsOn: []
+        targetNamespace: weka-operator-system
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: quay-io-secret
+            namespace: weka-operator-system
+          type: kubernetes.io/dockerconfigjson
+          stringData:
+            .dockerconfigjson: "[[ quay_dockerconfigjson ]]"
+
+      - name: quay-secret-default-ns
+        description: "Quay.io pull secret in default namespace (WekaClient image pull)"
+        enabled: true
+        dependsOn: []
+        targetNamespace: default
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: quay-io-secret
+            namespace: default
+          type: kubernetes.io/dockerconfigjson
+          stringData:
+            .dockerconfigjson: "[[ quay_dockerconfigjson ]]"
+
+      # -----------------------------------------------------------------------
+      # STAGE 2: WEKA Operator (depends on both quay secrets)
+      # Installed from OCI registry. readinessCheck waits for operator deployment
+      # to be available before proceeding with CRD-dependent components.
+      # -----------------------------------------------------------------------
+
+      - name: weka-operator
+        description: "WEKA Kubernetes operator — installs WekaClient CRD and manages WEKA cluster lifecycle"
+        enabled: true
+        dependsOn:
+          - quay-secret-operator-ns
+          - quay-secret-default-ns
+        helmChart:
+          # OCI chart: operator assembles oci://quay.io/weka.io/helm/weka-operator at install time
+          repository: "oci://quay.io/weka.io/helm"
+          name: "weka-operator"
+          releaseName: "weka-operator"
+          version: "[[ operator_version ]]"
+        waitForReady: true
+        readinessCheck:
+          type: deployment
+          name: weka-operator
+          namespace: weka-operator-system
+          timeout: 300
+        targetNamespace: weka-operator-system
+
+      # -----------------------------------------------------------------------
+      # STAGE 3: CSI driver (depends on weka-operator for CRD readiness)
+      # Public Helm repo — no auth needed.
+      # Pin to 2.8.7 (latest stable as of Phase 27); update this when upgrading.
+      # -----------------------------------------------------------------------
+
+      - name: csi-wekafs
+        description: "WEKA CSI driver (csi-wekafsplugin) — provides StorageClass provisioning"
+        enabled: true
+        dependsOn:
+          - weka-operator
+        helmChart:
+          repository: "https://weka.github.io/csi-wekafs"
+          name: "csi-wekafsplugin"
+          releaseName: "csi-wekafs"
+          version: "2.8.7"  # pin; update when upgrading CSI driver
+        waitForReady: true
+        readinessCheck:
+          type: deployment
+          name: csi-wekafs-csi-wekafsplugin-controller
+          namespace: csi-wekafs
+          timeout: 300
+        targetNamespace: csi-wekafs
+
+      # -----------------------------------------------------------------------
+      # STAGE 3 (parallel): Node-label service account
+      # SA must exist before the ClusterRoleBinding references it.
+      # -----------------------------------------------------------------------
+
+      - name: weka-node-label-sa
+        description: "ServiceAccount for the node-label Job that marks worker nodes"
+        enabled: true
+        dependsOn:
+          - weka-operator
+        targetNamespace: kube-system
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: weka-node-label
+            namespace: kube-system
+
+      # -----------------------------------------------------------------------
+      # STAGE 3 (parallel): WekaClient secret
+      # Plain Opaque secret with stringData — no base64 hand-encoding required.
+      # -----------------------------------------------------------------------
+
+      - name: weka-client-secret
+        description: "WEKA cluster credentials secret consumed by the WekaClient CR"
+        enabled: true
+        dependsOn:
+          - weka-operator
+        targetNamespace: default
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: weka-client-cluster-dev
+            namespace: default
+          type: Opaque
+          stringData:
+            org: "[[ weka_org ]]"
+            username: "[[ weka_username ]]"
+            password: "[[ weka_password ]]"
+
+      # -----------------------------------------------------------------------
+      # STAGE 4: Node-label RBAC (depends on SA)
+      # Binds cluster-admin to the node-label SA — consistent with the
+      # gateway-api-crds precedent in app-store-cluster-init.yaml.
+      # Tradeoff: cluster-admin is broad; least-privilege follow-on deferred.
+      # -----------------------------------------------------------------------
+
+      - name: weka-node-label-rbac
+        description: "ClusterRoleBinding granting cluster-admin to the node-label SA"
+        enabled: true
+        dependsOn:
+          - weka-node-label-sa
+        kubernetesManifest: |
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: weka-node-label-admin
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: cluster-admin
+          subjects:
+            - kind: ServiceAccount
+              name: weka-node-label
+              namespace: kube-system
+
+      # -----------------------------------------------------------------------
+      # STAGE 5: Node-label Job (depends on RBAC)
+      # Labels all worker nodes with weka.io/supports-clients=true so the
+      # WekaClient nodeSelector can schedule pods there. --overwrite makes
+      # re-runs idempotent (SEC-02).
+      # -----------------------------------------------------------------------
+
+      - name: weka-node-label-job
+        description: "Job that labels all nodes with weka.io/supports-clients=true"
+        enabled: true
+        dependsOn:
+          - weka-node-label-rbac
+        waitForReady: true
+        readinessCheck:
+          type: job
+          timeout: 300
+        targetNamespace: kube-system
+        kubernetesManifest: |
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: weka-node-label
+          spec:
+            backoffLimit: 2
+            template:
+              spec:
+                serviceAccountName: weka-node-label
+                restartPolicy: OnFailure
+                containers:
+                  - name: kubectl
+                    image: docker.io/bitnami/kubectl:latest
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        kubectl label nodes --all weka.io/supports-clients=true --overwrite
+                        echo "Node labeling complete."
+
+      # -----------------------------------------------------------------------
+      # STAGE 4 (parallel): CSI API secret (depends on csi-wekafs namespace)
+      # endpoints_csv is a server-derived var (comma-joined host:port list)
+      # injected by Phase 29 backend — NOT in x-variables.
+      # -----------------------------------------------------------------------
+
+      - name: csi-api-secret
+        description: "CSI API secret — WEKA cluster credentials for csi-wekafsplugin provisioner"
+        enabled: true
+        dependsOn:
+          - csi-wekafs
+        targetNamespace: csi-wekafs
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: csi-wekafs-api-secret
+            namespace: csi-wekafs
+          type: Opaque
+          stringData:
+            username: "[[ weka_username ]]"
+            password: "[[ weka_password ]]"
+            organization: "[[ weka_org ]]"
+            endpoints: "[[ endpoints_csv ]]"
+            scheme: "[[ weka_endpoint_scheme ]]"
+
+      # -----------------------------------------------------------------------
+      # STAGE 4 (parallel): WekaClient CR (depends on operator + secret)
+      # NO readinessCheck — WekaClient operator manages its own reconcile loop;
+      # the operator cannot meaningfully wait on client-cluster-join completion.
+      # join_ip_ports_list is a YAML-array injected by Phase 29 backend.
+      # -----------------------------------------------------------------------
+
+      - name: weka-client
+        description: "WekaClient CR — deploys WEKA client DaemonSet on labeled nodes"
+        enabled: true
+        dependsOn:
+          - weka-operator
+          - weka-client-secret
+        targetNamespace: default
+        kubernetesManifest: |
+          apiVersion: weka.weka.io/v1alpha1
+          kind: WekaClient
+          metadata:
+            name: warp-cluster-clients
+          spec:
+            image: quay.io/weka.io/weka-in-container:[[ weka_image_version ]]
+            imagePullSecret: quay-io-secret
+            driversDistService: "https://drivers.weka.io"
+            port: 4500
+            agentPort: 45000
+            nodeSelector:
+              weka.io/supports-clients: "true"
+            wekaSecretRef: weka-client-cluster-dev
+            joinIpPorts: [[ join_ip_ports_list ]]
+
+      # -----------------------------------------------------------------------
+      # STAGE 5: StorageClass demote Job (depends on csi-api-secret)
+      # Patches any existing default StorageClass to is-default-class=false
+      # before the new WEKA default StorageClass is applied. Idempotent (SEC-02).
+      # Uses a dedicated least-privilege ClusterRole (get/list/patch storageclasses)
+      # — NOT cluster-admin (T-27-04 mitigation).
+      # -----------------------------------------------------------------------
+
+      - name: storageclass-demote-job
+        description: "SA + ClusterRole + ClusterRoleBinding + Job: demotes any existing default StorageClass before WEKA classes are applied"
+        enabled: true
+        dependsOn:
+          - csi-api-secret
+        waitForReady: true
+        readinessCheck:
+          type: job
+          timeout: 300
+        targetNamespace: kube-system
+        kubernetesManifest: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: storageclass-demote
+            namespace: kube-system
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRole
+          metadata:
+            name: storageclass-demote-role
+          rules:
+            - apiGroups: ["storage.k8s.io"]
+              resources: ["storageclasses"]
+              verbs: ["get", "list", "patch"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: storageclass-demote-binding
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: storageclass-demote-role
+          subjects:
+            - kind: ServiceAccount
+              name: storageclass-demote
+              namespace: kube-system
+          ---
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: storageclass-demote
+          spec:
+            backoffLimit: 2
+            template:
+              spec:
+                serviceAccountName: storageclass-demote
+                restartPolicy: OnFailure
+                containers:
+                  - name: kubectl
+                    image: docker.io/bitnami/kubectl:latest
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        set -euo pipefail
+                        echo "Checking for existing default StorageClass..."
+                        DEFAULTS=$(kubectl get storageclass \
+                          -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{"\n"}{end}')
+                        if [ -z "$DEFAULTS" ]; then
+                          echo "No existing default StorageClass found. Nothing to demote."
+                          exit 0
+                        fi
+                        for SC in $DEFAULTS; do
+                          echo "Demoting default StorageClass: $SC"
+                          kubectl patch storageclass "$SC" \
+                            -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
+                        done
+                        echo "Demotion complete."
+
+      # -----------------------------------------------------------------------
+      # STAGE 6: StorageClasses (depends on demote Job)
+      # Three StorageClasses in one manifest block:
+      #   1. storageclass-wekafs-dir-api — DELETE policy, is-default-class=true
+      #   2. storageclass-wekafs-dir-api-retain — RETAIN policy, not default
+      #   3. storageclass-wekafs-fs-api — filesystem-backed, RETAIN, not default
+      # All reference csi-wekafs-api-secret in csi-wekafs namespace.
+      # -----------------------------------------------------------------------
+
+      - name: storageclasses
+        description: "Three WEKA StorageClasses: dir-api (default), dir-api-retain, fs-api"
+        enabled: true
+        dependsOn:
+          - storageclass-demote-job
+        kubernetesManifest: |
+          apiVersion: storage.k8s.io/v1
+          kind: StorageClass
+          metadata:
+            name: storageclass-wekafs-dir-api
+            annotations:
+              storageclass.kubernetes.io/is-default-class: "true"
+          provisioner: csi.weka.io
+          reclaimPolicy: Delete
+          volumeBindingMode: Immediate
+          allowVolumeExpansion: true
+          parameters:
+            volumeType: dir/v1
+            filesystemName: csi-dir
+            capacityEnforcement: HARD
+            ownerUid: "1000"
+            ownerGid: "1000"
+            permissions: "0775"
+            csi.storage.k8s.io/provisioner-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/provisioner-secret-namespace: csi-wekafs
+            csi.storage.k8s.io/controller-publish-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/controller-publish-secret-namespace: csi-wekafs
+            csi.storage.k8s.io/controller-expand-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/controller-expand-secret-namespace: csi-wekafs
+            csi.storage.k8s.io/node-stage-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/node-stage-secret-namespace: csi-wekafs
+            csi.storage.k8s.io/node-publish-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/node-publish-secret-namespace: csi-wekafs
+          ---
+          apiVersion: storage.k8s.io/v1
+          kind: StorageClass
+          metadata:
+            name: storageclass-wekafs-dir-api-retain
+            annotations:
+              storageclass.kubernetes.io/is-default-class: "false"
+          provisioner: csi.weka.io
+          reclaimPolicy: Retain
+          volumeBindingMode: Immediate
+          allowVolumeExpansion: true
+          parameters:
+            volumeType: dir/v1
+            filesystemName: csi-dir
+            capacityEnforcement: HARD
+            ownerUid: "1000"
+            ownerGid: "1000"
+            permissions: "0775"
+            csi.storage.k8s.io/provisioner-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/provisioner-secret-namespace: csi-wekafs
+            csi.storage.k8s.io/controller-publish-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/controller-publish-secret-namespace: csi-wekafs
+            csi.storage.k8s.io/controller-expand-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/controller-expand-secret-namespace: csi-wekafs
+            csi.storage.k8s.io/node-stage-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/node-stage-secret-namespace: csi-wekafs
+            csi.storage.k8s.io/node-publish-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/node-publish-secret-namespace: csi-wekafs
+          ---
+          apiVersion: storage.k8s.io/v1
+          kind: StorageClass
+          metadata:
+            name: storageclass-wekafs-fs-api
+            annotations:
+              storageclass.kubernetes.io/is-default-class: "false"
+          provisioner: csi.weka.io
+          reclaimPolicy: Retain
+          volumeBindingMode: Immediate
+          allowVolumeExpansion: true
+          parameters:
+            volumeType: weka/v2
+            filesystemGroupName: default
+            csi.storage.k8s.io/provisioner-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/provisioner-secret-namespace: csi-wekafs
+            csi.storage.k8s.io/controller-publish-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/controller-publish-secret-namespace: csi-wekafs
+            csi.storage.k8s.io/controller-expand-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/controller-expand-secret-namespace: csi-wekafs
+            csi.storage.k8s.io/node-stage-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/node-stage-secret-namespace: csi-wekafs
+            csi.storage.k8s.io/node-publish-secret-name: csi-wekafs-api-secret
+            csi.storage.k8s.io/node-publish-secret-namespace: csi-wekafs
