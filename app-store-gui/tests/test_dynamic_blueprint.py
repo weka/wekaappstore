@@ -636,3 +636,125 @@ def test_data_pipeline_fixture_has_x_variables():
     schema = main.parse_x_variables(content)
     assert schema, f"data-pipeline.yaml must have a non-empty x-variables block, got: {schema}"
     assert isinstance(schema, dict)
+
+
+# ---------------------------------------------------------------------------
+# Phase 29 Plan 01: NAMESPACE_PRESERVING_APPS + parse_deploy_timeout tests
+# ---------------------------------------------------------------------------
+
+
+def test_namespace_preserving_apps_contains_both_apps():
+    """Test 16: NAMESPACE_PRESERVING_APPS set contains both cluster-init and app-store-install."""
+    assert "cluster-init" in main.NAMESPACE_PRESERVING_APPS, \
+        "NAMESPACE_PRESERVING_APPS must include 'cluster-init'"
+    assert "app-store-install" in main.NAMESPACE_PRESERVING_APPS, \
+        "NAMESPACE_PRESERVING_APPS must include 'app-store-install'"
+
+
+def test_deploy_stream_app_store_install_preserves_namespace(tmp_path, monkeypatch):
+    """Test 17: deploy_stream with app_name='app-store-install' passes namespace='' to apply
+    even when variables carry a non-empty namespace value."""
+    yaml_content = (
+        "x-variables:\n"
+        "  namespace:\n"
+        "    type: string\n"
+        "    required: false\n"
+        "\n"
+        "apiVersion: warp.io/v1alpha1\n"
+        "kind: WekaAppStore\n"
+        "metadata:\n"
+        "  name: app-store-install\n"
+        "  namespace: default\n"
+        "spec:\n"
+        "  appStack:\n"
+        "    components: []\n"
+    )
+    bp_file = tmp_path / "app-store-install.yaml"
+    bp_file.write_text(yaml_content)
+
+    monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
+    captured_ns = []
+
+    def mock_apply(docs, namespace=""):
+        captured_ns.append(namespace)
+        return {"applied": []}
+
+    monkeypatch.setattr(main, "apply_blueprint_documents_with_namespace", mock_apply)
+
+    async def run():
+        request = _make_request_stub()
+        # Pass a non-empty namespace in variables — must be ignored for app-store-install
+        resp = await main.deploy_stream(
+            request,
+            app_name="app-store-install",
+            variables=_json.dumps({"namespace": "my-ns"}),
+        )
+        await _collect_sse(resp)
+        assert captured_ns, "apply should have been called"
+        assert captured_ns[0] == "", \
+            f"Expected namespace='' for app-store-install, got '{captured_ns[0]}'"
+
+    asyncio.run(run())
+
+
+def test_deploy_stream_app_store_install_exempt_from_required_validation(tmp_path, monkeypatch):
+    """Test 18: deploy_stream with app_name='app-store-install' does NOT emit a
+    'Required variable missing' error even when a required x-variable is absent."""
+    yaml_content = (
+        "x-variables:\n"
+        "  quay_password:\n"
+        "    type: string\n"
+        "    required: true\n"
+        "\n"
+        "apiVersion: warp.io/v1alpha1\n"
+        "kind: WekaAppStore\n"
+        "metadata:\n"
+        "  name: app-store-install\n"
+        "  namespace: default\n"
+        "spec:\n"
+        "  appStack:\n"
+        "    components: []\n"
+    )
+    bp_file = tmp_path / "app-store-install.yaml"
+    bp_file.write_text(yaml_content)
+
+    monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
+    monkeypatch.setattr(main, "apply_blueprint_documents_with_namespace", lambda *a, **kw: {"applied": []})
+
+    async def run():
+        request = _make_request_stub()
+        # quay_password is required in schema but app-store-install is namespace-preserving exempt
+        resp = await main.deploy_stream(
+            request,
+            app_name="app-store-install",
+            variables=_json.dumps({}),
+        )
+        events = await _collect_sse(resp)
+        req_errors = [
+            e for e in events
+            if e.get("type") == "error" and "Required variable missing" in e.get("message", "")
+        ]
+        assert not req_errors, \
+            f"app-store-install must bypass required-field validation, got: {req_errors}"
+
+    asyncio.run(run())
+
+
+def test_parse_deploy_timeout_returns_blueprint_value():
+    """Test 19: parse_deploy_timeout returns the blueprint's x-deploy-timeout value."""
+    result = main.parse_deploy_timeout("x-deploy-timeout: 2700\n")
+    assert result == 2700, f"Expected 2700, got {result}"
+
+
+def test_parse_deploy_timeout_returns_default_when_absent():
+    """Test 20: parse_deploy_timeout returns DEFAULT_DEPLOY_TIMEOUT_SECONDS when key is absent."""
+    result = main.parse_deploy_timeout("")
+    assert result == main.DEFAULT_DEPLOY_TIMEOUT_SECONDS, \
+        f"Expected default {main.DEFAULT_DEPLOY_TIMEOUT_SECONDS}, got {result}"
+
+
+def test_parse_deploy_timeout_returns_default_for_malformed_value():
+    """Test 21: parse_deploy_timeout returns default for non-integer and non-positive values."""
+    assert main.parse_deploy_timeout("x-deploy-timeout: notanumber\n") == main.DEFAULT_DEPLOY_TIMEOUT_SECONDS
+    assert main.parse_deploy_timeout("x-deploy-timeout: -100\n") == main.DEFAULT_DEPLOY_TIMEOUT_SECONDS
+    assert main.parse_deploy_timeout("x-deploy-timeout: 0\n") == main.DEFAULT_DEPLOY_TIMEOUT_SECONDS
