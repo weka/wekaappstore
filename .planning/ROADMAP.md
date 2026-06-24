@@ -10,7 +10,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
 
 ## Phases
 
-- [ ] **Phase 27: Install Blueprint Authoring** - Parameterized `app-store-install.yaml` AppStack CR encoding the full ordered install with `stringData` secrets and idempotent components.
+- [x] **Phase 27: Install Blueprint Authoring** - Parameterized `app-store-install.yaml` AppStack CR encoding the full ordered install with `stringData` secrets and idempotent components. (completed 2026-06-24)
 - [ ] **Phase 28: Operator Helm Auth & CRD Discovery** - Operator authenticates to quay before OCI chart pulls and stops caching empty-CRD failures — the highest-risk de-risk, built before the frontend.
 - [ ] **Phase 29: Backend Wiring & Secret Safety** - Server-side dockerconfigjson/endpoint derivation, raised per-blueprint SSE deadline, and secret redaction in annotation + SSE stream.
 - [ ] **Phase 30: Wizard Stepper & Live Progress** - Multi-step `welcome.html` form replacing the hard-block, with per-stage progress and chaining to cluster-init.
@@ -30,7 +30,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
   5. The node-label Job uses `kubectl label nodes --all weka.io/supports-clients=true --overwrite` and is a no-op on re-run, and an `x-variables` block maps 1:1 to the wizard form fields (GUI-derived vars excluded from validation).
 **Plans**: 2 plans
 - [x] 27-01-PLAN.md — Author app-store-install.yaml (x-variables, quay/operator/CSI + node-label/WekaClient/CSI-secret/demote/StorageClasses, stringData secrets, D-01 order)
-- [ ] 27-02-PLAN.md — Cluster-free pytest: GUI [[ ]] render + real resolve_dependencies topo order + quay encoding round-trip + single default StorageClass
+- [x] 27-02-PLAN.md — Cluster-free pytest: GUI [[ ]] render + real resolve_dependencies topo order + quay encoding round-trip + single default StorageClass
 
 ### Phase 28: Operator Helm Auth & CRD Discovery
 **Goal**: The operator pod can pull and install the quay OCI operator chart on a fresh cluster that has only the in-namespace pull secrets, and reliably discovers the chart's CRDs.
@@ -82,7 +82,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 27. Install Blueprint Authoring | 1/2 | In Progress|  |
+| 27. Install Blueprint Authoring | 2/2 | Complete   | 2026-06-24 |
 | 28. Operator Helm Auth & CRD Discovery | 0/0 | Not started | - |
 | 29. Backend Wiring & Secret Safety | 0/0 | Not started | - |
 | 30. Wizard Stepper & Live Progress | 0/0 | Not started | - |
