@@ -42,7 +42,7 @@ v7.0 shipped 2026-06-17. v3.1 deferred E2E chat work remains tracked separately 
 - Two chained CRs: `app-store-install` runs to `Ready`, then the untouched `app-store-cluster-init` runs last; redirect when cluster-init reaches `Ready`
 - Parameterized `weka-csi-config/` templates using `stringData` (eliminates the base64 trailing-newline bug class) and GUI-built `dockerconfigjson` for the quay secret
 
-**Authoritative spec:** `.planning/PRD-install-wizard-weka-storage-stack.md` (resolved decisions A1, GUI-built quay secret, no helm registry login, two chained CRs, cluster-init `Ready` as redirect gate).
+**Authoritative spec:** `.planning/PRD-install-wizard-weka-storage-stack.md` (resolved decisions A1 node-prereq-as-snippet, GUI-built quay `dockerconfigjson`, two chained CRs, cluster-init `Ready` as redirect gate). **Decision C revised after research:** the operator pod's helm process needs `helm registry login` for the quay OCI chart pull — Kubernetes `dockerconfigjson` secrets only cover image pulls — so operator-side helm registry auth (+ `discover_chart_crds` cache fix) is scoped into v8.0.
 
 ## Recent Milestones
 
