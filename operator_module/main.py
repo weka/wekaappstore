@@ -670,15 +670,36 @@ def _load_kube_config_once() -> bool:
             return False
 
 
-@lru_cache(maxsize=128)
-def discover_chart_crds(chart_ref: str, version: Optional[str] = None) -> set[str]:
+# Success-only cache for chart CRD discovery (OPA-02 / D-06).
+# Replaces the previous @lru_cache so that a failed `helm show crds`
+# (auth/network error) is NEVER memoized as "no CRDs". Only successful
+# subprocess results — including a genuine empty set — are cached here.
+# Key is the tuple (chart_ref, version, registry_config_path) per D-07.
+_chart_crds_cache: "dict[tuple, set]" = {}
+
+
+def discover_chart_crds(chart_ref: str, version: Optional[str] = None,
+                        registry_config_path: Optional[str] = None) -> set[str]:
     """Return the set of CRD names a chart would install using `helm show crds`.
 
     If helm cannot show CRDs (no crds/ or error), returns empty set.
+
+    Results are cached in the module-level ``_chart_crds_cache`` dict ONLY on
+    subprocess success (D-06). A failure (CalledProcessError or any Exception)
+    returns ``set()`` without caching, so a subsequent call re-attempts the
+    subprocess — a transient auth/network failure is never memoized as
+    "no CRDs". When ``registry_config_path`` is provided it is passed to helm
+    as ``--registry-config <path>`` for OCI registry authentication.
     """
+    cache_key = (chart_ref, version, registry_config_path)
+    if cache_key in _chart_crds_cache:
+        return _chart_crds_cache[cache_key]
+
     cmd = ["helm", "show", "crds", chart_ref]
     if version:
         cmd += ["--version", str(version)]
+    if registry_config_path is not None:
+        cmd += ["--registry-config", registry_config_path]
 
     try:
         out = subprocess.check_output(cmd, text=True)
@@ -700,6 +721,8 @@ def discover_chart_crds(chart_ref: str, version: Optional[str] = None) -> set[st
             name = meta.get("name")
             if name:
                 names.add(str(name))
+    # Cache only on subprocess success (genuine empty set included).
+    _chart_crds_cache[cache_key] = names
     return names
 
 
