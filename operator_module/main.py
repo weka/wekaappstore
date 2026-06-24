@@ -78,10 +78,11 @@ class HelmOperator:
         except Exception:
             self.helm_cmd_timeout = 900
     
-    def install_or_upgrade(self, name: str, chart: str, values: Dict[str, Any], 
+    def install_or_upgrade(self, name: str, chart: str, values: Dict[str, Any],
                           namespace: str, repository: Optional[str] = None,
                           version: Optional[str] = None,
-                          skip_crds: Optional[bool] = None) -> tuple[bool, str]:
+                          skip_crds: Optional[bool] = None,
+                          registry_config_path: Optional[str] = None) -> tuple[bool, str]:
         """
         Install or upgrade a Helm chart
         
@@ -104,9 +105,9 @@ class HelmOperator:
             
             # Check if release exists
             if self._release_exists(name, namespace):
-                return self._upgrade_chart(name, chart, values, namespace, version, skip_crds)
+                return self._upgrade_chart(name, chart, values, namespace, version, skip_crds, registry_config_path)
             else:
-                return self._install_chart(name, chart, values, namespace, version, skip_crds)
+                return self._install_chart(name, chart, values, namespace, version, skip_crds, registry_config_path)
         except Exception as e:
             error_msg = f"Helm operation failed: {str(e)}"
             self.logger.error(error_msg)
@@ -133,20 +134,23 @@ class HelmOperator:
             self.logger.error(f"Error adding Helm repo: {str(e)}")
             return False
     
-    def _install_chart(self, name: str, chart: str, values: Dict[str, Any], 
+    def _install_chart(self, name: str, chart: str, values: Dict[str, Any],
                       namespace: str, version: Optional[str] = None,
-                      skip_crds: Optional[bool] = None) -> tuple[bool, str]:
+                      skip_crds: Optional[bool] = None,
+                      registry_config_path: Optional[str] = None) -> tuple[bool, str]:
         """Install a new Helm chart"""
         cmd = [
             "helm", "install", name, chart,
             "--namespace", namespace,
             "--create-namespace",
         ]
-        
+
         if version:
             cmd.extend(["--version", version])
         if skip_crds:
             cmd.append("--skip-crds")
+        if registry_config_path is not None:
+            cmd.extend(["--registry-config", registry_config_path])
         
         # Write values to temporary file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
@@ -177,19 +181,22 @@ class HelmOperator:
             if os.path.exists(values_file):
                 os.unlink(values_file)
     
-    def _upgrade_chart(self, name: str, chart: str, values: Dict[str, Any], 
+    def _upgrade_chart(self, name: str, chart: str, values: Dict[str, Any],
                       namespace: str, version: Optional[str] = None,
-                      skip_crds: Optional[bool] = None) -> tuple[bool, str]:
+                      skip_crds: Optional[bool] = None,
+                      registry_config_path: Optional[str] = None) -> tuple[bool, str]:
         """Upgrade an existing Helm chart"""
         cmd = [
             "helm", "upgrade", name, chart,
             "--namespace", namespace,
         ]
-        
+
         if version:
             cmd.extend(["--version", version])
         if skip_crds:
             cmd.append("--skip-crds")
+        if registry_config_path is not None:
+            cmd.extend(["--registry-config", registry_config_path])
         
         # Write values to temporary file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
@@ -744,7 +751,8 @@ def list_existing_crds() -> set[str]:
         return set()
 
 
-def should_skip_crds_for_component(helm_cfg: Dict[str, Any], chart_ref: str, version: Optional[str]) -> bool:
+def should_skip_crds_for_component(helm_cfg: Dict[str, Any], chart_ref: str, version: Optional[str],
+                                   registry_config_path: Optional[str] = None) -> bool:
     """Decide whether to pass --skip-crds for a Helm installation.
 
     Strategy options (case-insensitive):
@@ -760,7 +768,7 @@ def should_skip_crds_for_component(helm_cfg: Dict[str, Any], chart_ref: str, ver
         return True
 
     # Auto strategy
-    chart_crds = discover_chart_crds(chart_ref, version)
+    chart_crds = discover_chart_crds(chart_ref, version, registry_config_path)
     if not chart_crds:
         # No CRDs in chart → nothing to skip at Helm level
         return False
@@ -1172,52 +1180,71 @@ def handle_appstack_deployment(body, spec, name, namespace, status, **kwargs):
                         )
                         merged_values = _deep_merge(merged_values, ref_values)
                 
-                # Decide CRD handling strategy (default Auto)
-                try:
-                    # Ensure repo is added before CRD discovery so `helm show crds <repo/chart>` can resolve
-                    if chart_repo and not chart_repo.startswith("oci://"):
-                        try:
-                            repo_name = helm_operator._extract_repo_name(chart_repo)
-                            helm_operator._add_repo(repo_name, chart_repo)
-                        except Exception as e:
-                            logging.debug(f"Skipping repo add prior to CRD discovery for component '{comp_name}': {e}")
-                    skip_crds = should_skip_crds_for_component(helm_config, chart_ref, chart_version)
-                    logging.info(f"CRD strategy for component '{comp_name}': crdsStrategy={helm_config.get('crdsStrategy', 'Auto')} -> skip_crds={skip_crds}")
-                except Exception as e:
-                    # Be conservative: don't skip if we couldn't decide
-                    skip_crds = False
-                    logging.warning(f"Failed to evaluate CRD strategy for component '{comp_name}': {e}. Proceeding without --skip-crds.")
+                # For OCI charts on quay, write the docker auth JSON to a temp
+                # registry-config file so `helm show crds` / install / upgrade can
+                # authenticate (OPA-01 / D-01..D-05). Guarded by oci:// + the
+                # presence of quay_dockerconfigjson in stack_vars; otherwise the
+                # path stays None and helm runs without --registry-config
+                # (backward-compatible). The file is unlinked in the finally below.
+                registry_config_path = None
+                if chart_repo and chart_repo.startswith("oci://") and "quay_dockerconfigjson" in stack_vars:
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as rcf:
+                        rcf.write(stack_vars["quay_dockerconfigjson"])
+                        registry_config_path = rcf.name
+                    logging.debug(f"Wrote OCI registry-config for component '{comp_name}' to {registry_config_path}")
 
-                # Install or upgrade
-                success, message = helm_operator.install_or_upgrade(
-                    name=release_name,
-                    chart=chart_ref,
-                    values=merged_values,
-                    namespace=target_namespace,
-                    repository=chart_repo,
-                    version=chart_version,
-                    skip_crds=skip_crds
-                )
-                
-                if not success:
-                    comp_status['phase'] = 'Failed'
-                    comp_status['message'] = f"Failed to deploy: {message}"
-                    failed = True
-                else:
-                    comp_status['releaseName'] = release_name
-                    
-                    # Wait for component to be ready if configured
-                    if component.get('waitForReady', True):
-                        if wait_for_component_ready(component, target_namespace):
-                            comp_status['phase'] = 'Ready'
-                            comp_status['message'] = 'Component deployed and ready'
-                        else:
-                            comp_status['phase'] = 'Failed'
-                            comp_status['message'] = 'Component deployed but not ready within timeout'
-                            failed = True
+                try:
+                    # Decide CRD handling strategy (default Auto)
+                    try:
+                        # Ensure repo is added before CRD discovery so `helm show crds <repo/chart>` can resolve
+                        if chart_repo and not chart_repo.startswith("oci://"):
+                            try:
+                                repo_name = helm_operator._extract_repo_name(chart_repo)
+                                helm_operator._add_repo(repo_name, chart_repo)
+                            except Exception as e:
+                                logging.debug(f"Skipping repo add prior to CRD discovery for component '{comp_name}': {e}")
+                        skip_crds = should_skip_crds_for_component(helm_config, chart_ref, chart_version, registry_config_path)
+                        logging.info(f"CRD strategy for component '{comp_name}': crdsStrategy={helm_config.get('crdsStrategy', 'Auto')} -> skip_crds={skip_crds}")
+                    except Exception as e:
+                        # Be conservative: don't skip if we couldn't decide
+                        skip_crds = False
+                        logging.warning(f"Failed to evaluate CRD strategy for component '{comp_name}': {e}. Proceeding without --skip-crds.")
+
+                    # Install or upgrade
+                    success, message = helm_operator.install_or_upgrade(
+                        name=release_name,
+                        chart=chart_ref,
+                        values=merged_values,
+                        namespace=target_namespace,
+                        repository=chart_repo,
+                        version=chart_version,
+                        skip_crds=skip_crds,
+                        registry_config_path=registry_config_path
+                    )
+
+                    if not success:
+                        comp_status['phase'] = 'Failed'
+                        comp_status['message'] = f"Failed to deploy: {message}"
+                        failed = True
                     else:
-                        comp_status['phase'] = 'Ready'
-                        comp_status['message'] = 'Component deployed (readiness check skipped)'
+                        comp_status['releaseName'] = release_name
+
+                        # Wait for component to be ready if configured
+                        if component.get('waitForReady', True):
+                            if wait_for_component_ready(component, target_namespace):
+                                comp_status['phase'] = 'Ready'
+                                comp_status['message'] = 'Component deployed and ready'
+                            else:
+                                comp_status['phase'] = 'Failed'
+                                comp_status['message'] = 'Component deployed but not ready within timeout'
+                                failed = True
+                        else:
+                            comp_status['phase'] = 'Ready'
+                            comp_status['message'] = 'Component deployed (readiness check skipped)'
+                finally:
+                    # Always remove the temp registry-config file, even on exception.
+                    if registry_config_path is not None and os.path.exists(registry_config_path):
+                        os.unlink(registry_config_path)
                 
             elif 'kubernetesManifest' in component and component['kubernetesManifest']:
                 # Deploy raw Kubernetes manifest
