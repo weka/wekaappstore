@@ -758,3 +758,79 @@ def test_parse_deploy_timeout_returns_default_for_malformed_value():
     assert main.parse_deploy_timeout("x-deploy-timeout: notanumber\n") == main.DEFAULT_DEPLOY_TIMEOUT_SECONDS
     assert main.parse_deploy_timeout("x-deploy-timeout: -100\n") == main.DEFAULT_DEPLOY_TIMEOUT_SECONDS
     assert main.parse_deploy_timeout("x-deploy-timeout: 0\n") == main.DEFAULT_DEPLOY_TIMEOUT_SECONDS
+
+
+# ---------------------------------------------------------------------------
+# Phase 29 Plan 02: build_quay_dockerconfigjson + split_endpoints tests
+# ---------------------------------------------------------------------------
+
+
+def test_build_quay_dockerconfigjson_byte_exact():
+    """Test 22: quay auth decodes to exactly user:pass with no trailing bytes."""
+    import base64
+    import json
+
+    result = main.build_quay_dockerconfigjson("alice", "s3cr3t")
+    parsed = json.loads(result)
+    raw_auth = parsed["auths"]["quay.io"]["auth"]
+    decoded = base64.b64decode(raw_auth)
+    assert decoded == b"alice:s3cr3t", (
+        f"Expected b'alice:s3cr3t', got {decoded!r}"
+    )
+    assert not decoded.endswith(b"\n"), (
+        "auth must not have a trailing newline byte"
+    )
+
+
+def test_build_quay_dockerconfigjson_structure():
+    """Test 23: build_quay_dockerconfigjson returns valid JSON with expected shape."""
+    import json
+
+    result = main.build_quay_dockerconfigjson("user", "pass")
+    parsed = json.loads(result)
+    assert "auths" in parsed
+    assert "quay.io" in parsed["auths"]
+    assert "auth" in parsed["auths"]["quay.io"]
+
+
+def test_split_endpoints_single():
+    """Test 24: split_endpoints with a single endpoint produces correct both forms."""
+    import json
+
+    result = main.split_endpoints("h:1")
+    assert result["endpoints_csv"] == "h:1"
+    assert json.loads(result["join_ip_ports_list"]) == ["h:1"]
+
+
+def test_split_endpoints_multiple_with_whitespace():
+    """Test 25: split_endpoints with multiple entries and surrounding whitespace trims correctly."""
+    import json
+
+    result = main.split_endpoints("a:1, b:2 , c:3")
+    assert result["endpoints_csv"] == "a:1,b:2,c:3"
+    assert json.loads(result["join_ip_ports_list"]) == ["a:1", "b:2", "c:3"]
+
+
+def test_split_endpoints_drops_empty_entries():
+    """Test 26: split_endpoints drops empty entries (e.g. trailing comma)."""
+    import json
+
+    result = main.split_endpoints("a:1,,b:2,")
+    assert json.loads(result["join_ip_ports_list"]) == ["a:1", "b:2"]
+    assert result["endpoints_csv"] == "a:1,b:2"
+
+
+def test_split_endpoints_join_ip_ports_list_is_valid_yaml():
+    """Test 27: join_ip_ports_list rendered into a YAML line parses as a valid YAML list."""
+    import yaml
+    from jinja2 import Environment
+
+    result = main.split_endpoints("a:1,b:2")
+    # Use the same Jinja2 Environment delimiters as deploy_stream
+    env = Environment(variable_start_string="[[", variable_end_string="]]")
+    template = env.from_string("joinIpPorts: [[ join_ip_ports_list ]]")
+    rendered = template.render(join_ip_ports_list=result["join_ip_ports_list"])
+    parsed = yaml.safe_load(rendered)
+    assert parsed == {"joinIpPorts": ["a:1", "b:2"]}, (
+        f"Expected list, got: {parsed!r}"
+    )
