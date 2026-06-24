@@ -1806,6 +1806,61 @@ def _cr_gui_variables(cr: dict) -> dict:
     return spec_vars if isinstance(spec_vars, dict) else {}
 
 
+# ---------------------------------------------------------------------------
+# Secret-key predicate and redaction helpers (SEC-01, D-09, D-10)
+#
+# _is_secret_key is the SINGLE source of truth used by BOTH _safe_gui_variables
+# (annotation allowlist) and _redact_secrets (SSE message redactor).
+# ---------------------------------------------------------------------------
+
+_SECRET_KEY_SUBSTRINGS = ("password", "token", "secret")
+_SECRET_KEY_EXACT = "quay_dockerconfigjson"
+
+
+def _is_secret_key(name: str) -> bool:
+    """Return True if ``name`` identifies a secret variable.
+
+    A key is secret when its lowercase form contains any of the substrings
+    'password', 'token', or 'secret', OR when it equals exactly
+    'quay_dockerconfigjson' (case-sensitive exact match, as it is a
+    well-known derived key that does not contain the above substrings).
+    """
+    lower = name.lower()
+    if any(sub in lower for sub in _SECRET_KEY_SUBSTRINGS):
+        return True
+    return name == _SECRET_KEY_EXACT
+
+
+def _safe_gui_variables(user_vars: dict) -> dict:
+    """Return a copy of ``user_vars`` with all secret keys removed.
+
+    Used to stamp the warp.io/gui-variables CR annotation so that secret
+    values (passwords, tokens, dockerconfigjson) are never persisted in etcd
+    or visible via ``kubectl get wekaappstore -o yaml`` (T-29-07 mitigate).
+    The original dict is not mutated.
+    """
+    return {k: v for k, v in user_vars.items() if not _is_secret_key(k)}
+
+
+def _redact_secrets(message: str, user_vars: dict) -> str:
+    """Replace occurrences of secret VALUES in ``message`` with '***'.
+
+    Builds the secret-value set from the same _is_secret_key predicate, so
+    the annotation allowlist and the SSE redactor share one definition
+    (T-29-09 mitigate). Only non-empty string values are replaced; empty
+    values are skipped to avoid replacing every empty substring. Replacement
+    is longest-first to prevent partial-overlap artifacts (T-29-08 mitigate).
+    """
+    secret_values = sorted(
+        (str(v) for k, v in user_vars.items() if _is_secret_key(k) and v),
+        key=len,
+        reverse=True,
+    )
+    for secret in secret_values:
+        message = message.replace(secret, "***")
+    return message
+
+
 # Variable names that should hold a URL/endpoint even when the blueprint only
 # declares them as a plain string (most blueprints predate a dedicated url type).
 _URL_FIELD_RE = re.compile(r"(?:^|_)(url|uri|endpoint|host|server|address)(?:_|$)", re.I)
