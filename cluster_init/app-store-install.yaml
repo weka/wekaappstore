@@ -253,6 +253,10 @@ spec:
       # NO readinessCheck — WekaClient operator manages its own reconcile loop;
       # the operator cannot meaningfully wait on client-cluster-join completion.
       # join_ip_ports_list is a YAML-array injected by Phase 29 backend.
+      # NOTE: weka-client runs in parallel with weka-node-label-job by design
+      # (D-01/D-03). The WekaClient operator manages its own reconcile loop and
+      # will schedule pods on labeled nodes when labels arrive. Adding
+      # weka-node-label-job to dependsOn would contradict the locked D-01/D-03.
       # -----------------------------------------------------------------------
 
       - name: weka-client
