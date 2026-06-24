@@ -40,7 +40,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 ### Progress & Streaming (PROG)
 
 - [ ] **PROG-01**: The install view shows each install stage transitioning Pending → In-progress → Done/Failed, driven by the existing `componentStatus` SSE events.
-- [ ] **PROG-02**: The deploy SSE deadline is raised (per-blueprint as needed) and keepalive/reconnect is robust, so a long operator+CSI+WekaClient install does not false-fail on a still-healthy deployment.
+- [x] **PROG-02**: The deploy SSE deadline is raised (per-blueprint as needed) and keepalive/reconnect is robust, so a long operator+CSI+WekaClient install does not false-fail on a still-healthy deployment.
 - [ ] **PROG-03**: On a stage failure the customer sees a clear, specific error and can retry the install.
 
 ### Secret Safety & Idempotency (SEC)
@@ -98,7 +98,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 | INST-10 | Phase 27 | Pending |
 | OPA-01 | Phase 28 | Complete |
 | OPA-02 | Phase 28 | Complete |
-| PROG-02 | Phase 29 | Pending |
+| PROG-02 | Phase 29 | Complete |
 | SEC-01 | Phase 29 | Pending |
 | WIZ-01 | Phase 30 | Pending |
 | WIZ-02 | Phase 30 | Pending |
