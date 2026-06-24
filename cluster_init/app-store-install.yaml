@@ -51,7 +51,7 @@ spec:
             namespace: weka-operator-system
           type: kubernetes.io/dockerconfigjson
           stringData:
-            .dockerconfigjson: "[[ quay_dockerconfigjson ]]"
+            .dockerconfigjson: '[[ quay_dockerconfigjson ]]'
 
       - name: quay-secret-default-ns
         description: "Quay.io pull secret in default namespace (WekaClient image pull)"
@@ -66,7 +66,7 @@ spec:
             namespace: default
           type: kubernetes.io/dockerconfigjson
           stringData:
-            .dockerconfigjson: "[[ quay_dockerconfigjson ]]"
+            .dockerconfigjson: '[[ quay_dockerconfigjson ]]'
 
       # -----------------------------------------------------------------------
       # STAGE 2: WEKA Operator (depends on both quay secrets)
