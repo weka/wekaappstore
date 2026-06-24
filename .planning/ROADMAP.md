@@ -28,7 +28,9 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
   3. The `weka-client` (WekaClient CR) component declares `dependsOn: [weka-operator, weka-client-secret]` and the `weka-operator` component carries `readinessCheck: {type: deployment}`, so the WekaClient apply cannot 404 on a missing CRD; the WEKA operator installs from `oci://quay.io/weka.io/helm/weka-operator` at `[[ operator_version ]]` and CSI from the public `csi-wekafs` repo into the `csi-wekafs` namespace.
   4. The three StorageClasses share `secretName`/`secretNamespace` matching the `csi-wekafs-api-secret`, `storageclass-wekafs-dir-api` is the cluster default, and a brownfield existing-default is demoted or skipped rather than creating two defaults.
   5. The node-label Job uses `kubectl label nodes --all weka.io/supports-clients=true --overwrite` and is a no-op on re-run, and an `x-variables` block maps 1:1 to the wizard form fields (GUI-derived vars excluded from validation).
-**Plans**: TBD
+**Plans**: 2 plans
+- [ ] 27-01-PLAN.md — Author app-store-install.yaml (x-variables, quay/operator/CSI + node-label/WekaClient/CSI-secret/demote/StorageClasses, stringData secrets, D-01 order)
+- [ ] 27-02-PLAN.md — Cluster-free pytest: GUI [[ ]] render + real resolve_dependencies topo order + quay encoding round-trip + single default StorageClass
 
 ### Phase 28: Operator Helm Auth & CRD Discovery
 **Goal**: The operator pod can pull and install the quay OCI operator chart on a fresh cluster that has only the in-namespace pull secrets, and reliably discovers the chart's CRDs.
@@ -80,7 +82,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 27. Install Blueprint Authoring | 0/0 | Not started | - |
+| 27. Install Blueprint Authoring | 0/2 | Planned | - |
 | 28. Operator Helm Auth & CRD Discovery | 0/0 | Not started | - |
 | 29. Backend Wiring & Secret Safety | 0/0 | Not started | - |
 | 30. Wizard Stepper & Live Progress | 0/0 | Not started | - |
