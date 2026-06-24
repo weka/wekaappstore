@@ -12,7 +12,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
 
 - [x] **Phase 27: Install Blueprint Authoring** - Parameterized `app-store-install.yaml` AppStack CR encoding the full ordered install with `stringData` secrets and idempotent components. (completed 2026-06-24)
 - [x] **Phase 28: Operator Helm Auth & CRD Discovery** - Operator authenticates to quay before OCI chart pulls and stops caching empty-CRD failures — the highest-risk de-risk, built before the frontend. (completed 2026-06-24)
-- [ ] **Phase 29: Backend Wiring & Secret Safety** - Server-side dockerconfigjson/endpoint derivation, raised per-blueprint SSE deadline, and secret redaction in annotation + SSE stream.
+- [x] **Phase 29: Backend Wiring & Secret Safety** - Server-side dockerconfigjson/endpoint derivation, raised per-blueprint SSE deadline, and secret redaction in annotation + SSE stream. (completed 2026-06-24)
 - [ ] **Phase 30: Wizard Stepper & Live Progress** - Multi-step `welcome.html` form replacing the hard-block, with per-stage progress and chaining to cluster-init.
 - [ ] **Phase 31: End-to-End Verification** - Fresh-cluster full install, failure/retry, idempotent re-run, and secret-leak gate.
 
@@ -57,7 +57,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
 **Plans**: 3 plans
 - [x] 29-01-PLAN.md — NAMESPACE_PRESERVING_APPS set (SC1) + parse_deploy_timeout/x-deploy-timeout raised SSE deadline (SC3, PROG-02), main.py + blueprint + tests (complete 2026-06-24)
 - [x] 29-02-PLAN.md — build_quay_dockerconfigjson (byte-exact) + split_endpoints (dual form, JSON-string list) merged before render (SC2) + unit tests
-- [ ] 29-03-PLAN.md — Shared secret-key predicate driving _safe_gui_variables annotation allowlist + SSE message redactor (SC4, SEC-01, E2E-03) + tests
+- [x] 29-03-PLAN.md — Shared secret-key predicate driving _safe_gui_variables annotation allowlist + SSE message redactor (SC4, SEC-01, E2E-03) + tests (complete 2026-06-24)
 
 ### Phase 30: Wizard Stepper & Live Progress
 **Goal**: A customer completes a multi-step web form and watches the storage stack install stage-by-stage, then is redirected to the App Store after cluster-init.
