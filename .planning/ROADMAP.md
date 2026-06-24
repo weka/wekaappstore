@@ -56,7 +56,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
   4. Quay and WEKA secret values never appear in the `warp.io/gui-variables` CR annotation (variable allowlist excludes `*password*`/`*token*`/`*secret*`/`quay_dockerconfigjson`) nor in emitted SSE component messages (redaction).
 **Plans**: 3 plans
 - [x] 29-01-PLAN.md — NAMESPACE_PRESERVING_APPS set (SC1) + parse_deploy_timeout/x-deploy-timeout raised SSE deadline (SC3, PROG-02), main.py + blueprint + tests (complete 2026-06-24)
-- [ ] 29-02-PLAN.md — build_quay_dockerconfigjson (byte-exact) + split_endpoints (dual form, JSON-string list) merged before render (SC2) + unit tests
+- [x] 29-02-PLAN.md — build_quay_dockerconfigjson (byte-exact) + split_endpoints (dual form, JSON-string list) merged before render (SC2) + unit tests
 - [ ] 29-03-PLAN.md — Shared secret-key predicate driving _safe_gui_variables annotation allowlist + SSE message redactor (SC4, SEC-01, E2E-03) + tests
 
 ### Phase 30: Wizard Stepper & Live Progress
@@ -89,7 +89,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
 |-------|----------------|--------|-----------|
 | 27. Install Blueprint Authoring | 2/2 | Complete   | 2026-06-24 |
 | 28. Operator Helm Auth & CRD Discovery | 2/2 | Complete    | 2026-06-24 |
-| 29. Backend Wiring & Secret Safety | 0/3 | Planned | - |
+| 29. Backend Wiring & Secret Safety | 2/3 | In Progress|  |
 | 30. Wizard Stepper & Live Progress | 0/0 | Not started | - |
 | 31. End-to-End Verification | 0/0 | Not started | - |
 

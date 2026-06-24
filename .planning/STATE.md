@@ -4,13 +4,13 @@ milestone: v8.0
 milestone_name: Guided Install Wizard — WEKA Operator, CSI & Storage Classes
 status: executing
 stopped_at: Completed 29-01-PLAN.md
-last_updated: "2026-06-24T12:06:31Z"
-last_activity: 2026-06-24 -- Phase 29 Plan 01 complete
+last_updated: "2026-06-24T12:14:29.536Z"
+last_activity: 2026-06-24
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
   percent: 40
 ---
 
@@ -26,11 +26,11 @@ See: `.planning/PROJECT.md` (updated 2026-06-24 — milestone v8.0 started)
 ## Current Position
 
 Phase: 29
-Plan: 01 complete (1 of 4 plans done)
-Status: Executing
-Last activity: 2026-06-24 -- Phase 29 Plan 01 complete (NAMESPACE_PRESERVING_APPS + parse_deploy_timeout)
+Plan: 2 complete (1 of 4 plans done)
+Status: Ready to execute
+Last activity: 2026-06-24
 
-Progress: [----------] 0% (0/5 phases, plan 1/4 in phase 29)
+Progress: [█████████░] 86%
 
 ## Accumulated Context
 
@@ -63,6 +63,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-24T12:06:31Z
+Last session: 2026-06-24T12:14:29.530Z
 Stopped at: Completed 29-01-PLAN.md
 Resume: `/gsd:execute-phase 29` to execute Phase 29 Plan 02
