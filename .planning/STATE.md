@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v8.0
 milestone_name: Guided Install Wizard — WEKA Operator, CSI & Storage Classes
-status: executing
-stopped_at: Phase 28 context gathered (assumptions mode)
-last_updated: "2026-06-24T07:16:32.834Z"
+status: ready_to_plan
+stopped_at: Phase 28 complete (2/2) — ready to discuss Phase 29
+last_updated: 2026-06-24T07:33:47.678Z
 last_activity: 2026-06-24 -- Phase 28 execution started
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 29
   percent: 20
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-06-24 — milestone v8.0 started)
 
 **Core value:** A customer can stand up the full WEKA storage stack (operator, CSI driver, client, storage classes) from the App Store install wizard by answering a short form — no manual `kubectl`/`helm`/base64 work.
-**Current focus:** Phase 28 — operator-helm-auth-crd-discovery
+**Current focus:** Phase 29 — backend wiring & secret safety
 
 ## Current Position
 
-Phase: 28 (operator-helm-auth-crd-discovery) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 28
-Last activity: 2026-06-24 -- Phase 28 execution started
+Phase: 29
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-06-24
 
 Progress: [----------] 0% (0/5 phases)
 

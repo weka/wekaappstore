@@ -23,8 +23,8 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Operator Helm Auth (OPA) — operator-side changes for authenticated quay OCI pulls
 
-- [ ] **OPA-01**: The operator authenticates to quay before pulling the operator OCI chart (`helm registry login` / `--registry-config`) using the supplied quay credentials, so `helm show crds` / `helm install oci://quay.io/...` succeed from inside the operator pod.
-- [ ] **OPA-02**: `discover_chart_crds` no longer memoizes an empty-CRD failure result, so operator CRDs are discovered reliably (preventing a later WekaClient 404).
+- [x] **OPA-01**: The operator authenticates to quay before pulling the operator OCI chart (`helm registry login` / `--registry-config`) using the supplied quay credentials, so `helm show crds` / `helm install oci://quay.io/...` succeed from inside the operator pod.
+- [x] **OPA-02**: `discover_chart_crds` no longer memoizes an empty-CRD failure result, so operator CRDs are discovered reliably (preventing a later WekaClient 404).
 
 ### Wizard Form & UX (WIZ) — multi-step `welcome.html` form
 
@@ -96,8 +96,8 @@ Which phases cover which requirements. Populated during roadmap creation.
 | INST-08 | Phase 27 | Pending |
 | INST-09 | Phase 27 | Pending |
 | INST-10 | Phase 27 | Pending |
-| OPA-01 | Phase 28 | Pending |
-| OPA-02 | Phase 28 | Pending |
+| OPA-01 | Phase 28 | Complete |
+| OPA-02 | Phase 28 | Complete |
 | PROG-02 | Phase 29 | Pending |
 | SEC-01 | Phase 29 | Pending |
 | WIZ-01 | Phase 30 | Pending |

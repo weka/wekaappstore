@@ -85,7 +85,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 27. Install Blueprint Authoring | 2/2 | Complete   | 2026-06-24 |
-| 28. Operator Helm Auth & CRD Discovery | 2/2 | Complete   | 2026-06-24 |
+| 28. Operator Helm Auth & CRD Discovery | 2/2 | Complete    | 2026-06-24 |
 | 29. Backend Wiring & Secret Safety | 0/0 | Not started | - |
 | 30. Wizard Stepper & Live Progress | 0/0 | Not started | - |
 | 31. End-to-End Verification | 0/0 | Not started | - |
