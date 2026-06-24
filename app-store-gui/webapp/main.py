@@ -3064,7 +3064,7 @@ async def deploy_stream(
                 if isinstance(d, dict) and d.get("kind") == "WekaAppStore":
                     md = d.setdefault("metadata", {})
                     anns = md.setdefault("annotations", {})
-                    anns["warp.io/gui-variables"] = json.dumps(user_vars, separators=(",", ":"))
+                    anns["warp.io/gui-variables"] = json.dumps(_safe_gui_variables(user_vars), separators=(",", ":"))
                     cr_name = cr_name or md.get("name")
 
             # Apply manifest with namespace overrides using the rendered documents
@@ -3113,7 +3113,7 @@ async def deploy_stream(
                             "type": "component",
                             "name": cname,
                             "phase": cphase,
-                            "message": comp.get("message", ""),
+                            "message": _redact_secrets(comp.get("message", ""), user_vars),
                         })
                 phase = status.get("appStackPhase")
                 if phase == "Ready":
