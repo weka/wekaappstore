@@ -185,6 +185,11 @@ if os.path.isdir(STATIC_DIR):
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 PLANNING_APPLY_GATEWAY = ApplyGateway(project_root=PROJECT_ROOT)
 
+# Apps whose blueprints carry fixed per-component targetNamespace values that must
+# NOT be overwritten by a user-selected namespace.  Any new blueprint that uses
+# hard-coded targetNamespace values should be added here.
+NAMESPACE_PRESERVING_APPS = {"cluster-init", "app-store-install"}
+
 # Load logo as base64 once for reuse in templates
 LOGO_B64 = None
 try:
@@ -1927,8 +1932,8 @@ async def deploy(app_name: str = Form(...), namespace: str = Form("default")):
     if not yaml_path:
         return JSONResponse({"ok": False, "error": "Unknown app"}, status_code=400)
 
-    # For cluster-init, preserve namespaces defined in the YAML (do not override)
-    effective_ns = "" if app_name == "cluster-init" else namespace
+    # For namespace-preserving apps, keep the namespaces defined in the YAML (do not override)
+    effective_ns = "" if app_name in NAMESPACE_PRESERVING_APPS else namespace
 
     try:
         # Apply with explicit namespace overrides so the blueprint deploys into the chosen namespace
@@ -2870,8 +2875,8 @@ async def deploy_stream(
         # Extract namespace from variables dict; default to "default" if absent or empty
         namespace = str(user_vars.get("namespace", "default") or "default").strip() or "default"
 
-        # Required-field validation (cluster-init is exempt)
-        if app_name != "cluster-init":
+        # Required-field validation (namespace-preserving apps are exempt)
+        if app_name not in NAMESPACE_PRESERVING_APPS:
             if not os.path.isabs(yaml_path):
                 schema_path = os.path.join(PROJECT_ROOT, yaml_path)
             else:
@@ -2940,12 +2945,12 @@ async def deploy_stream(
                 "Deploy-stream start: app=%s namespace=%s blueprint=%s items=%d",
                 app_name, namespace, bp_path, len(items)
             )
-            ns_for_apply = "" if app_name == "cluster-init" else namespace
+            ns_for_apply = "" if app_name in NAMESPACE_PRESERVING_APPS else namespace
             result = apply_blueprint_documents_with_namespace(docs, namespace=ns_for_apply)
 
-            # cluster-init and non-appStack blueprints have no per-component operator status
-            # to poll — report submission complete immediately.
-            if not cr_name or app_name == "cluster-init":
+            # Namespace-preserving apps and non-appStack blueprints have no per-component
+            # operator status to poll — report submission complete immediately.
+            if not cr_name or app_name in NAMESPACE_PRESERVING_APPS:
                 yield sse_event({"type": "complete", "ok": True, "result": result, "message": "Deployment complete"})
                 return
 
