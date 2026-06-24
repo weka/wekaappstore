@@ -29,7 +29,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
   4. The three StorageClasses share `secretName`/`secretNamespace` matching the `csi-wekafs-api-secret`, `storageclass-wekafs-dir-api` is the cluster default, and a brownfield existing-default is demoted or skipped rather than creating two defaults.
   5. The node-label Job uses `kubectl label nodes --all weka.io/supports-clients=true --overwrite` and is a no-op on re-run, and an `x-variables` block maps 1:1 to the wizard form fields (GUI-derived vars excluded from validation).
 **Plans**: 2 plans
-- [ ] 27-01-PLAN.md — Author app-store-install.yaml (x-variables, quay/operator/CSI + node-label/WekaClient/CSI-secret/demote/StorageClasses, stringData secrets, D-01 order)
+- [x] 27-01-PLAN.md — Author app-store-install.yaml (x-variables, quay/operator/CSI + node-label/WekaClient/CSI-secret/demote/StorageClasses, stringData secrets, D-01 order)
 - [ ] 27-02-PLAN.md — Cluster-free pytest: GUI [[ ]] render + real resolve_dependencies topo order + quay encoding round-trip + single default StorageClass
 
 ### Phase 28: Operator Helm Auth & CRD Discovery
@@ -82,7 +82,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 27. Install Blueprint Authoring | 0/2 | Planned | - |
+| 27. Install Blueprint Authoring | 1/2 | In Progress|  |
 | 28. Operator Helm Auth & CRD Discovery | 0/0 | Not started | - |
 | 29. Backend Wiring & Secret Safety | 0/0 | Not started | - |
 | 30. Wizard Stepper & Live Progress | 0/0 | Not started | - |
