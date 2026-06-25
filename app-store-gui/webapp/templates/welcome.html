@@ -434,7 +434,11 @@ kind: Node
 
       // Cluster-init chain — opened automatically after app-store-install Ready (D-10)
       function openClusterInitStream() {
-        const es = new EventSource(`/deploy-stream?app_name=cluster-init&namespace=${selectedNamespace}`);
+        const params = new URLSearchParams({
+          app_name: 'cluster-init',
+          variables: JSON.stringify({ namespace: selectedNamespace }),
+        });
+        const es = new EventSource(`/deploy-stream?${params.toString()}`);
 
         es.onmessage = (ev) => {
           try {
@@ -496,7 +500,11 @@ kind: Node
         setLogs([]);
 
         // Use deploy-stream for consistency with other blueprints
-        const url = `/deploy-stream?app_name=cluster-init&namespace=${selectedNamespace}`;
+        const params = new URLSearchParams({
+          app_name: 'cluster-init',
+          variables: JSON.stringify({ namespace: selectedNamespace }),
+        });
+        const url = `/deploy-stream?${params.toString()}`;
         const es = new EventSource(url);
 
         es.onmessage = (ev) => {
