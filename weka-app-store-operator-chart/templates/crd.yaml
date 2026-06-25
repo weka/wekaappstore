@@ -200,8 +200,6 @@ spec:
                       if not explicitly set. Use $$ to escape a literal dollar sign.
                       Undefined references raise a permanent error.
                       Variable names must match Python identifier syntax: [_a-zA-Z][_a-zA-Z0-9]*.
-                    propertyNames:
-                      pattern: "^[_a-zA-Z][_a-zA-Z0-9]*$"
                     additionalProperties:
                       type: string
           
