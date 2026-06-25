@@ -4,7 +4,7 @@ replicaCount: 1
 image:
   repository: wekachrisjen/weka-app-store-multi-arch
   pullPolicy: IfNotPresent
-  tag: "v0.15"
+  tag: "v0.19"
 
 # Control how the operator watches resources
 watch:
@@ -41,11 +41,11 @@ rbac:
   clusterRole:
     rules:
       # Global, cluster-wide visibility and safe write operations. This ensures the
-      # operator can see resources and CRs in ALL namespaces and perform non-destructive
-      # updates/patches across the cluster, as requested.
+      # operator can manage resources and CRs in ALL namespaces, including CRDs installed
+      # at runtime by blueprints (e.g. weka.weka.io, any operator CRD group).
       - apiGroups: ["*"]
         resources: ["*"]
-        verbs: ["get", "list", "watch", "update", "patch"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
       - apiGroups: [""]
         resources: ["pods", "pods/log", "services", "endpoints", "events", "configmaps", "secrets", "serviceaccounts", "persistentvolumeclaims", "namespaces"]
         verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

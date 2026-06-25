@@ -2619,10 +2619,7 @@ async def get_cluster_status_endpoint(namespace: str = "default"):
                 if os.path.exists(init_manifest_path):
                     with open(init_manifest_path, 'r') as f:
                         docs = list(yaml.safe_load_all(f))
-                        # Use the first document which should be the WekaAppStore CR
-                        manifest = docs[0] if docs else {}
-                        # The manifest is a list of appStack components or a single CR. 
-                        # In this case it's a single WekaAppStore CR.
+                        manifest = next((d for d in docs if isinstance(d, dict) and d.get("kind") == "WekaAppStore"), {})
                         app_stack = manifest.get("spec", {}).get("appStack", [])
                         for item in app_stack:
                             if item.get("name") == "envoy-route-appstore-gui":
@@ -2923,7 +2920,7 @@ def get_blueprint_components(file_path: str) -> List[str]:
     try:
         with open(file_path, 'r') as f:
             docs = list(yaml.safe_load_all(f))
-        data = docs[0] if docs else {}
+        data = next((d for d in docs if isinstance(d, dict) and d.get("kind") == "WekaAppStore"), {})
         spec = (data or {}).get('spec', {})
         comps = ((spec.get('appStack') or {}).get('components')) or []
         for idx, c in enumerate(comps):
@@ -3052,7 +3049,7 @@ async def deploy_stream(
             rendered = template.render(**user_vars)
 
             try:
-                docs = list(yaml.safe_load_all(rendered))
+                docs = [d for d in yaml.safe_load_all(rendered) if isinstance(d, dict) and d.get("kind")]
             except yaml.YAMLError as ye:
                 yield sse_event({"type": "error", "message": f"Rendered blueprint is not valid YAML: {ye}"})
                 return

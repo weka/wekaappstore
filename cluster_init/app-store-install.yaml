@@ -101,7 +101,7 @@ spec:
         waitForReady: true
         readinessCheck:
           type: deployment
-          name: weka-operator
+          name: weka-operator-controller-manager
           namespace: weka-operator-system
           timeout: 300
         targetNamespace: weka-operator-system
@@ -125,7 +125,7 @@ spec:
         waitForReady: true
         readinessCheck:
           type: deployment
-          name: csi-wekafs-csi-wekafsplugin-controller
+          name: csi-wekafs-controller
           namespace: csi-wekafs
           timeout: 300
         targetNamespace: csi-wekafs
@@ -229,12 +229,8 @@ spec:
                 restartPolicy: OnFailure
                 containers:
                   - name: kubectl
-                    image: docker.io/bitnami/kubectl:1.29
-                    command: ["/bin/sh", "-c"]
-                    args:
-                      - |
-                        kubectl label nodes --all weka.io/supports-clients=true --overwrite
-                        echo "Node labeling complete."
+                    image: registry.k8s.io/kubectl:v1.31.0
+                    command: ["kubectl", "label", "nodes", "--all", "weka.io/supports-clients=true", "--overwrite"]
 
       # -----------------------------------------------------------------------
       # STAGE 4 (parallel): CSI API secret (depends on csi-wekafs namespace)
@@ -357,24 +353,8 @@ spec:
                 restartPolicy: OnFailure
                 containers:
                   - name: kubectl
-                    image: docker.io/bitnami/kubectl:1.29
-                    command: ["/bin/sh", "-c"]
-                    args:
-                      - |
-                        set -euo pipefail
-                        echo "Checking for existing default StorageClass..."
-                        DEFAULTS=$(kubectl get storageclass \
-                          -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{"\n"}{end}')
-                        if [ -z "$DEFAULTS" ]; then
-                          echo "No existing default StorageClass found. Nothing to demote."
-                          exit 0
-                        fi
-                        for SC in $DEFAULTS; do
-                          echo "Demoting default StorageClass: $SC"
-                          kubectl patch storageclass "$SC" \
-                            -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
-                        done
-                        echo "Demotion complete."
+                    image: registry.k8s.io/kubectl:v1.31.0
+                    command: ["kubectl", "annotate", "storageclass", "--all", "storageclass.kubernetes.io/is-default-class=false", "--overwrite"]
 
       # -----------------------------------------------------------------------
       # STAGE 6: StorageClasses (depends on demote Job)

@@ -393,6 +393,16 @@ def _namespace_args(kind, doc_namespace, default_namespace):
     return ['-n', doc_namespace or default_namespace]
 
 
+def _ensure_namespace(name: str) -> None:
+    """Create namespace if it does not exist. Ignores AlreadyExists errors."""
+    if not name:
+        return
+    subprocess.run(
+        ['kubectl', 'create', 'namespace', name],
+        capture_output=True, text=True, timeout=30,
+    )
+
+
 def _apply_manifest_multi_ns(manifest_yaml, default_namespace):
     """kubectl apply a possibly multi-namespace manifest, one document at a time.
 
@@ -403,7 +413,10 @@ def _apply_manifest_multi_ns(manifest_yaml, default_namespace):
     except Exception as e:
         return False, f"Failed to parse manifest: {e}"
     for kind, doc_ns, doc_text in docs:
-        cmd = ['kubectl', 'apply', '-f', '-'] + _namespace_args(kind, doc_ns, default_namespace)
+        ns_args = _namespace_args(kind, doc_ns, default_namespace)
+        if ns_args:
+            _ensure_namespace(ns_args[1])
+        cmd = ['kubectl', 'apply', '-f', '-'] + ns_args
         result = subprocess.run(cmd, input=doc_text, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
             return False, result.stderr
@@ -978,6 +991,46 @@ def wait_for_component_ready(component: Dict[str, Any], namespace: str, timeout:
         stdout_full = result.stdout or ''
         stderr = stderr_full.lower()
 
+        # If explicit name was not found, fall back to the label selector
+        if target_name and 'not found' in stderr:
+            logging.warning(
+                f"Resource '{target_name}' not found for component '{component['name']}'. "
+                f"Retrying with label selector '{selector}'.")
+            cmd_label = [
+                'kubectl', 'wait', f"--for=condition={condition}", resource,
+                '-l', selector,
+                '-n', target_namespace,
+                f"--timeout={check_timeout}s"
+            ]
+            result_label = subprocess.run(cmd_label, capture_output=True, text=True, timeout=check_timeout + 15)
+            if result_label.returncode == 0:
+                logging.info(f"Component '{component['name']}' is ready (label selector fallback)")
+                return True
+            stderr_full = result_label.stderr or ''
+            stdout_full = result_label.stdout or ''
+            stderr = stderr_full.lower()
+
+        # If label selector found nothing, try the legacy Helm 'release=' label (used by charts
+        # that predate app.kubernetes.io/ conventions, e.g. csi-wekafs 2.x)
+        release_selector = f"release={release_name}" if release_name else None
+        if 'no matching resources' in stderr and release_selector and selector != release_selector:
+            logging.warning(
+                f"No resources found for selector '{selector}' for component '{component['name']}'. "
+                f"Retrying with release label selector '{release_selector}'.")
+            cmd_release = [
+                'kubectl', 'wait', f"--for=condition={condition}", resource,
+                '-l', release_selector,
+                '-n', target_namespace,
+                f"--timeout={check_timeout}s"
+            ]
+            result_release = subprocess.run(cmd_release, capture_output=True, text=True, timeout=check_timeout + 15)
+            if result_release.returncode == 0:
+                logging.info(f"Component '{component['name']}' is ready (release label fallback)")
+                return True
+            stderr_full = result_release.stderr or ''
+            stdout_full = result_release.stdout or ''
+            stderr = stderr_full.lower()
+
         # If nothing matched: handle fallbacks only when we weren't explicitly given a name
         if 'no matching resources' in stderr and not target_name:
             # First try switching resource to deployment with the same selector
@@ -1270,8 +1323,17 @@ def handle_appstack_deployment(body, spec, name, namespace, status, **kwargs):
                     # namespace) is not rejected by a single conflicting -n flag.
                     ok, msg = _apply_manifest_multi_ns(manifest_yaml, target_namespace)
                     if ok:
-                        comp_status['phase'] = 'Ready'
-                        comp_status['message'] = 'Manifest applied successfully'
+                        if component.get('waitForReady') and component.get('readinessCheck'):
+                            if wait_for_component_ready(component, target_namespace):
+                                comp_status['phase'] = 'Ready'
+                                comp_status['message'] = 'Component deployed and ready'
+                            else:
+                                comp_status['phase'] = 'Failed'
+                                comp_status['message'] = 'Component deployed but not ready within timeout'
+                                failed = True
+                        else:
+                            comp_status['phase'] = 'Ready'
+                            comp_status['message'] = 'Manifest applied successfully'
                     else:
                         comp_status['phase'] = 'Failed'
                         comp_status['message'] = f"Failed to apply manifest: {msg}"
