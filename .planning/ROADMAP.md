@@ -71,7 +71,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
   5. After `app-store-install` reaches `Ready` the wizard chains the untouched `app-store-cluster-init` CR as the final stage and redirects to the App Store when cluster-init reaches `Ready`.
 **Plans**: 3 plans
 - [x] 30-01-PLAN.md — Backend SSE fix (D-13): narrow the /deploy-stream line-3080 guard to `if not cr_name:` so app-store-install/cluster-init stream component events (PROG-01 precondition)
-- [ ] 30-02-PLAN.md — Wizard Stepper: 5-step form (node prereqs, quay, WEKA connection, WEKA creds, masked review) + client-side validation + hard-block removal + handleInstall handoff (WIZ-01..08)
+- [x] 30-02-PLAN.md — Wizard Stepper: 5-step form (node prereqs, quay, WEKA connection, WEKA creds, masked review) + client-side validation + hard-block removal + handleInstall handoff (WIZ-01..08)
 - [ ] 30-03-PLAN.md — Live progress: SSE per-stage view, failure+Retry, cluster-init chain + Ready-gated redirect (PROG-01, PROG-03)
 **UI hint**: yes
 
@@ -93,7 +93,7 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
 | 27. Install Blueprint Authoring | 2/2 | Complete   | 2026-06-24 |
 | 28. Operator Helm Auth & CRD Discovery | 2/2 | Complete    | 2026-06-24 |
 | 29. Backend Wiring & Secret Safety | 2/3 | In Progress|  |
-| 30. Wizard Stepper & Live Progress | 1/3 | In Progress|  |
+| 30. Wizard Stepper & Live Progress | 2/3 | In Progress|  |
 | 31. End-to-End Verification | 0/0 | Not started | - |
 
 ---

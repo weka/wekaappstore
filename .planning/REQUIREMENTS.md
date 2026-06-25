@@ -28,14 +28,14 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Wizard Form & UX (WIZ) — multi-step `welcome.html` form
 
-- [ ] **WIZ-01**: The customer progresses through a multi-step form (node prerequisites → quay credentials → WEKA connection → WEKA credentials → review) before install begins.
-- [ ] **WIZ-02**: Step 1 shows the required `KubeletConfiguration` (CPU manager `static`, `strict-cpu-reservation`) and hugepage snippet as copy-paste text, gated behind an "I have applied node prerequisites" checkbox; the App Store never writes node config or restarts kubelet (Decision A1).
-- [ ] **WIZ-03**: The customer enters quay registry username, password (masked), and operator chart version (default `v1.13.0`).
-- [ ] **WIZ-04**: The customer enters WEKA connection details: join endpoints (one or more `host:port`), WEKA container image version tag, and API scheme via an `http`/`https` dropdown.
-- [ ] **WIZ-05**: The customer enters WEKA cluster credentials: organization (default `Root`), username, and password (masked).
-- [ ] **WIZ-06**: A review step shows a summary with secrets masked plus a namespace selector before the customer submits.
-- [ ] **WIZ-07**: Inputs are validated before submit (required fields, `host:port` endpoint format, version tags), with clear inline errors.
-- [ ] **WIZ-08**: The old single-button prerequisite hard-block is removed; the wizard installs the operator/CSI instead of requiring them already present.
+- [x] **WIZ-01**: The customer progresses through a multi-step form (node prerequisites → quay credentials → WEKA connection → WEKA credentials → review) before install begins.
+- [x] **WIZ-02**: Step 1 shows the required `KubeletConfiguration` (CPU manager `static`, `strict-cpu-reservation`) and hugepage snippet as copy-paste text, gated behind an "I have applied node prerequisites" checkbox; the App Store never writes node config or restarts kubelet (Decision A1).
+- [x] **WIZ-03**: The customer enters quay registry username, password (masked), and operator chart version (default `v1.13.0`).
+- [x] **WIZ-04**: The customer enters WEKA connection details: join endpoints (one or more `host:port`), WEKA container image version tag, and API scheme via an `http`/`https` dropdown.
+- [x] **WIZ-05**: The customer enters WEKA cluster credentials: organization (default `Root`), username, and password (masked).
+- [x] **WIZ-06**: A review step shows a summary with secrets masked plus a namespace selector before the customer submits.
+- [x] **WIZ-07**: Inputs are validated before submit (required fields, `host:port` endpoint format, version tags), with clear inline errors.
+- [x] **WIZ-08**: The old single-button prerequisite hard-block is removed; the wizard installs the operator/CSI instead of requiring them already present.
 
 ### Progress & Streaming (PROG)
 
@@ -100,14 +100,14 @@ Which phases cover which requirements. Populated during roadmap creation.
 | OPA-02 | Phase 28 | Complete |
 | PROG-02 | Phase 29 | Complete |
 | SEC-01 | Phase 29 | Pending |
-| WIZ-01 | Phase 30 | Pending |
-| WIZ-02 | Phase 30 | Pending |
-| WIZ-03 | Phase 30 | Pending |
-| WIZ-04 | Phase 30 | Pending |
-| WIZ-05 | Phase 30 | Pending |
-| WIZ-06 | Phase 30 | Pending |
-| WIZ-07 | Phase 30 | Pending |
-| WIZ-08 | Phase 30 | Pending |
+| WIZ-01 | Phase 30 | Complete |
+| WIZ-02 | Phase 30 | Complete |
+| WIZ-03 | Phase 30 | Complete |
+| WIZ-04 | Phase 30 | Complete |
+| WIZ-05 | Phase 30 | Complete |
+| WIZ-06 | Phase 30 | Complete |
+| WIZ-07 | Phase 30 | Complete |
+| WIZ-08 | Phase 30 | Complete |
 | PROG-01 | Phase 30 | Complete |
 | PROG-03 | Phase 30 | Pending |
 | E2E-01 | Phase 31 | Pending |
