@@ -1701,7 +1701,7 @@ def parse_x_variables(yaml_text: str) -> dict:
     if not yaml_text:
         return {}
     try:
-        data = yaml.safe_load(yaml_text)
+        data = next(yaml.safe_load_all(yaml_text), None)
         if not isinstance(data, dict):
             return {}
         x_vars = data.get("x-variables")
@@ -1728,7 +1728,7 @@ def parse_deploy_timeout(yaml_text: str) -> int:
     if not yaml_text:
         return DEFAULT_DEPLOY_TIMEOUT_SECONDS
     try:
-        data = yaml.safe_load(yaml_text)
+        data = next(yaml.safe_load_all(yaml_text), None)
         if not isinstance(data, dict):
             return DEFAULT_DEPLOY_TIMEOUT_SECONDS
         raw = data.get("x-deploy-timeout")
