@@ -6,7 +6,7 @@
 <domain>
 ## Phase Boundary
 
-Replace the current single-button prerequisite hard-block in `welcome.html` with a multi-step wizard form (node prerequisites → quay credentials → WEKA connection → WEKA credentials → review → live progress). The wizard submits to the existing `/deploy-stream` backend, displays per-stage install progress driven by `componentStatus` SSE events, chains to `cluster-init` after `app-store-install` reaches Ready, and redirects to the App Store when cluster-init reaches Ready. Scope is `welcome.html` (React+MUI frontend) and any minimal new frontend routes if needed — no new Python backend routes, no operator changes, no blueprint changes.
+Replace the current single-button prerequisite hard-block in `welcome.html` with a multi-step wizard form (node prerequisites → quay credentials → WEKA connection → WEKA credentials → review → live progress). The wizard submits to the existing `/deploy-stream` backend, displays per-stage install progress driven by `componentStatus` SSE events, chains to `cluster-init` after `app-store-install` reaches Ready, and redirects to the App Store when cluster-init reaches Ready. Scope is primarily `welcome.html` (React+MUI frontend) and any minimal new frontend routes if needed — no new Python backend routes, no operator changes, no blueprint changes — **plus one surgical backend fix** (D-13): the `/deploy-stream` generator must be corrected so `app-store-install` and `cluster-init` actually stream `component` events. This was discovered during planning (the original "frontend-only" assumption was wrong — see D-05/D-13).
 </domain>
 
 <decisions>
@@ -25,6 +25,7 @@ Replace the current single-button prerequisite hard-block in `welcome.html` with
 ### Live Progress Display
 
 - **D-05:** The per-stage install progress view reuses the `blueprint.html` SSE consumer pattern exactly — `EventSource` opened to `/deploy-stream?app_name=app-store-install&variables=<encoded>&namespace=default` (namespace is irrelevant for namespace-preserving apps but required by the endpoint). Handles `init` (populate stage list), `component` (update stage status), `complete` (success/fail branch), `error` (hard fail) — identical to `blueprint.html` lines 283–346.
+  - **CORRECTION (found during planning):** The original assumption that `app-store-install` streams `component` events like `blueprint.html` was WRONG. `blueprint.html` only ever runs generic (non-namespace-preserving) blueprints, which reach the componentStatus poll loop. `app-store-install` and `cluster-init` are in `NAMESPACE_PRESERVING_APPS` (`main.py:191`) and the generator short-circuits to `complete` at `main.py:3080` **before** the poll loop — so today they emit `init` → `complete` with no `component` events. The frontend SSE consumer is still correct as written; the backend must be fixed (D-13) so the events it expects actually arrive. With D-13 applied, `complete` also fires only at `appStackPhase == Ready`/`Failed` (not immediately), so the success/fail/redirect branches become meaningful for both apps.
 
 - **D-06:** Stage status display maps `component.phase` values from SSE events: Pending → grey, `Installing`/`Upgrading` → blue (in-progress), `Ready` → green (done), `Failed` → red (failed). The existing `sectionClass(phase)` function from `blueprint.html` or an equivalent is replicated in the wizard component.
 
@@ -57,6 +58,10 @@ Replace the current single-button prerequisite hard-block in `welcome.html` with
 - **D-11:** When the cluster-init `EventSource` emits `{type: "complete", ok: true}`, the client calls the existing `/cluster-status` endpoint (`main.py:2551`) to get `redirect_url`, then performs a client-side `window.location.href = redirect_url` redirect. This matches the existing redirect logic the current `welcome.html` already uses after cluster-init (lines 266-296 of `welcome.html`).
 
 - **D-12:** The `ClusterInitMiddleware` exemption list at `main.py:43` already includes `/deploy-stream` and `/welcome` — no middleware changes needed for Phase 30.
+
+### Backend SSE Fix (scope amendment — added during planning)
+
+- **D-13:** The `/deploy-stream` generator at `main.py:3080` currently short-circuits to a single `complete` event for any app in `NAMESPACE_PRESERVING_APPS`, conflating two separate concerns: (a) "do not override the user-selected namespace" (`main.py:3075`, correct — these apps have fixed per-component `targetNamespace`) and (b) "do not poll `componentStatus`" (`main.py:3080`, the bug). Fix: change the line-3080 guard from `if not cr_name or app_name in NAMESPACE_PRESERVING_APPS:` to `if not cr_name:` so any appStack CR (including `app-store-install` and `cluster-init`, both of which ARE multi-component appStacks) reaches the componentStatus poll loop and streams per-stage `component` events. The namespace-override suppression at line 3075 is UNCHANGED. **Namespace-match requirement:** the poll loop queries the CR with `get_namespaced_custom_object(namespace=namespace, name=cr_name)`; for namespace-preserving apps applied with `ns_for_apply=""` the CR lives in its manifest-declared `metadata.namespace`. The executor must ensure the poll queries the namespace where the CR actually lives (both `app-store-install` and `app-store-cluster-init` declare `namespace`/land in `default`) so the lookup does not 404. This is the ONLY backend change in Phase 30 and is the precondition for PROG-01 / Success Criterion 4.
 
 ### Claude's Discretion
 
