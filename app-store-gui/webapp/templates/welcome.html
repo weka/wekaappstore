@@ -137,6 +137,10 @@ kind: Node
       const [selectedNamespace, setSelectedNamespace] = React.useState('default');
       const logContainerRef = React.useRef(null);
 
+      // Install progress state (30-03)
+      const [stages, setStages] = React.useState([]);
+      const [installError, setInstallError] = React.useState(null);
+
       // Wizard state
       const [activeStep, setActiveStep] = React.useState(0);
       const [nodePrereqAck, setNodePrereqAck] = React.useState(false);
@@ -307,6 +311,19 @@ kind: Node
         };
       }
 
+      // Map an operator component phase to a MUI sx color (D-06, mirrors blueprint.html sectionClass)
+      function stageColor(phase) {
+        switch ((phase || '').toLowerCase()) {
+          case 'ready':
+          case 'healthy':    return { border: '1px solid rgba(16,185,129,0.6)', bgcolor: 'rgba(16,185,129,0.1)', color: '#6ee7b7' };
+          case 'failed':
+          case 'error':      return { border: '1px solid rgba(239,68,68,0.6)', bgcolor: 'rgba(239,68,68,0.1)', color: '#fca5a5' };
+          case 'installing':
+          case 'upgrading':  return { border: '1px solid rgba(251,191,36,0.8)', bgcolor: 'rgba(234,179,8,0.1)', color: '#fde68a' };
+          default:           return { border: '1px solid rgba(255,255,255,0.1)', bgcolor: 'rgba(31,41,55,0.4)', color: 'rgba(255,255,255,0.5)' };
+        }
+      }
+
       // Validate the fields on a given step index (D-04)
       function validateStep(stepIndex) {
         const errors = {};
@@ -348,7 +365,7 @@ kind: Node
         return errors;
       }
 
-      // Named handleInstall entry point (30-03 handoff contract)
+      // Named handleInstall entry point — opens app-store-install SSE stream (D-05, PROG-01)
       function handleInstall() {
         // Re-validate all steps before installing
         const errs1 = validateStep(1);
@@ -359,9 +376,116 @@ kind: Node
           setFieldErrors(allErrors);
           return;
         }
-        buildVariables();
+
         setShowProgress(true);
         setProgressActive(true);
+        setInstallError(null);
+        setStages([]);
+
+        const vars = buildVariables();
+        const params = new URLSearchParams({
+          app_name: 'app-store-install',
+          variables: JSON.stringify(vars),
+        });
+        const es = new EventSource(`/deploy-stream?${params.toString()}`);
+
+        es.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'init') {
+              // Seed the stage list from the init items (PROG-01)
+              setStages((msg.items || []).map(name => ({ name, phase: 'pending', message: '' })));
+            } else if (msg.type === 'component') {
+              // Update the matching stage, or append if not in list (mirrors blueprint.html:315-321)
+              const phaseVal = (msg.phase || 'pending').toLowerCase();
+              setStages(prev => {
+                const idx = prev.findIndex(s => s.name === msg.name);
+                if (idx >= 0) {
+                  const next = [...prev];
+                  next[idx] = { ...next[idx], phase: phaseVal, message: msg.message || '' };
+                  return next;
+                }
+                return [...prev, { name: msg.name, phase: phaseVal, message: msg.message || '' }];
+              });
+            } else if (msg.type === 'complete') {
+              es.close();
+              if (msg.ok !== false) {
+                // Genuine Ready (post 30-01 fix) — mark all stages ready, then chain cluster-init (D-10)
+                setStages(prev => prev.map(s => ({ ...s, phase: 'ready' })));
+                openClusterInitStream();
+              } else {
+                // Genuine Failed (post 30-01 fix) — show error + Retry (PROG-03, D-07)
+                setInstallError(msg.message || 'Installation failed.');
+              }
+            } else if (msg.type === 'error') {
+              // Hard fail — show error + Retry (PROG-03, D-07)
+              setInstallError(msg.message || 'An unexpected error occurred.');
+              es.close();
+            }
+          } catch (err) {
+            console.error('SSE parse error:', err);
+          }
+        };
+
+        es.onerror = () => {
+          es.close();
+        };
+      }
+
+      // Cluster-init chain — opened automatically after app-store-install Ready (D-10)
+      function openClusterInitStream() {
+        const es = new EventSource(`/deploy-stream?app_name=cluster-init&namespace=${selectedNamespace}`);
+
+        es.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'init') {
+              // Append cluster-init stages to the existing list (single unified stage list)
+              setStages(prev => [
+                ...prev,
+                ...(msg.items || []).map(name => ({ name, phase: 'pending', message: '' })),
+              ]);
+            } else if (msg.type === 'component') {
+              // Same component handler — tolerate both multi-component and single-stage cases
+              const phaseVal = (msg.phase || 'pending').toLowerCase();
+              setStages(prev => {
+                const idx = prev.findIndex(s => s.name === msg.name);
+                if (idx >= 0) {
+                  const next = [...prev];
+                  next[idx] = { ...next[idx], phase: phaseVal, message: msg.message || '' };
+                  return next;
+                }
+                return [...prev, { name: msg.name, phase: phaseVal, message: msg.message || '' }];
+              });
+            } else if (msg.type === 'complete') {
+              es.close();
+              if (msg.ok !== false) {
+                // Genuine Ready (post 30-01 fix) — fetch redirect_url and navigate (D-11)
+                setStages(prev => prev.map(s => ({ ...s, phase: 'ready' })));
+                fetch(`/cluster-status?namespace=${selectedNamespace}`)
+                  .then(res => res.json())
+                  .then(data => {
+                    window.location.href = data.redirect_url || '/';
+                  })
+                  .catch(() => {
+                    window.location.href = '/';
+                  });
+              } else {
+                // cluster-init Failed — show error + Retry (Retry re-runs handleInstall; both CRs are idempotent)
+                setInstallError(msg.message || 'Cluster initialization failed.');
+              }
+            } else if (msg.type === 'error') {
+              setInstallError(msg.message || 'Cluster initialization error.');
+              es.close();
+            }
+          } catch (err) {
+            console.error('SSE parse error:', err);
+          }
+        };
+
+        es.onerror = () => {
+          es.close();
+        };
       }
 
       const handleInitialize = async () => {
@@ -732,11 +856,55 @@ kind: Node
                   )}
 
                   {progressActive && (
-                    <Box sx={% raw %}{{ py: 4 }}{% endraw %}>
-                      <Typography variant="h6" sx={% raw %}{{ fontWeight: 600, mb: 2 }}{% endraw %}>Installing WEKA Storage Stack...</Typography>
-                      <Typography variant="body2" sx={% raw %}{{ color: 'rgba(255,255,255,0.6)' }}{% endraw %}>
-                        The install progress view will be wired in the next phase (30-03).
+                    <Box sx={% raw %}{{ py: 2 }}{% endraw %}>
+                      <Typography variant="h6" sx={% raw %}{{ fontWeight: 600, mb: 2 }}{% endraw %}>
+                        {installError ? 'Installation Failed' : 'Installing WEKA Storage Stack...'}
                       </Typography>
+
+                      {/* Per-stage install progress list (PROG-01, D-05, D-06) */}
+                      {stages.length > 0 && (
+                        <Box sx={% raw %}{{ display: 'flex', flexDirection: 'column', gap: 0.75, mb: 2 }}{% endraw %}>
+                          {stages.map((stage, i) => (
+                            <Box
+                              key={stage.name + i}
+                              title={stage.message || undefined}
+                              sx={% raw %}{{ ...stageColor(stage.phase), px: 1.5, py: 0.75, borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}{% endraw %}
+                            >
+                              <Typography variant="caption" sx={% raw %}{{ fontWeight: 500, fontFamily: "'Courier New', monospace" }}{% endraw %}>
+                                {stage.name}
+                              </Typography>
+                              <Typography variant="caption" sx={% raw %}{{ textTransform: 'capitalize', opacity: 0.85 }}{% endraw %}>
+                                {stage.phase}
+                              </Typography>
+                            </Box>
+                          ))}
+                        </Box>
+                      )}
+
+                      {stages.length === 0 && !installError && (
+                        <Box sx={% raw %}{{ mb: 2 }}{% endraw %}>
+                          <LinearProgress sx={% raw %}{{ height: 6, borderRadius: 3, bgcolor: 'rgba(255,255,255,0.1)' }}{% endraw %} />
+                          <Typography variant="body2" sx={% raw %}{{ color: 'rgba(255,255,255,0.5)', mt: 1 }}{% endraw %}>
+                            Connecting to deployment stream...
+                          </Typography>
+                        </Box>
+                      )}
+
+                      {/* Inline failure display + Retry (PROG-03, D-07) */}
+                      {installError && (
+                        <Alert severity="error" variant="outlined" sx={% raw %}{{ mt: 1 }}{% endraw %}>
+                          <AlertTitle>Error</AlertTitle>
+                          {installError}
+                          <Button
+                            size="small"
+                            color="inherit"
+                            onClick={() => { setInstallError(null); handleInstall(); }}
+                            sx={% raw %}{{ mt: 1, display: 'block', textTransform: 'none' }}{% endraw %}
+                          >
+                            Retry
+                          </Button>
+                        </Alert>
+                      )}
                     </Box>
                   )}
                 </Box>
