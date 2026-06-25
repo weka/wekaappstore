@@ -963,3 +963,148 @@ def test_redact_secrets_ignores_empty_secret_values():
     msg = "Some message with no secret"
     result = main._redact_secrets(msg, user_vars)
     assert result == msg
+
+
+# ---------------------------------------------------------------------------
+# Phase 29 Plan 03 E2E tests: annotation allowlist + SSE redaction (Task 3)
+# ---------------------------------------------------------------------------
+
+_SECRET_VARS_BLUEPRINT = (
+    "x-variables:\n"
+    "  namespace:\n"
+    "    type: string\n"
+    "    required: false\n"
+    "  weka_username:\n"
+    "    type: string\n"
+    "    required: false\n"
+    "  weka_password:\n"
+    "    type: string\n"
+    "    required: false\n"
+    "  quay_username:\n"
+    "    type: string\n"
+    "    required: false\n"
+    "  quay_password:\n"
+    "    type: string\n"
+    "    required: false\n"
+    "\n"
+    "apiVersion: warp.io/v1alpha1\n"
+    "kind: WekaAppStore\n"
+    "metadata:\n"
+    "  name: secret-test-app\n"
+    "  namespace: [[namespace]]\n"
+    "spec:\n"
+    "  appStack:\n"
+    "    components:\n"
+    "      - name: comp-a\n"
+)
+
+_SECRET_USER_VARS = {
+    "namespace": "default",
+    "weka_username": "wekaadmin",
+    "weka_password": "super_secret_weka_pass",
+    "quay_username": "quayuser",
+    "quay_password": "super_secret_quay_pass",
+}
+
+
+def test_annotation_excludes_secret_keys_and_values(tmp_path, monkeypatch):
+    """Test 40 (E2E annotation): warp.io/gui-variables annotation contains NO secret keys
+    and NO secret values; non-secret keys are preserved. (SEC-01 / T-29-07)"""
+    bp_file = tmp_path / "secret-test-app.yaml"
+    bp_file.write_text(_SECRET_VARS_BLUEPRINT)
+
+    monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
+    applied_docs = []
+    monkeypatch.setattr(
+        main,
+        "apply_blueprint_documents_with_namespace",
+        lambda docs, namespace="": applied_docs.append(list(docs)) or {"applied": []},
+    )
+    _mock_appstack_ready(monkeypatch, phase="Ready", components=[{"name": "comp-a", "phase": "Ready"}])
+
+    async def run():
+        request = _make_request_stub()
+        resp = await main.deploy_stream(
+            request, app_name="secret-test-app", variables=_json.dumps(_SECRET_USER_VARS)
+        )
+        await _collect_sse(resp)
+        assert applied_docs, "apply should have been called"
+        cr = next(d for d in applied_docs[0] if d.get("kind") == "WekaAppStore")
+        raw = cr["metadata"]["annotations"]["warp.io/gui-variables"]
+        ann = _json.loads(raw)
+
+        # Secret keys must be absent from the annotation
+        assert "weka_password" not in ann, "weka_password key must be excluded from annotation"
+        assert "quay_password" not in ann, "quay_password key must be excluded from annotation"
+        assert "quay_dockerconfigjson" not in ann, "quay_dockerconfigjson must be excluded from annotation"
+
+        # Secret values must not appear anywhere in the annotation JSON
+        assert "super_secret_weka_pass" not in raw, "weka_password value must not appear in annotation"
+        assert "super_secret_quay_pass" not in raw, "quay_password value must not appear in annotation"
+
+        # Non-secret keys must be preserved
+        assert ann.get("namespace") == "default"
+        assert ann.get("weka_username") == "wekaadmin"
+        assert ann.get("quay_username") == "quayuser"
+
+    asyncio.run(run())
+
+
+def test_sse_component_messages_exclude_secret_values(tmp_path, monkeypatch):
+    """Test 41 (E2E SSE): no collected SSE event's JSON contains any secret value.
+    An operator message embedding the secret values has them replaced with ***. (E2E-03 / T-29-08)"""
+    bp_file = tmp_path / "secret-test-app2.yaml"
+    bp_file.write_text(_SECRET_VARS_BLUEPRINT.replace("secret-test-app", "secret-test-app2"))
+
+    monkeypatch.setattr(main, "find_blueprint", lambda app_name, blueprints_dir=None: str(bp_file))
+    monkeypatch.setattr(
+        main,
+        "apply_blueprint_documents_with_namespace",
+        lambda docs, namespace="": {"applied": ["WekaAppStore"]},
+    )
+
+    # Build the quay_dockerconfigjson value that will be derived server-side
+    quay_cfg = main.build_quay_dockerconfigjson(
+        _SECRET_USER_VARS["quay_username"], _SECRET_USER_VARS["quay_password"]
+    )
+
+    # Operator-supplied component message embeds all secret values literally
+    secret_message = (
+        f"Error: failed with password={_SECRET_USER_VARS['weka_password']} "
+        f"quay_pass={_SECRET_USER_VARS['quay_password']} "
+        f"cfg={quay_cfg}"
+    )
+
+    _mock_appstack_ready(
+        monkeypatch,
+        phase="Failed",
+        components=[{"name": "comp-a", "phase": "Failed", "message": secret_message}],
+    )
+
+    async def run():
+        request = _make_request_stub()
+        resp = await main.deploy_stream(
+            request, app_name="secret-test-app2", variables=_json.dumps(_SECRET_USER_VARS)
+        )
+        events = await _collect_sse(resp)
+
+        # Serialize all events to a single string for substring search
+        all_events_json = _json.dumps(events)
+
+        assert _SECRET_USER_VARS["weka_password"] not in all_events_json, (
+            f"weka_password value must not appear in any SSE event"
+        )
+        assert _SECRET_USER_VARS["quay_password"] not in all_events_json, (
+            f"quay_password value must not appear in any SSE event"
+        )
+        assert quay_cfg not in all_events_json, (
+            f"quay_dockerconfigjson value must not appear in any SSE event"
+        )
+        # *** should be present (redaction happened)
+        comp_events = [e for e in events if e.get("type") == "component"]
+        assert comp_events, "Expected at least one component event"
+        assert any("***" in e.get("message", "") for e in comp_events), (
+            "Redacted component message must contain ***"
+        )
+
+    asyncio.run(run())

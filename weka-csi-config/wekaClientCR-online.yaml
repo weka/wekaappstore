@@ -11,7 +11,7 @@ spec:
       operator: "Equal"
       value: "true"
       effect: "NoSchedule"
-  port: 45001
+  port: 4500
   agentPort: 45000
   nodeSelector:
     weka.io/supports-clients: "true"
