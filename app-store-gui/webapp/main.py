@@ -3075,9 +3075,12 @@ async def deploy_stream(
             ns_for_apply = "" if app_name in NAMESPACE_PRESERVING_APPS else namespace
             result = apply_blueprint_documents_with_namespace(docs, namespace=ns_for_apply)
 
-            # Namespace-preserving apps and non-appStack blueprints have no per-component
-            # operator status to poll — report submission complete immediately.
-            if not cr_name or app_name in NAMESPACE_PRESERVING_APPS:
+            # Non-appStack blueprints (no WekaAppStore CR in the manifest) have no
+            # per-component operator status to poll — report submission complete immediately.
+            # Namespace-preserving apps (app-store-install, cluster-init) ARE multi-component
+            # appStacks and DO reach the poll loop below; only the namespace-override
+            # suppression at line 3075 is skipped for them (ns_for_apply=""), not the poll.
+            if not cr_name:
                 yield sse_event({"type": "complete", "ok": True, "result": result, "message": "Deployment complete"})
                 return
 
@@ -3121,8 +3124,9 @@ async def deploy_stream(
                     return
                 if phase == "Failed":
                     failed = next((c for c in comp_statuses if c.get("phase") in ("Failed", "Error")), None)
-                    msg = (f"{failed.get('name')}: {failed.get('message', 'failed')}"
-                           if failed else "Deployment failed")
+                    raw_msg = (f"{failed.get('name')}: {failed.get('message', 'failed')}"
+                               if failed else "Deployment failed")
+                    msg = _redact_secrets(raw_msg, user_vars)
                     yield sse_event({"type": "complete", "ok": False, "result": result, "message": msg})
                     return
                 if time.time() > deadline:
