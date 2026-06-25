@@ -96,7 +96,7 @@
       );
     }
 
-    const STEP_LABELS = ["Node Prerequisites", "Quay Credentials", "WEKA Connection", "WEKA Credentials", "Review"];
+    const STEP_LABELS = ["Welcome", "Node Prerequisites", "Quay Credentials", "WEKA Connection", "WEKA Credentials", "Review"];
 
     const NODE_PREREQ_SNIPPET = `# KubeletConfiguration — apply on all worker nodes
 # Add to /etc/kubernetes/kubelet-config.yaml and restart kubelet.
@@ -122,27 +122,20 @@ kind: Node
 #   HugePageStorageMediumSize: true`;
 
     function WelcomeApp() {
-      const [initializing, setInitializing] = React.useState(false);
-      const [phase, setPhase] = React.useState('None');
-      const [statusMessage, setStatusMessage] = React.useState('');
-      const [logs, setLogs] = React.useState([]);
       const [clusterName, setClusterName] = React.useState('Detecting...');
-      const [wekaOperatorInstalled, setWekaOperatorInstalled] = React.useState(null);
-      const [wekaCsiInstalled, setWekaCsiInstalled] = React.useState(null);
-      const [errorCount, setErrorCount] = React.useState(0);
-      const [failed, setFailed] = React.useState(false);
-      const [showProgress, setShowProgress] = React.useState(false);
+      const [k8sVersion, setK8sVersion] = React.useState('Detecting...');
+      const [nvidiaGpuOperatorInstalled, setNvidiaGpuOperatorInstalled] = React.useState(null);
+      const [nvidiaNimOperatorInstalled, setNvidiaNimOperatorInstalled] = React.useState(null);
+      const [podNamespace, setPodNamespace] = React.useState('default');
       const [progressActive, setProgressActive] = React.useState(false);
-      const [namespaces, setNamespaces] = React.useState(['default']);
-      const [selectedNamespace, setSelectedNamespace] = React.useState('default');
-      const logContainerRef = React.useRef(null);
 
-      // Install progress state (30-03)
+      // Install progress state
       const [stages, setStages] = React.useState([]);
       const [installError, setInstallError] = React.useState(null);
 
       // Wizard state
       const [activeStep, setActiveStep] = React.useState(0);
+      const [welcomeAck, setWelcomeAck] = React.useState(false);
       const [nodePrereqAck, setNodePrereqAck] = React.useState(false);
       const [form, setForm] = React.useState({
         quay_username: "",
@@ -158,142 +151,23 @@ kind: Node
       const [fieldErrors, setFieldErrors] = React.useState({});
 
       React.useEffect(() => {
-        // Fetch cluster info
         fetch('/cluster-info')
           .then(res => res.json())
           .then(data => {
-            setClusterName(data.cluster_name);
-            setWekaOperatorInstalled(data.weka_operator_installed);
-            setWekaCsiInstalled(data.weka_csi_installed);
+            setClusterName(data.cluster_name || 'Kubernetes Cluster');
+            setK8sVersion(data.k8s_version || 'Unknown');
+            setNvidiaGpuOperatorInstalled(data.nvidia_gpu_operator_installed ?? false);
+            setNvidiaNimOperatorInstalled(data.nvidia_nim_operator_installed ?? false);
+            setPodNamespace(data.pod_namespace || 'default');
           })
-          .catch(err => {
+          .catch(() => {
             setClusterName('Kubernetes Cluster');
-            setWekaOperatorInstalled(false);
-            setWekaCsiInstalled(false);
-          });
-
-        // Fetch namespaces
-        fetch('/api/namespaces')
-          .then(res => res.json())
-          .then(data => {
-            if (data.ok && data.items) {
-              setNamespaces(data.items);
-              // Try to restore from localStorage or auth-status
-              const saved = localStorage.getItem('selectedNamespace');
-              if (saved && data.items.includes(saved)) {
-                setSelectedNamespace(saved);
-              } else {
-                fetch('/auth-status')
-                  .then(res => res.json())
-                  .then(auth => {
-                    if (auth.authenticated && auth.details?.namespace) {
-                      if (data.items.includes(auth.details.namespace)) {
-                        setSelectedNamespace(auth.details.namespace);
-                      }
-                    }
-                  }).catch(() => {});
-              }
-            }
-          })
-          .catch(err => console.error('Failed to fetch namespaces:', err));
-
-        // Check initial status
-        fetch(`/cluster-status?namespace=${selectedNamespace}`)
-          .then(res => res.json())
-          .then(status => {
-            if (status.exists) {
-              setPhase(status.phase);
-              setStatusMessage(status.message);
-              // If it's already in progress, completed or failed, show the progress box
-              if (status.phase !== 'None' && status.phase !== 'Pending') {
-                setShowProgress(true);
-              }
-              if (status.phase === 'Failed') {
-                setFailed(true);
-              }
-            }
+            setK8sVersion('Unknown');
+            setNvidiaGpuOperatorInstalled(false);
+            setNvidiaNimOperatorInstalled(false);
           });
       }, []);
 
-      React.useEffect(() => {
-        if (initializing && !failed) {
-          const interval = setInterval(async () => {
-            try {
-              const response = await fetch(`/cluster-status?namespace=${selectedNamespace}`);
-              const status = await response.json();
-
-              if (status.exists) {
-                setPhase(status.phase);
-                setStatusMessage(status.message || 'Initializing components...');
-
-                if (status.phase === 'Ready') {
-                  setInitializing(false);
-                  clearInterval(interval);
-                  // Auto redirect after 2 seconds
-                  const targetUrl = status.redirect_url || '/';
-                  setTimeout(() => { window.location.href = targetUrl; }, 2000);
-                } else if (status.phase === 'Failed' || status.phase === 'Error') {
-                  setFailed(true);
-                  setInitializing(false);
-                  clearInterval(interval);
-                } else {
-                  // If it's something else (Installing, etc.), reset error count
-                  setErrorCount(0);
-                }
-              } else if (status.error) {
-                  setStatusMessage(`Error: ${status.error}`);
-                  throw new Error(status.error);
-              }
-            } catch (err) {
-              console.error('Status poll error:', err);
-              setErrorCount(prev => {
-                const next = prev + 1;
-                if (next >= 5) {
-                  setFailed(true);
-                  setInitializing(false);
-                  clearInterval(interval);
-                }
-                return next;
-              });
-            }
-          }, 3000);
-          return () => clearInterval(interval);
-        }
-      }, [initializing, failed, selectedNamespace]);
-
-      React.useEffect(() => {
-        if (logContainerRef.current) {
-          logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-        }
-      }, [logs]);
-
-      React.useEffect(() => {
-        let eventSource;
-        if (initializing && !failed) {
-          eventSource = new EventSource('/init-logs');
-          eventSource.onmessage = (event) => {
-            const data = event.data;
-            let type = 'info';
-            if (data.toLowerCase().includes('failed') || data.toLowerCase().includes('error')) {
-              type = 'error';
-              if (data.includes('Operator pod not found after 5 attempts')) {
-                setFailed(true);
-                setInitializing(false);
-              }
-            }
-            else if (data.toLowerCase().includes('ready') || data.toLowerCase().includes('success')) type = 'success';
-            else if (data.toLowerCase().includes('warning')) type = 'warn';
-
-            setLogs(prev => [...prev, { text: data, type }]);
-          };
-          eventSource.onerror = () => {
-            // Browser handles reconnection automatically
-          };
-        }
-        return () => {
-          if (eventSource) eventSource.close();
-        };
-      }, [initializing, failed]);
 
       // Build the variables dict for /deploy-stream (D-08)
       function buildVariables() {
@@ -307,7 +181,7 @@ kind: Node
           weka_org: form.weka_org.trim(),
           weka_username: form.weka_username.trim(),
           weka_password: form.weka_password,
-          namespace: selectedNamespace,
+          namespace: podNamespace,
         };
       }
 
@@ -330,7 +204,7 @@ kind: Node
         const versionRe = /^v?\d+\.\d+(\.\d+)*$/;
         const hostPortRe = /^[^:]+:\d+$/;
 
-        if (stepIndex === 1) {
+        if (stepIndex === 2) {
           if (!form.quay_username.trim()) errors.quay_username = "Quay username is required";
           if (!form.quay_password) errors.quay_password = "Quay password is required";
           if (!form.operator_version.trim()) {
@@ -340,7 +214,7 @@ kind: Node
           }
         }
 
-        if (stepIndex === 2) {
+        if (stepIndex === 3) {
           if (!form.join_ip_ports.trim()) {
             errors.join_ip_ports = "At least one endpoint is required";
           } else {
@@ -357,7 +231,7 @@ kind: Node
           }
         }
 
-        if (stepIndex === 3) {
+        if (stepIndex === 4) {
           if (!form.weka_username.trim()) errors.weka_username = "WEKA username is required";
           if (!form.weka_password) errors.weka_password = "WEKA password is required";
         }
@@ -368,9 +242,9 @@ kind: Node
       // Named handleInstall entry point — opens app-store-install SSE stream (D-05, PROG-01)
       function handleInstall() {
         // Re-validate all steps before installing
-        const errs1 = validateStep(1);
-        const errs2 = validateStep(2);
-        const errs3 = validateStep(3);
+        const errs1 = validateStep(2);
+        const errs2 = validateStep(3);
+        const errs3 = validateStep(4);
         const allErrors = { ...errs1, ...errs2, ...errs3 };
         if (Object.keys(allErrors).length > 0) {
           setFieldErrors(allErrors);
@@ -438,7 +312,7 @@ kind: Node
       function openClusterInitStream() {
         const params = new URLSearchParams({
           app_name: 'cluster-init',
-          variables: JSON.stringify({ namespace: selectedNamespace }),
+          variables: JSON.stringify({ namespace: podNamespace }),
         });
         const es = new EventSource(`/deploy-stream?${params.toString()}`);
 
@@ -468,7 +342,7 @@ kind: Node
               if (msg.ok !== false) {
                 // Genuine Ready (post 30-01 fix) — fetch redirect_url and navigate (D-11)
                 setStages(prev => prev.map(s => ({ ...s, phase: 'ready' })));
-                fetch(`/cluster-status?namespace=${selectedNamespace}`)
+                fetch(`/cluster-status?namespace=${podNamespace}`)
                   .then(res => res.json())
                   .then(data => {
                     window.location.href = data.redirect_url || '/';
@@ -495,50 +369,6 @@ kind: Node
         };
       }
 
-      const handleInitialize = async () => {
-        setInitializing(true);
-        setShowProgress(true);
-        setFailed(false);
-        setErrorCount(0);
-        setLogs([]);
-
-        // Use deploy-stream for consistency with other blueprints
-        const params = new URLSearchParams({
-          app_name: 'cluster-init',
-          variables: JSON.stringify({ namespace: selectedNamespace }),
-        });
-        const url = `/deploy-stream?${params.toString()}`;
-        const es = new EventSource(url);
-
-        es.onmessage = (ev) => {
-          try {
-            const msg = JSON.parse(ev.data);
-            if (msg.type === 'init') {
-              setLogs(prev => [...prev, { text: `Applying initialization manifest: ${msg.items?.length || 0} components identified.`, type: 'info' }]);
-            } else if (msg.type === 'progress') {
-              setLogs(prev => [...prev, { text: `Applying ${msg.name}...`, type: 'info' }]);
-              setStatusMessage(`Applying ${msg.name}...`);
-            } else if (msg.type === 'complete') {
-              setLogs(prev => [...prev, { text: "Manifest applied successfully. Waiting for operator to initialize components...", type: 'success' }]);
-              setStatusMessage("Waiting for operator...");
-              es.close();
-            } else if (msg.type === 'error') {
-              setLogs(prev => [...prev, { text: `Deployment Error: ${msg.message}`, type: 'error' }]);
-              setInitializing(false);
-              setFailed(true);
-              es.close();
-            }
-          } catch (err) {
-            console.error('SSE parse error:', err);
-          }
-        };
-
-        es.onerror = (err) => {
-          console.error('SSE connection error:', err);
-          es.close();
-        };
-      };
-
       function handleFormChange(key, value) {
         setForm(prev => ({ ...prev, [key]: value }));
         // Clear error for the field on change
@@ -552,8 +382,7 @@ kind: Node
       }
 
       function handleNext() {
-        if (activeStep === 0) {
-          // Step 1: gated by nodePrereqAck (button disabled when false)
+        if (activeStep <= 1) {
           setActiveStep(prev => prev + 1);
           return;
         }
@@ -572,6 +401,42 @@ kind: Node
 
       function renderStepContent(step) {
         if (step === 0) {
+          return (
+            <Box sx={% raw %}{{ display: 'flex', flexDirection: 'column', gap: 2 }}{% endraw %}>
+              <Typography variant="body2" sx={% raw %}{{ color: 'rgba(255,255,255,0.8)', lineHeight: 1.7 }}{% endraw %}>
+                Welcome to the WEKA App Store installer. To use the WEKA App Store it needs to be connected to your WEKA NeuralMesh storage system via the WEKA Operator/CSI Driver. This wizard will step you through the process of connecting the WEKA App Store to your NeuralMesh storage system as well as installing other supported products into your Kubernetes Cluster.
+              </Typography>
+              <Typography variant="body2" sx={% raw %}{{ color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}{% endraw %}>
+                Before starting this installation wizard you will need to perform the following preparation:
+              </Typography>
+              <Box component="ol" sx={% raw %}{{ pl: 2.5, display: 'flex', flexDirection: 'column', gap: 1.5, color: 'rgba(255,255,255,0.75)', fontSize: '0.875rem', lineHeight: 1.7 }}{% endraw %}>
+                <li>Log into your NeuralMesh admin interface and create a new user that has the role <strong>CSI</strong>. You can make this username and password anything you like. Remember the username and password to enter into the installation wizard.</li>
+                <li>Make sure that the networking between your Kubernetes Cluster and your NeuralMesh Cluster have all the required ports open for a NeuralMesh client. Refer to <a href="https://docs.weka.io/planning-and-installation/prerequisites-and-compatibility#required-ports" target="_blank" rel="noopener noreferrer" style={% raw %}{{color: '#a78bfa'}}{% endraw %}>docs.weka.io port requirements</a> for details.</li>
+                <li>Make sure you have root access to your Kubernetes Cluster worker nodes and the right to modify the worker nodes hugepage and kubelet configurations. These settings are required for successful installation of the WEKA Client.</li>
+                <li>You will need a valid login for the <a href="https://get.weka.io" target="_blank" rel="noopener noreferrer" style={% raw %}{{color: '#a78bfa'}}{% endraw %}>Get WEKA portal</a>. You will need to provide your WEKA login details for the WEKA Operator. If you do not have a login for get.weka.io, contact WEKA Sales to arrange a login prior to starting this installation.</li>
+              </Box>
+              <Typography variant="body2" sx={% raw %}{{ color: 'rgba(255,255,255,0.6)', fontStyle: 'italic' }}{% endraw %}>
+                Once you have all the prerequisites set up and configured you will have access to all the details required to successfully complete this installation wizard.
+              </Typography>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={welcomeAck}
+                    onChange={(e) => setWelcomeAck(e.target.checked)}
+                    sx={% raw %}{{ color: 'rgba(255,255,255,0.5)', '&.Mui-checked': { color: '#6b2fb3' } }}{% endraw %}
+                  />
+                }
+                label={
+                  <Typography variant="body2" sx={% raw %}{{ color: 'rgba(255,255,255,0.8)' }}{% endraw %}>
+                    I have reviewed the prerequisites above and I am ready to proceed
+                  </Typography>
+                }
+              />
+            </Box>
+          );
+        }
+
+        if (step === 1) {
           return (
             <Box>
               <Typography variant="body2" sx={% raw %}{{ mb: 2, color: 'rgba(255,255,255,0.7)' }}{% endraw %}>
@@ -613,7 +478,7 @@ kind: Node
           );
         }
 
-        if (step === 1) {
+        if (step === 2) {
           return (
             <Box sx={% raw %}{{ display: 'flex', flexDirection: 'column', gap: 2 }}{% endraw %}>
               <TextField
@@ -651,7 +516,7 @@ kind: Node
           );
         }
 
-        if (step === 2) {
+        if (step === 3) {
           return (
             <Box sx={% raw %}{{ display: 'flex', flexDirection: 'column', gap: 2 }}{% endraw %}>
               <TextField
@@ -690,7 +555,7 @@ kind: Node
           );
         }
 
-        if (step === 3) {
+        if (step === 4) {
           return (
             <Box sx={% raw %}{{ display: 'flex', flexDirection: 'column', gap: 2 }}{% endraw %}>
               <TextField
@@ -728,8 +593,8 @@ kind: Node
           );
         }
 
-        // Step 4: Review
-        if (step === 4) {
+        // Step 5: Review
+        if (step === 5) {
           const reviewRows = [
             { label: "Quay Username", value: form.quay_username },
             { label: "Quay Password", value: "••••••••" },
@@ -755,22 +620,6 @@ kind: Node
                 ))}
               </Box>
 
-              <FormControl size="small" sx={% raw %}{{ minWidth: 200 }}{% endraw %}>
-                <InputLabel id="review-namespace-label">Namespace</InputLabel>
-                <Select
-                  labelId="review-namespace-label"
-                  value={selectedNamespace}
-                  label="Namespace"
-                  onChange={(e) => {
-                    setSelectedNamespace(e.target.value);
-                    localStorage.setItem('selectedNamespace', e.target.value);
-                  }}
-                >
-                  {namespaces.map((ns) => (
-                    <MenuItem key={ns} value={ns}>{ns}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
             </Box>
           );
         }
@@ -837,7 +686,7 @@ kind: Node
                           <Button
                             variant="contained"
                             onClick={handleNext}
-                            disabled={activeStep === 0 && !nodePrereqAck}
+                            disabled={(activeStep === 0 && !welcomeAck) || (activeStep === 1 && !nodePrereqAck)}
                             sx={% raw %}{{
                               bgcolor: 'var(--weka-purple)',
                               textTransform: 'none',
@@ -940,10 +789,13 @@ kind: Node
                       <Typography variant="subtitle1" sx={% raw %}{{ color: '#fff', fontWeight: 600, wordBreak: 'break-all', fontSize: '1rem' }}{% endraw %}>
                         {clusterName}
                       </Typography>
+                      <Typography variant="caption" sx={% raw %}{{ color: 'rgba(255,255,255,0.45)', fontFamily: "'Courier New', monospace", fontSize: '0.75rem' }}{% endraw %}>
+                        {k8sVersion}
+                      </Typography>
                     </Box>
 
                     <Box sx={% raw %}{{
-                      mb: 4, p: 2,
+                      p: 2,
                       bgcolor: 'rgba(255,255,255,0.03)',
                       borderRadius: '8px',
                       border: '1px solid rgba(255,255,255,0.05)',
@@ -951,69 +803,9 @@ kind: Node
                       flexDirection: 'column',
                       gap: 1.5
                     }}{% endraw %}>
-                      <StatusIndicator label="WEKA Operator" status={wekaOperatorInstalled} />
-                      <StatusIndicator label="WEKA CSI Driver" status={wekaCsiInstalled} />
+                      <StatusIndicator label="NVIDIA GPU Operator" status={nvidiaGpuOperatorInstalled} />
+                      <StatusIndicator label="NVIDIA NIM Operator" status={nvidiaNimOperatorInstalled} />
                     </Box>
-
-                    {showProgress || (phase !== 'None' && phase !== 'Pending') ? (
-                      <Box className="space-y-6">
-                        <Box sx={% raw %}{{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}{% endraw %}>
-                          <Typography variant="subtitle1" sx={% raw %}{{ fontWeight: 600 }}{% endraw %}>
-                            {(phase === 'Ready') ? 'Initialization Complete' : (phase === 'Failed' || failed) ? 'Error' : 'Initializing...'}
-                          </Typography>
-                          <Typography variant="caption" sx={% raw %}{{ color: phase === 'Ready' ? '#10b981' : (phase === 'Failed' || failed) ? '#ef4444' : '#f59e0b' }}{% endraw %}>
-                            {(phase === 'Failed' || failed) ? 'Failed' : phase}
-                          </Typography>
-                        </Box>
-
-                        <LinearProgress
-                          variant={(phase === 'Ready' || phase === 'Failed' || failed) ? 'determinate' : 'indeterminate'}
-                          value={(phase === 'Ready' || phase === 'Failed' || failed) ? 100 : undefined}
-                          sx={% raw %}{{
-                            height: 8,
-                            borderRadius: 4,
-                            bgcolor: 'rgba(255,255,255,0.1)',
-                            '& .MuiLinearProgress-bar': {
-                              bgcolor: (phase === 'Failed' || failed) ? '#ef4444' : undefined
-                            }
-                          }}{% endraw %}
-                        />
-
-                        <Typography variant="body2" className="muted italic">
-                          {statusMessage || 'Preparing environment...'}
-                        </Typography>
-
-                        <Box className="space-y-2">
-                          <Typography variant="caption" className="muted uppercase font-bold tracking-wider">Operator Logs</Typography>
-                          <Box className="log-container" ref={logContainerRef}>
-                            {logs.map((log, i) => (
-                              <div key={i} className={`log-entry log-${log.type}`}>{log.text}</div>
-                            ))}
-                          </Box>
-                        </Box>
-
-                        {phase === 'Ready' && (
-                          <Alert severity="success" variant="filled" sx={% raw %}{{ mt: 2 }}{% endraw %}>
-                            <AlertTitle>Success</AlertTitle>
-                            Cluster initialized. Redirecting to App Store...
-                          </Alert>
-                        )}
-
-                        {failed && (
-                          <Alert severity="error" variant="filled" sx={% raw %}{{ mt: 2 }}{% endraw %}>
-                            <AlertTitle>Initialization Failed</AlertTitle>
-                            The process failed. Please check the logs and try again.
-                            <Button size="small" color="inherit" onClick={() => { window.location.reload(); }} sx={% raw %}{{ mt: 1, display: 'block' }}{% endraw %}>Retry</Button>
-                          </Alert>
-                        )}
-                      </Box>
-                    ) : (
-                      <Box sx={% raw %}{{ py: 4, textAlign: 'center' }}{% endraw %}>
-                        <Typography className="muted" variant="body2">
-                          Complete the wizard to begin the WEKA storage stack installation.
-                        </Typography>
-                      </Box>
-                    )}
                   </Paper>
                 </Box>
               </Box>

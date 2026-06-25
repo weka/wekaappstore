@@ -35,7 +35,7 @@ spec:
               - { name: manifests, mountPath: /manifests }
       containers:
         - name: wekaappstoregui
-          image: wekachrisjen/weka-app-store-gui:v0.56
+          image: wekachrisjen/weka-app-store-gui:v0.59
           volumeMounts:
             - name: manifests
               mountPath: /app/manifests
@@ -146,13 +146,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: wekaappstoregui-view
-# NOTE:
-# - ClusterRoleBinding is cluster-scoped, but ServiceAccount subjects are namespaced.
-# - The namespace below MUST match the namespace where the ServiceAccount 'wekaappstoregui-sa' is created.
-# - If you deploy this manifest to a namespace other than 'default', change 'subjects[0].namespace' to that namespace.
-# - Do NOT omit the namespace field for a ServiceAccount subject; it is required. If you want a namespace-agnostic binding,
-#   consider binding the ClusterRole to a GROUP instead (e.g., 'system:serviceaccounts' to grant to all ServiceAccounts),
-#   but that broadens access cluster-wide and is generally not recommended.
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -160,7 +153,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: wekaappstoregui-sa
-    namespace: default
+    namespace: {{ .Release.Namespace }}
 ---
 # Grant the web app permissions to CREATE and DELETE Custom Resources (CRs) in its namespace.
 # Notes:
@@ -168,15 +161,14 @@ subjects:
 #   all named API groups (which includes CRDs' groups and most non-core groups) but does NOT include
 #   the core API group "". This is a pragmatic way to allow managing CRs without broad core access.
 # - This Role is NAMESPACE-SCOPED. It enables managing namespaced CRs within the namespace where the
-#   app is deployed. If you deploy to a namespace other than 'default', update all 'metadata.namespace'
-#   and the subject namespace fields accordingly.
+#   app is deployed. The namespace is set automatically from .Release.Namespace at install time.
 # - If you also need to manage CLUSTER-SCOPED custom resources, a ClusterRole and ClusterRoleBinding
 #   would be required (broader privileges). Not added here to keep scope minimal.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: wekaappstoregui-cr-manager
-  namespace: default
+  namespace: {{ .Release.Namespace }}
 rules:
   - apiGroups: ["*"]   # all named (non-core) API groups; commonly where CRs live
     resources: ["*"]   # all resources in those API groups
@@ -186,11 +178,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: wekaappstoregui-cr-manager
-  namespace: default
+  namespace: {{ .Release.Namespace }}
 subjects:
   - kind: ServiceAccount
     name: wekaappstoregui-sa
-    namespace: default  # must match the SA namespace
+    namespace: {{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -235,7 +227,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: wekaappstoregui-sa
-    namespace: default  # must match the ServiceAccount namespace
+    namespace: {{ .Release.Namespace }}
 ---
 # Write permissions required to submit blueprints and initialize/un-initialize the cluster.
 # This grants the web app the ability to:
@@ -279,6 +271,6 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: wekaappstoregui-sa
-    namespace: default  # must match the ServiceAccount namespace
+    namespace: {{ .Release.Namespace }}
 
 {{- end }}

@@ -2479,59 +2479,58 @@ async def readyz():
 
 @app.get("/cluster-info")
 async def get_cluster_info():
-    """Get information about the current Kubernetes cluster and required components."""
+    """Get information about the current Kubernetes cluster."""
     try:
         load_kube_config()
-        # Try to get cluster name from the current context first
+
         try:
             contexts, active_context = config.list_kube_config_contexts()
             cluster_name = active_context.get('context', {}).get('cluster', 'Unknown Cluster')
         except Exception:
-            # Fallback for in-cluster: try to get it from something like a well-known configmap or just 'Kubernetes Cluster'
             cluster_name = os.getenv("KUBERNETES_CLUSTER_NAME", "Kubernetes Cluster")
 
-        # Check for WEKA Operator CRDs
-        operator_crds = [
-            "wekapolicies.weka.weka.io",
-            "wekamanualoperations.weka.weka.io",
-            "wekacontainers.weka.weka.io",
-            "wekaclusters.weka.weka.io",
-            "wekaclients.weka.weka.io",
-            "driveclaims.weka.weka.io"
-        ]
-        
-        crd_status = True
+        try:
+            k8s_version = client.VersionApi().get_code().git_version
+        except Exception:
+            k8s_version = "Unknown"
+
+        nvidia_gpu_operator_installed = False
+        nvidia_nim_operator_installed = False
         try:
             api_extensions = client.ApiextensionsV1Api()
-            crds = api_extensions.list_custom_resource_definition()
-            installed_crds = [crd.metadata.name for crd in crds.items]
-            for target_crd in operator_crds:
-                if target_crd not in installed_crds:
-                    crd_status = False
-                    break
+            try:
+                api_extensions.read_custom_resource_definition("clusterpolicies.nvidia.com")
+                nvidia_gpu_operator_installed = True
+            except Exception:
+                pass
+            try:
+                api_extensions.read_custom_resource_definition("nimcaches.apps.nvidia.com")
+                nvidia_nim_operator_installed = True
+            except Exception:
+                pass
         except Exception:
-            crd_status = False
+            pass
 
-        # Check for WEKA CSI Driver deployment
-        csi_status = False
         try:
-            apps_v1 = client.AppsV1Api()
-            deployments = apps_v1.list_deployment_for_all_namespaces(field_selector="metadata.name=csi-wekafs-controller")
-            if deployments.items:
-                csi_status = True
-        except Exception:
-            csi_status = False
-            
+            with open('/var/run/secrets/kubernetes.io/serviceaccount/namespace', 'r') as f:
+                pod_namespace = f.read().strip()
+        except FileNotFoundError:
+            pod_namespace = 'default'
+
         return {
             "cluster_name": cluster_name,
-            "weka_operator_installed": crd_status,
-            "weka_csi_installed": csi_status
+            "k8s_version": k8s_version,
+            "nvidia_gpu_operator_installed": nvidia_gpu_operator_installed,
+            "nvidia_nim_operator_installed": nvidia_nim_operator_installed,
+            "pod_namespace": pod_namespace,
         }
     except Exception as e:
         return {
             "cluster_name": "Kubernetes Cluster",
-            "weka_operator_installed": False,
-            "weka_csi_installed": False,
+            "k8s_version": "Unknown",
+            "nvidia_gpu_operator_installed": False,
+            "nvidia_nim_operator_installed": False,
+            "pod_namespace": "default",
             "error": str(e)
         }
 
@@ -3065,6 +3064,15 @@ async def deploy_stream(
                     anns["warp.io/gui-variables"] = json.dumps(_safe_gui_variables(user_vars), separators=(",", ":"))
                     cr_name = cr_name or md.get("name")
                     cr_namespace = cr_namespace or md.get("namespace")
+
+            # For app-store-install, patch the CR's own namespace to the detected pod namespace
+            # so the CR lands in the App Store's namespace rather than the hardcoded blueprint default.
+            # Component targetNamespaces remain fixed because NAMESPACE_PRESERVING_APPS keeps ns_for_apply="".
+            if app_name in ("app-store-install", "cluster-init"):
+                for d in docs:
+                    if isinstance(d, dict) and d.get("kind") == "WekaAppStore":
+                        d.setdefault("metadata", {})["namespace"] = namespace
+                cr_namespace = namespace
 
             # Apply manifest with namespace overrides using the rendered documents
             logger.info(
