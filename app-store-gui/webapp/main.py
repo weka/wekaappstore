@@ -3060,12 +3060,14 @@ async def deploy_stream(
             # Stamp the submitted variables onto the WekaAppStore CR so the blueprint
             # page can later show them in read-only fields and offer Uninstall.
             cr_name = None
+            cr_namespace = None
             for d in docs:
                 if isinstance(d, dict) and d.get("kind") == "WekaAppStore":
                     md = d.setdefault("metadata", {})
                     anns = md.setdefault("annotations", {})
                     anns["warp.io/gui-variables"] = json.dumps(_safe_gui_variables(user_vars), separators=(",", ":"))
                     cr_name = cr_name or md.get("name")
+                    cr_namespace = cr_namespace or md.get("namespace")
 
             # Apply manifest with namespace overrides using the rendered documents
             logger.info(
@@ -3085,6 +3087,9 @@ async def deploy_stream(
                 return
 
             # Poll the operator's real componentStatus until the stack reaches a terminal phase.
+            # For namespace-preserving apps the CR is applied to its blueprint-declared namespace,
+            # not the user-supplied one; use the CR's actual namespace for polling when available.
+            poll_namespace = cr_namespace if (app_name in NAMESPACE_PRESERVING_APPS and cr_namespace) else namespace
             load_kube_config()
             custom_api = client.CustomObjectsApi()
             emitted: Dict[str, str] = {}
@@ -3100,7 +3105,7 @@ async def deploy_stream(
                     cr = await asyncio.to_thread(
                         custom_api.get_namespaced_custom_object,
                         group="warp.io", version="v1alpha1",
-                        namespace=namespace, plural="wekaappstores", name=cr_name,
+                        namespace=poll_namespace, plural="wekaappstores", name=cr_name,
                     )
                 except ApiException:
                     cr = None
