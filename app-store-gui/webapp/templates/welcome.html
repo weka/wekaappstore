@@ -1003,7 +1003,7 @@ kind: Node
                           <Alert severity="error" variant="filled" sx={% raw %}{{ mt: 2 }}{% endraw %}>
                             <AlertTitle>Initialization Failed</AlertTitle>
                             The process failed. Please check the logs and try again.
-                            <Button size="small" color="inherit" onClick={handleInitialize} sx={% raw %}{{ mt: 1, display: 'block' }}{% endraw %}>Retry</Button>
+                            <Button size="small" color="inherit" onClick={() => { window.location.reload(); }} sx={% raw %}{{ mt: 1, display: 'block' }}{% endraw %}>Retry</Button>
                           </Alert>
                         )}
                       </Box>
