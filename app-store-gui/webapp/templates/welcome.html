@@ -37,11 +37,12 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { 
-      ThemeProvider, createTheme, CssBaseline, Button, LinearProgress, 
-      Typography, Box, Container, Paper, List, ListItem, ListItemText, 
-      ListItemIcon, Divider, Alert, AlertTitle, Chip, FormControl, 
-      InputLabel, Select, MenuItem
+    const {
+      ThemeProvider, createTheme, CssBaseline, Button, LinearProgress,
+      Typography, Box, Container, Paper, List, ListItem, ListItemText,
+      ListItemIcon, Divider, Alert, AlertTitle, Chip, FormControl,
+      InputLabel, Select, MenuItem,
+      Stepper, Step, StepLabel, TextField, Checkbox, FormControlLabel
     } = MaterialUI;
 
     const theme = createTheme({
@@ -80,10 +81,10 @@
     function StatusIndicator({ label, status }) {
       return (
         <Box sx={% raw %}{{ display: 'flex', alignItems: 'center', gap: 1.5 }}{% endraw %}>
-          <Box sx={% raw %}{{ 
-            width: 10, 
-            height: 10, 
-            borderRadius: '50%', 
+          <Box sx={% raw %}{{
+            width: 10,
+            height: 10,
+            borderRadius: '50%',
             bgcolor: status === true ? '#10b981' : status === false ? '#ef4444' : '#6b7280',
             boxShadow: status === true ? '0 0 8px #10b981' : status === false ? '0 0 8px #ef4444' : 'none',
             flexShrink: 0
@@ -94,6 +95,31 @@
         </Box>
       );
     }
+
+    const STEP_LABELS = ["Node Prerequisites", "Quay Credentials", "WEKA Connection", "WEKA Credentials", "Review"];
+
+    const NODE_PREREQ_SNIPPET = `# KubeletConfiguration — apply on all worker nodes
+# Add to /etc/kubernetes/kubelet-config.yaml and restart kubelet.
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cpuManagerPolicy: static
+cpuManagerPolicyOptions:
+  strict-cpu-reservation: "true"
+kubeReserved:
+  cpu: "1000m"
+  memory: "1Gi"
+reservedSystemCPUs: "0-1"
+# Hugepages for WEKA client (25000 x 2Mi)
+---
+apiVersion: v1
+kind: Node
+# kubectl patch node <node-name> --type=json \\
+#   -p='[{"op":"add","path":"/status/allocatable/hugepages-2Mi","value":"50Gi"}]'
+# Or configure in kubelet:
+# kubeReserved:
+#   hugepages-2Mi: 0
+# featureGates:
+#   HugePageStorageMediumSize: true`;
 
     function WelcomeApp() {
       const [initializing, setInitializing] = React.useState(false);
@@ -106,9 +132,26 @@
       const [errorCount, setErrorCount] = React.useState(0);
       const [failed, setFailed] = React.useState(false);
       const [showProgress, setShowProgress] = React.useState(false);
+      const [progressActive, setProgressActive] = React.useState(false);
       const [namespaces, setNamespaces] = React.useState(['default']);
       const [selectedNamespace, setSelectedNamespace] = React.useState('default');
       const logContainerRef = React.useRef(null);
+
+      // Wizard state
+      const [activeStep, setActiveStep] = React.useState(0);
+      const [nodePrereqAck, setNodePrereqAck] = React.useState(false);
+      const [form, setForm] = React.useState({
+        quay_username: "",
+        quay_password: "",
+        operator_version: "v1.13.0",
+        join_ip_ports: "",
+        weka_image_version: "",
+        weka_endpoint_scheme: "http",
+        weka_org: "Root",
+        weka_username: "",
+        weka_password: "",
+      });
+      const [fieldErrors, setFieldErrors] = React.useState({});
 
       React.useEffect(() => {
         // Fetch cluster info
@@ -174,11 +217,11 @@
             try {
               const response = await fetch(`/cluster-status?namespace=${selectedNamespace}`);
               const status = await response.json();
-              
+
               if (status.exists) {
                 setPhase(status.phase);
                 setStatusMessage(status.message || 'Initializing components...');
-                  
+
                 if (status.phase === 'Ready') {
                   setInitializing(false);
                   clearInterval(interval);
@@ -236,7 +279,7 @@
             }
             else if (data.toLowerCase().includes('ready') || data.toLowerCase().includes('success')) type = 'success';
             else if (data.toLowerCase().includes('warning')) type = 'warn';
-            
+
             setLogs(prev => [...prev, { text: data, type }]);
           };
           eventSource.onerror = () => {
@@ -248,15 +291,80 @@
         };
       }, [initializing, failed]);
 
-      const handleInitialize = async () => {
-        if (wekaOperatorInstalled !== true || wekaCsiInstalled !== true) {
-          setLogs(prev => [...prev, { text: "Error: you need to install the WEKA Operator and WEKA CSI driver first.", type: 'error' }]);
-          setStatusMessage("Prerequisites not met.");
-          setShowProgress(true);
-          setFailed(true);
-          setPhase('Failed');
+      // Build the variables dict for /deploy-stream (D-08)
+      function buildVariables() {
+        return {
+          quay_username: form.quay_username.trim(),
+          quay_password: form.quay_password,
+          operator_version: form.operator_version.trim(),
+          join_ip_ports: form.join_ip_ports.trim(),
+          weka_image_version: form.weka_image_version.trim(),
+          weka_endpoint_scheme: form.weka_endpoint_scheme,
+          weka_org: form.weka_org.trim(),
+          weka_username: form.weka_username.trim(),
+          weka_password: form.weka_password,
+          namespace: selectedNamespace,
+        };
+      }
+
+      // Validate the fields on a given step index (D-04)
+      function validateStep(stepIndex) {
+        const errors = {};
+        const versionRe = /^v?\d+\.\d+(\.\d+)*$/;
+        const hostPortRe = /^[^:]+:\d+$/;
+
+        if (stepIndex === 1) {
+          if (!form.quay_username.trim()) errors.quay_username = "Quay username is required";
+          if (!form.quay_password) errors.quay_password = "Quay password is required";
+          if (!form.operator_version.trim()) {
+            errors.operator_version = "Operator version is required";
+          } else if (!versionRe.test(form.operator_version.trim())) {
+            errors.operator_version = "Use a version like v1.13.0 or 1.13.0";
+          }
+        }
+
+        if (stepIndex === 2) {
+          if (!form.join_ip_ports.trim()) {
+            errors.join_ip_ports = "At least one endpoint is required";
+          } else {
+            const entries = form.join_ip_ports.split(',').map(e => e.trim()).filter(e => e);
+            const invalid = entries.filter(e => !hostPortRe.test(e));
+            if (invalid.length > 0) {
+              errors.join_ip_ports = "Each endpoint must be host:port (e.g. 192.168.1.1:14000)";
+            }
+          }
+          if (!form.weka_image_version.trim()) {
+            errors.weka_image_version = "WEKA image version is required";
+          } else if (!versionRe.test(form.weka_image_version.trim())) {
+            errors.weka_image_version = "Use a version like v5.1.0.605 or 5.1.0.605";
+          }
+        }
+
+        if (stepIndex === 3) {
+          if (!form.weka_username.trim()) errors.weka_username = "WEKA username is required";
+          if (!form.weka_password) errors.weka_password = "WEKA password is required";
+        }
+
+        return errors;
+      }
+
+      // Named handleInstall entry point (30-03 handoff contract)
+      function handleInstall() {
+        // Re-validate all steps before installing
+        const errs1 = validateStep(1);
+        const errs2 = validateStep(2);
+        const errs3 = validateStep(3);
+        const allErrors = { ...errs1, ...errs2, ...errs3 };
+        if (Object.keys(allErrors).length > 0) {
+          setFieldErrors(allErrors);
           return;
         }
+        buildVariables();
+        setShowProgress(true);
+        setProgressActive(true);
+      }
+
+      const handleInitialize = async () => {
         setInitializing(true);
         setShowProgress(true);
         setFailed(false);
@@ -296,6 +404,245 @@
         };
       };
 
+      function handleFormChange(key, value) {
+        setForm(prev => ({ ...prev, [key]: value }));
+        // Clear error for the field on change
+        if (fieldErrors[key]) {
+          setFieldErrors(prev => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+        }
+      }
+
+      function handleNext() {
+        if (activeStep === 0) {
+          // Step 1: gated by nodePrereqAck (button disabled when false)
+          setActiveStep(prev => prev + 1);
+          return;
+        }
+        const errors = validateStep(activeStep);
+        if (Object.keys(errors).length > 0) {
+          setFieldErrors(errors);
+          return;
+        }
+        setFieldErrors({});
+        setActiveStep(prev => prev + 1);
+      }
+
+      function handleBack() {
+        setActiveStep(prev => prev - 1);
+      }
+
+      function renderStepContent(step) {
+        if (step === 0) {
+          return (
+            <Box>
+              <Typography variant="body2" sx={% raw %}{{ mb: 2, color: 'rgba(255,255,255,0.7)' }}{% endraw %}>
+                Before installing WEKA, apply the following configuration on all worker nodes that will run WEKA clients. This is required for CPU manager and hugepage support.
+              </Typography>
+              <Box
+                component="pre"
+                sx={% raw %}{{
+                  bgcolor: '#111827',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '8px',
+                  p: 2,
+                  fontSize: '0.75rem',
+                  color: '#d1d5db',
+                  overflowX: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                  mb: 2,
+                  fontFamily: "'Courier New', Courier, monospace",
+                }}{% endraw %}
+              >
+                {NODE_PREREQ_SNIPPET}
+              </Box>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={nodePrereqAck}
+                    onChange={(e) => setNodePrereqAck(e.target.checked)}
+                    sx={% raw %}{{ color: 'rgba(255,255,255,0.5)', '&.Mui-checked': { color: '#6b2fb3' } }}{% endraw %}
+                  />
+                }
+                label={
+                  <Typography variant="body2" sx={% raw %}{{ color: 'rgba(255,255,255,0.8)' }}{% endraw %}>
+                    I have applied node prerequisites on all worker nodes
+                  </Typography>
+                }
+              />
+            </Box>
+          );
+        }
+
+        if (step === 1) {
+          return (
+            <Box sx={% raw %}{{ display: 'flex', flexDirection: 'column', gap: 2 }}{% endraw %}>
+              <TextField
+                label="Quay Username"
+                variant="outlined"
+                size="small"
+                fullWidth
+                value={form.quay_username}
+                onChange={(e) => handleFormChange('quay_username', e.target.value)}
+                error={!!fieldErrors.quay_username}
+                helperText={fieldErrors.quay_username || ''}
+              />
+              <TextField
+                label="Quay Password / Robot Token"
+                variant="outlined"
+                size="small"
+                fullWidth
+                type="password"
+                value={form.quay_password}
+                onChange={(e) => handleFormChange('quay_password', e.target.value)}
+                error={!!fieldErrors.quay_password}
+                helperText={fieldErrors.quay_password || ''}
+              />
+              <TextField
+                label="Operator Version"
+                variant="outlined"
+                size="small"
+                fullWidth
+                value={form.operator_version}
+                onChange={(e) => handleFormChange('operator_version', e.target.value)}
+                error={!!fieldErrors.operator_version}
+                helperText={fieldErrors.operator_version || 'e.g. v1.13.0'}
+              />
+            </Box>
+          );
+        }
+
+        if (step === 2) {
+          return (
+            <Box sx={% raw %}{{ display: 'flex', flexDirection: 'column', gap: 2 }}{% endraw %}>
+              <TextField
+                label="WEKA Endpoints (join_ip_ports)"
+                variant="outlined"
+                size="small"
+                fullWidth
+                value={form.join_ip_ports}
+                onChange={(e) => handleFormChange('join_ip_ports', e.target.value)}
+                error={!!fieldErrors.join_ip_ports}
+                helperText={fieldErrors.join_ip_ports || 'Comma-delimited host:port list, e.g. 192.168.1.1:14000,192.168.1.2:14000'}
+              />
+              <TextField
+                label="WEKA Image Version"
+                variant="outlined"
+                size="small"
+                fullWidth
+                value={form.weka_image_version}
+                onChange={(e) => handleFormChange('weka_image_version', e.target.value)}
+                error={!!fieldErrors.weka_image_version}
+                helperText={fieldErrors.weka_image_version || 'e.g. 5.1.0.605'}
+              />
+              <FormControl size="small" fullWidth variant="outlined">
+                <InputLabel id="scheme-label">API Scheme</InputLabel>
+                <Select
+                  labelId="scheme-label"
+                  value={form.weka_endpoint_scheme}
+                  label="API Scheme"
+                  onChange={(e) => handleFormChange('weka_endpoint_scheme', e.target.value)}
+                >
+                  <MenuItem value="http">http</MenuItem>
+                  <MenuItem value="https">https</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+          );
+        }
+
+        if (step === 3) {
+          return (
+            <Box sx={% raw %}{{ display: 'flex', flexDirection: 'column', gap: 2 }}{% endraw %}>
+              <TextField
+                label="WEKA Organization"
+                variant="outlined"
+                size="small"
+                fullWidth
+                value={form.weka_org}
+                onChange={(e) => handleFormChange('weka_org', e.target.value)}
+                error={!!fieldErrors.weka_org}
+                helperText={fieldErrors.weka_org || 'Default: Root'}
+              />
+              <TextField
+                label="WEKA Username"
+                variant="outlined"
+                size="small"
+                fullWidth
+                value={form.weka_username}
+                onChange={(e) => handleFormChange('weka_username', e.target.value)}
+                error={!!fieldErrors.weka_username}
+                helperText={fieldErrors.weka_username || ''}
+              />
+              <TextField
+                label="WEKA Password"
+                variant="outlined"
+                size="small"
+                fullWidth
+                type="password"
+                value={form.weka_password}
+                onChange={(e) => handleFormChange('weka_password', e.target.value)}
+                error={!!fieldErrors.weka_password}
+                helperText={fieldErrors.weka_password || ''}
+              />
+            </Box>
+          );
+        }
+
+        // Step 4: Review
+        if (step === 4) {
+          const reviewRows = [
+            { label: "Quay Username", value: form.quay_username },
+            { label: "Quay Password", value: "••••••••" },
+            { label: "Operator Version", value: form.operator_version },
+            { label: "WEKA Endpoints", value: form.join_ip_ports },
+            { label: "WEKA Image Version", value: form.weka_image_version },
+            { label: "API Scheme", value: form.weka_endpoint_scheme },
+            { label: "WEKA Organization", value: form.weka_org },
+            { label: "WEKA Username", value: form.weka_username },
+            { label: "WEKA Password", value: "••••••••" },
+          ];
+          return (
+            <Box sx={% raw %}{{ display: 'flex', flexDirection: 'column', gap: 2 }}{% endraw %}>
+              <Typography variant="body2" sx={% raw %}{{ color: 'rgba(255,255,255,0.6)' }}{% endraw %}>
+                Review your settings before installing. Passwords are masked.
+              </Typography>
+              <Box sx={% raw %}{{ bgcolor: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)', p: 2 }}{% endraw %}>
+                {reviewRows.map((row) => (
+                  <Box key={row.label} sx={% raw %}{{ display: 'flex', justifyContent: 'space-between', py: 0.5 }}{% endraw %}>
+                    <Typography variant="caption" sx={% raw %}{{ color: 'rgba(255,255,255,0.5)', fontWeight: 600, minWidth: 160 }}{% endraw %}>{row.label}</Typography>
+                    <Typography variant="caption" sx={% raw %}{{ color: 'rgba(255,255,255,0.85)', wordBreak: 'break-all', textAlign: 'right' }}{% endraw %}>{row.value || <em style={% raw %}{{ opacity: 0.4 }}{% endraw %}>not set</em>}</Typography>
+                  </Box>
+                ))}
+              </Box>
+
+              <FormControl size="small" sx={% raw %}{{ minWidth: 200 }}{% endraw %}>
+                <InputLabel id="review-namespace-label">Namespace</InputLabel>
+                <Select
+                  labelId="review-namespace-label"
+                  value={selectedNamespace}
+                  label="Namespace"
+                  onChange={(e) => {
+                    setSelectedNamespace(e.target.value);
+                    localStorage.setItem('selectedNamespace', e.target.value);
+                  }}
+                >
+                  {namespaces.map((ns) => (
+                    <MenuItem key={ns} value={ns}>{ns}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+          );
+        }
+
+        return null;
+      }
+
       return (
         <ThemeProvider theme={theme}>
           <CssBaseline />
@@ -314,93 +661,96 @@
 
             <Container maxWidth="lg" sx={% raw %}{{ pt: 20, pb: 8, flexGrow: 1, position: 'relative', zIndex: 1 }}{% endraw %}>
               <Box className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                {/* Left column: wizard (hidden when progressActive) */}
                 <Box className="lg:col-span-7 space-y-6">
                   <Typography variant="h3" sx={% raw %}{{ fontWeight: 600, lineHeight: 1.2 }}{% endraw %}>
                     Initializing the <span className="bg-clip-text text-transparent" style={% raw %}{{backgroundImage: 'linear-gradient(90deg, var(--weka-purple) 0%, #a855f7 50%, #60a5fa 100%)'}}{% endraw %}>WEKA App Store</span>
                   </Typography>
-                  
+
                   <Typography variant="body1" sx={% raw %}{{ color: '#fff', fontWeight: 500, opacity: 0.9 }}{% endraw %}>
-                    Welcome to the WEKA App Store, your marketplace for discovering and deploying AI use cases on Kubernetes. The WEKA App Store leverages the performance of WEKA NeuralMesh storage to simplify and accelerate deployment. Follow the instructions below to initialize your Kubernetes cluster and get started.
+                    Welcome to the WEKA App Store, your marketplace for discovering and deploying AI use cases on Kubernetes. Complete the steps below to install the WEKA storage stack and initialize your cluster.
                   </Typography>
 
-                  <Typography className="muted" variant="body1">
-                    Before deploying AI blueprints, you must initialize your Kubernetes cluster to prepare it for the WEKA App Store. When you select Initialize, the WEKA App Store automatically installs the following required components:
-                  </Typography>
+                  {!progressActive && (
+                    <Box>
+                      <Stepper activeStep={activeStep} sx={% raw %}{{ mb: 3 }}{% endraw %}>
+                        {STEP_LABELS.map((label) => (
+                          <Step key={label}>
+                            <StepLabel>{label}</StepLabel>
+                          </Step>
+                        ))}
+                      </Stepper>
 
-                  <Box component="ul" className="muted space-y-2 list-disc pl-6">
-                    <li><Typography variant="body2">Prometheus and Grafana for monitoring</Typography></li>
-                    <li><Typography variant="body2">Envoy Ingress Controller</Typography></li>
-                    <li><Typography variant="body2">NVIDIA GPU Operator and GPU drivers</Typography></li>
-                  </Box>
+                      <Paper className="card rounded-xl p-4 border-white/10" elevation={0} sx={% raw %}{{ mb: 3 }}{% endraw %}>
+                        <Typography variant="subtitle1" sx={% raw %}{{ fontWeight: 600, mb: 2 }}{% endraw %}>
+                          {STEP_LABELS[activeStep]}
+                        </Typography>
+                        {renderStepContent(activeStep)}
+                      </Paper>
 
-                  <Divider sx={% raw %}{{ borderColor: 'rgba(255,255,255,0.1)' }}{% endraw %} />
-
-                  <Box className="space-y-4">
-                    <Typography variant="h6" sx={% raw %}{{ fontWeight: 600 }}{% endraw %}>Prerequisites</Typography>
-                    
-                    <Typography className="muted" variant="body2">
-                      Before initializing the WEKA App Store, verify that your Kubernetes cluster is already connected WEKA NeuralMesh via WEKA Operator and WEKA CSI Driver.
-                    </Typography>
-                    <Typography className="muted" variant="body2">
-                      All workloads deployed through the WEKA App Store require:
-                    </Typography>
-                    <Box component="ul" className="muted space-y-1 list-disc pl-6 text-sm">
-                      <li>An active WEKA NeuralMesh connection.</li>
-                      <li>The ability for blueprints to add to your Kubernetes cluster WEKA CSI specific StorageClass.</li>
-                    </Box>
-                    <Typography className="muted" variant="body2" sx={% raw %}{{ mt: 2 }}{% endraw %}>
-                      If these prerequisites are not met, close this page and complete the required setup steps as documented at <a href="https://docs.weka.io/appendices/weka-csi-plugin" target="_blank" className="text-purple-400 hover:underline">docs.weka.io/appendices/weka-csi-plugin</a> and <a href="https://docs.weka.io/kubernetes/weka-operator-deployments" target="_blank" className="text-purple-400 hover:underline">docs.weka.io/kubernetes/weka-operator-deployments</a>
-                    </Typography>
-                  </Box>
-
-                  {!initializing && !phase.includes('Ready') && (
-                    <Box sx={% raw %}{{ mt: 6, display: 'flex', alignItems: 'center', gap: 2 }}{% endraw %}>
-                      <FormControl size="small" sx={% raw %}{{ minWidth: 200 }}{% endraw %}>
-                        <InputLabel id="namespace-select-label">Namespace</InputLabel>
-                        <Select
-                          labelId="namespace-select-label"
-                          id="namespace-select"
-                          value={selectedNamespace}
-                          label="Namespace"
-                          onChange={(e) => {
-                            setSelectedNamespace(e.target.value);
-                            localStorage.setItem('selectedNamespace', e.target.value);
-                          }}
+                      <Box sx={% raw %}{{ display: 'flex', justifyContent: 'space-between', gap: 2 }}{% endraw %}>
+                        <Button
+                          variant="outlined"
+                          onClick={handleBack}
+                          disabled={activeStep === 0}
+                          sx={% raw %}{{ textTransform: 'none', borderColor: 'rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.7)' }}{% endraw %}
                         >
-                          {namespaces.map((ns) => (
-                            <MenuItem key={ns} value={ns}>{ns}</MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                      <Button 
-                        variant="contained" 
-                        onClick={handleInitialize}
-                        disabled={initializing}
-                        sx={% raw %}{{ 
-                          bgcolor: 'var(--weka-purple)', 
-                          px: 6, py: 1.5, 
-                          '&:hover': { bgcolor: 'var(--weka-purple-dark)' },
-                          borderRadius: '8px',
-                          textTransform: 'none',
-                          fontWeight: 600,
-                          height: '40px'
-                        }}{% endraw %}
-                      >
-                        Initialize Cluster
-                      </Button>
+                          Back
+                        </Button>
+
+                        {activeStep < STEP_LABELS.length - 1 ? (
+                          <Button
+                            variant="contained"
+                            onClick={handleNext}
+                            disabled={activeStep === 0 && !nodePrereqAck}
+                            sx={% raw %}{{
+                              bgcolor: 'var(--weka-purple)',
+                              textTransform: 'none',
+                              fontWeight: 600,
+                              '&:hover': { bgcolor: 'var(--weka-purple-dark)' },
+                            }}{% endraw %}
+                          >
+                            Next
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="contained"
+                            onClick={handleInstall}
+                            sx={% raw %}{{
+                              bgcolor: 'var(--weka-purple)',
+                              textTransform: 'none',
+                              fontWeight: 600,
+                              px: 4,
+                              '&:hover': { bgcolor: 'var(--weka-purple-dark)' },
+                            }}{% endraw %}
+                          >
+                            Install
+                          </Button>
+                        )}
+                      </Box>
+                    </Box>
+                  )}
+
+                  {progressActive && (
+                    <Box sx={% raw %}{{ py: 4 }}{% endraw %}>
+                      <Typography variant="h6" sx={% raw %}{{ fontWeight: 600, mb: 2 }}{% endraw %}>Installing WEKA Storage Stack...</Typography>
+                      <Typography variant="body2" sx={% raw %}{{ color: 'rgba(255,255,255,0.6)' }}{% endraw %}>
+                        The install progress view will be wired in the next phase (30-03).
+                      </Typography>
                     </Box>
                   )}
                 </Box>
 
+                {/* Right column: status card */}
                 <Box className="lg:col-span-5">
                   <Paper className="card rounded-xl p-6 border-white/10" elevation={0}>
-                    <Box sx={% raw %}{{ 
-                      mb: 2, p: 2, 
-                      borderRadius: '10px', 
-                      background: 'linear-gradient(180deg, rgba(107, 47, 179, 0.15) 0%, rgba(107, 47, 179, 0.05) 100%)', 
+                    <Box sx={% raw %}{{
+                      mb: 2, p: 2,
+                      borderRadius: '10px',
+                      background: 'linear-gradient(180deg, rgba(107, 47, 179, 0.15) 0%, rgba(107, 47, 179, 0.05) 100%)',
                       border: '1px solid rgba(107, 47, 179, 0.3)',
-                      display: 'flex', 
-                      flexDirection: 'column', 
+                      display: 'flex',
+                      flexDirection: 'column',
                       alignItems: 'center',
                       textAlign: 'center',
                       boxShadow: '0 4px 15px rgba(0,0,0,0.2)'
@@ -413,10 +763,10 @@
                       </Typography>
                     </Box>
 
-                    <Box sx={% raw %}{{ 
-                      mb: 4, p: 2, 
-                      bgcolor: 'rgba(255,255,255,0.03)', 
-                      borderRadius: '8px', 
+                    <Box sx={% raw %}{{
+                      mb: 4, p: 2,
+                      bgcolor: 'rgba(255,255,255,0.03)',
+                      borderRadius: '8px',
                       border: '1px solid rgba(255,255,255,0.05)',
                       display: 'flex',
                       flexDirection: 'column',
@@ -436,20 +786,20 @@
                             {(phase === 'Failed' || failed) ? 'Failed' : phase}
                           </Typography>
                         </Box>
-                        
-                        <LinearProgress 
-                          variant={(phase === 'Ready' || phase === 'Failed' || failed) ? 'determinate' : 'indeterminate'} 
+
+                        <LinearProgress
+                          variant={(phase === 'Ready' || phase === 'Failed' || failed) ? 'determinate' : 'indeterminate'}
                           value={(phase === 'Ready' || phase === 'Failed' || failed) ? 100 : undefined}
-                          sx={% raw %}{{ 
-                            height: 8, 
-                            borderRadius: 4, 
+                          sx={% raw %}{{
+                            height: 8,
+                            borderRadius: 4,
                             bgcolor: 'rgba(255,255,255,0.1)',
                             '& .MuiLinearProgress-bar': {
                               bgcolor: (phase === 'Failed' || failed) ? '#ef4444' : undefined
                             }
-                          }}{% endraw %} 
+                          }}{% endraw %}
                         />
-                        
+
                         <Typography variant="body2" className="muted italic">
                           {statusMessage || 'Preparing environment...'}
                         </Typography>
@@ -473,9 +823,7 @@
                         {failed && (
                           <Alert severity="error" variant="filled" sx={% raw %}{{ mt: 2 }}{% endraw %}>
                             <AlertTitle>Initialization Failed</AlertTitle>
-                            {wekaOperatorInstalled !== true || wekaCsiInstalled !== true 
-                              ? "You need to install the WEKA Operator and WEKA CSI driver first."
-                              : "The process failed multiple times. Please check the logs and try again later."}
+                            The process failed. Please check the logs and try again.
                             <Button size="small" color="inherit" onClick={handleInitialize} sx={% raw %}{{ mt: 1, display: 'block' }}{% endraw %}>Retry</Button>
                           </Alert>
                         )}
@@ -483,7 +831,7 @@
                     ) : (
                       <Box sx={% raw %}{{ py: 4, textAlign: 'center' }}{% endraw %}>
                         <Typography className="muted" variant="body2">
-                          Click "Initialize Cluster" to begin the setup process.
+                          Complete the wizard to begin the WEKA storage stack installation.
                         </Typography>
                       </Box>
                     )}
