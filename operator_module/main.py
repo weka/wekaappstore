@@ -746,6 +746,64 @@ def discover_chart_crds(chart_ref: str, version: Optional[str] = None,
     return names
 
 
+def pre_apply_chart_crds(chart_ref: str, version: Optional[str] = None,
+                          registry_config_path: Optional[str] = None) -> "tuple[bool, str]":
+    """Pre-apply chart CRDs via kubectl apply --server-side before helm install/upgrade.
+
+    Mirrors the standard two-step install pattern:
+      helm show crds <chart> | kubectl apply --server-side --force-conflicts -f -
+      helm upgrade --install <chart> --skip-crds
+
+    This ensures CRDs are always current even on upgrades — Helm's helm upgrade
+    deliberately does not update existing CRDs, so new CRDs added in later chart
+    versions would otherwise never be installed.
+
+    Returns (True, message) on success or when the chart contains no CRDs.
+    Returns (False, error_msg) on failure — caller should fall back to Helm's
+    native CRD handling rather than aborting the deployment.
+    """
+    cmd = ["helm", "show", "crds", chart_ref]
+    if version:
+        cmd += ["--version", str(version)]
+    if registry_config_path is not None:
+        cmd += ["--registry-config", registry_config_path]
+
+    try:
+        crd_yaml = subprocess.check_output(cmd, text=True, stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as e:
+        return False, f"helm show crds failed: {e.stderr.strip()}"
+    except Exception as e:
+        return False, f"helm show crds error: {e}"
+
+    if not crd_yaml.strip():
+        return True, "no CRDs in chart"
+
+    try:
+        crd_count = sum(
+            1 for d in yaml.safe_load_all(crd_yaml)
+            if d and isinstance(d, dict) and d.get("kind") == "CustomResourceDefinition"
+        )
+    except Exception:
+        crd_count = "unknown"
+
+    try:
+        result = subprocess.run(
+            ["kubectl", "apply", "--server-side", "--force-conflicts", "-f", "-"],
+            input=crd_yaml,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            return False, f"kubectl apply --server-side failed: {result.stderr.strip()}"
+        logging.info(f"Pre-applied {crd_count} CRD(s) from '{chart_ref}' via server-side apply")
+        return True, f"pre-applied {crd_count} CRD(s)"
+    except subprocess.TimeoutExpired:
+        return False, "kubectl apply --server-side timed out after 120s"
+    except Exception as e:
+        return False, f"kubectl apply --server-side error: {e}"
+
+
 @lru_cache(maxsize=1)
 def list_existing_crds() -> set[str]:
     """List CRD names currently installed in the cluster.
@@ -771,7 +829,12 @@ def should_skip_crds_for_component(helm_cfg: Dict[str, Any], chart_ref: str, ver
     Strategy options (case-insensitive):
       - Install: never skip (always let Helm install CRDs)
       - Skip: always skip (CRDs managed externally)
-      - Auto (default): if any CRDs from the chart already exist in cluster, skip
+      - Auto (default): pre-apply chart CRDs via kubectl apply --server-side, then
+          pass --skip-crds to Helm. This mirrors the standard two-step install:
+            helm show crds <chart> | kubectl apply --server-side --force-conflicts -f -
+            helm upgrade --install <chart> --skip-crds
+          Ensures CRDs are always current on upgrades (Helm upgrade never updates CRDs).
+          Falls back to Helm's native CRD handling if pre-apply fails.
     """
     strategy = (helm_cfg.get("crdsStrategy", "Auto") or "Auto").lower()
 
@@ -780,14 +843,22 @@ def should_skip_crds_for_component(helm_cfg: Dict[str, Any], chart_ref: str, ver
     if strategy == "skip":
         return True
 
-    # Auto strategy
-    chart_crds = discover_chart_crds(chart_ref, version, registry_config_path)
-    if not chart_crds:
-        # No CRDs in chart → nothing to skip at Helm level
+    # Auto strategy: pre-apply CRDs via server-side apply, then skip in Helm
+    ok, msg = pre_apply_chart_crds(chart_ref, version, registry_config_path)
+    if msg == "no CRDs in chart":
+        # Chart has no CRDs — nothing to pre-apply, let Helm run without --skip-crds
         return False
+    if not ok:
+        # Pre-apply failed: fall back to old behaviour (skip only if CRDs already exist)
+        logging.warning(f"CRD pre-apply failed for '{chart_ref}': {msg}. Falling back to cluster-check.")
+        chart_crds = discover_chart_crds(chart_ref, version, registry_config_path)
+        if not chart_crds:
+            return False
+        existing = list_existing_crds()
+        return bool(chart_crds & existing)
 
-    existing = list_existing_crds()
-    return bool(chart_crds & existing)
+    # CRDs pre-applied successfully — tell Helm to skip them to avoid conflicts
+    return True
 
 
 def load_values_from_reference(
@@ -952,6 +1023,7 @@ def wait_for_component_ready(component: Dict[str, Any], namespace: str, timeout:
         'deployment': ('deployment', 'available'),
         'statefulset': ('statefulset', 'ready'),
         'job': ('job', 'complete'),
+        'crd': ('crd', 'established'),
     }
 
     # Unknown/custom types: fall back to pods

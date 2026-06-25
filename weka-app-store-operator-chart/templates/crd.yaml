@@ -170,7 +170,7 @@ spec:
                           properties:
                             type:
                               type: string
-                              enum: ["pod", "deployment", "statefulset", "job", "custom"]
+                              enum: ["pod", "deployment", "statefulset", "job", "custom", "crd"]
                               description: "Type of readiness check"
                             name:
                               type: string

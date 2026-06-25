@@ -15,7 +15,7 @@ spec:
       labels:
         app: wekaappstoregui
     spec:
-      serviceAccountName: {{ include "weka-app-store-operator-chart.serviceAccountName" . }}
+      serviceAccountName: wekaappstoregui-sa
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -35,7 +35,7 @@ spec:
               - { name: manifests, mountPath: /manifests }
       containers:
         - name: wekaappstoregui
-          image: wekachrisjen/weka-app-store-gui:v0.59
+          image: wekachrisjen/weka-app-store-gui:v0.60
           volumeMounts:
             - name: manifests
               mountPath: /app/manifests

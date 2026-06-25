@@ -107,6 +107,448 @@ spec:
         targetNamespace: weka-operator-system
 
       # -----------------------------------------------------------------------
+      # STAGE 2b: WekaClient CRD (depends on weka-operator)
+      # weka-operator v1.13.0 from the OCI registry does not ship this CRD.
+      # Apply it explicitly and wait for it to be established before the
+      # WekaClient CR in STAGE 4 is applied.
+      # -----------------------------------------------------------------------
+
+      - name: weka-client-crd
+        description: "WekaClient CRD — required before the WekaClient CR can be applied"
+        enabled: true
+        dependsOn:
+          - weka-operator
+        waitForReady: true
+        readinessCheck:
+          type: crd
+          name: wekaclients.weka.weka.io
+          timeout: 60
+        kubernetesManifest: |
+          apiVersion: apiextensions.k8s.io/v1
+          kind: CustomResourceDefinition
+          metadata:
+            annotations:
+              controller-gen.kubebuilder.io/version: v0.16.5
+            name: wekaclients.weka.weka.io
+          spec:
+            group: weka.weka.io
+            names:
+              kind: WekaClient
+              listKind: WekaClientList
+              plural: wekaclients
+              singular: wekaclient
+            scope: Namespaced
+            versions:
+            - additionalPrinterColumns:
+              - description: Resource status
+                jsonPath: .status.status
+                name: Status
+                type: string
+              - description: Name of the target cluster if exists
+                jsonPath: .spec.targetCluster.name
+                name: Target Cluster
+                type: string
+              - description: Number of cores
+                jsonPath: .spec.coresNum
+                name: Cores
+                type: integer
+              - description: 'Number of client containers: Active/Created/Desired'
+                jsonPath: .status.printer.containers
+                name: Containers(A/C/D)
+                type: string
+              name: v1alpha1
+              schema:
+                openAPIV3Schema:
+                  description: WekaClient is the Schema for the clients API
+                  properties:
+                    apiVersion:
+                      type: string
+                    kind:
+                      type: string
+                    metadata:
+                      type: object
+                    spec:
+                      description: WekaClientSpec defines the desired state of WekaClient
+                      properties:
+                        additionalMemory:
+                          type: integer
+                        agentPort:
+                          type: integer
+                        allowHotUpgrade:
+                          type: boolean
+                        autoRemoveTimeout:
+                          default: 24h
+                          pattern: ^(0|([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+)$
+                          type: string
+                        coreIds:
+                          items:
+                            type: integer
+                          type: array
+                        coresNum:
+                          type: integer
+                        cpuPolicy:
+                          default: auto
+                          enum:
+                          - auto
+                          - shared
+                          - dedicated
+                          - dedicated_ht
+                          - manual
+                          type: string
+                        cpuRequest:
+                          type: string
+                        csiConfig:
+                          properties:
+                            advanced:
+                              properties:
+                                controllerLabels:
+                                  additionalProperties:
+                                    type: string
+                                  type: object
+                                controllerTolerations:
+                                  items:
+                                    properties:
+                                      effect:
+                                        type: string
+                                      key:
+                                        type: string
+                                      operator:
+                                        type: string
+                                      tolerationSeconds:
+                                        format: int64
+                                        type: integer
+                                      value:
+                                        type: string
+                                    type: object
+                                  type: array
+                                enforceTrustedHttps:
+                                  type: boolean
+                                nodeLabels:
+                                  additionalProperties:
+                                    type: string
+                                  type: object
+                                nodeTolerations:
+                                  items:
+                                    properties:
+                                      effect:
+                                        type: string
+                                      key:
+                                        type: string
+                                      operator:
+                                        type: string
+                                      tolerationSeconds:
+                                        format: int64
+                                        type: integer
+                                      value:
+                                        type: string
+                                    type: object
+                                  type: array
+                                skipGarbageCollection:
+                                  type: boolean
+                              type: object
+                            csiGroup:
+                              type: string
+                            disableControllerCreation:
+                              type: boolean
+                          type: object
+                        driversDistService:
+                          type: string
+                        globalPVC:
+                          properties:
+                            name:
+                              type: string
+                            path:
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        hugepages:
+                          type: integer
+                        hugepagesOffset:
+                          type: integer
+                        image:
+                          pattern: ^.+:\d+\.\d+\.\d+.*$
+                          type: string
+                        imagePullSecret:
+                          type: string
+                        joinIpPorts:
+                          items:
+                            type: string
+                          type: array
+                        network:
+                          properties:
+                            bindManagementAll:
+                              type: boolean
+                            deviceSubnets:
+                              items:
+                                pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}$
+                                type: string
+                              type: array
+                            ethDevice:
+                              type: string
+                            ethDevices:
+                              items:
+                                type: string
+                              type: array
+                            gateway:
+                              type: string
+                            managementIpsSelectors:
+                              items:
+                                properties:
+                                  deviceNames:
+                                    items:
+                                      type: string
+                                    type: array
+                                  max:
+                                    type: integer
+                                  min:
+                                    type: integer
+                                  subnet:
+                                    type: string
+                                type: object
+                              type: array
+                            nvidiaVfSingleIp:
+                              type: boolean
+                            selectors:
+                              items:
+                                properties:
+                                  deviceNames:
+                                    items:
+                                      type: string
+                                    type: array
+                                  max:
+                                    type: integer
+                                  min:
+                                    type: integer
+                                  subnet:
+                                    type: string
+                                type: object
+                              type: array
+                            udpMode:
+                              type: boolean
+                          type: object
+                        nodeSelector:
+                          additionalProperties:
+                            type: string
+                          type: object
+                        overrides:
+                          properties:
+                            driversBuildId:
+                              type: string
+                            driversLoaderImage:
+                              type: string
+                            dropAffinityConstraints:
+                              type: boolean
+                            forceDrain:
+                              type: boolean
+                            machineIdentifierNodeRef:
+                              type: string
+                            skipActiveMountsCheck:
+                              type: boolean
+                            umountOnHost:
+                              type: boolean
+                            wekaContainerName:
+                              type: string
+                          type: object
+                        port:
+                          type: integer
+                        portRange:
+                          properties:
+                            basePort:
+                              default: 45000
+                              maximum: 65535
+                              type: integer
+                            portRange:
+                              default: 0
+                              type: integer
+                          required:
+                          - basePort
+                          type: object
+                        rawTolerations:
+                          items:
+                            properties:
+                              effect:
+                                type: string
+                              key:
+                                type: string
+                              operator:
+                                type: string
+                              tolerationSeconds:
+                                format: int64
+                                type: integer
+                              value:
+                                type: string
+                            type: object
+                          type: array
+                        resources:
+                          properties:
+                            limits:
+                              properties:
+                                cpu:
+                                  anyOf:
+                                  - type: integer
+                                  - type: string
+                                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                  x-kubernetes-int-or-string: true
+                                memory:
+                                  anyOf:
+                                  - type: integer
+                                  - type: string
+                                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                  x-kubernetes-int-or-string: true
+                              type: object
+                            requests:
+                              properties:
+                                cpu:
+                                  anyOf:
+                                  - type: integer
+                                  - type: string
+                                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                  x-kubernetes-int-or-string: true
+                                memory:
+                                  anyOf:
+                                  - type: integer
+                                  - type: string
+                                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                  x-kubernetes-int-or-string: true
+                              type: object
+                          type: object
+                        serviceAccountName:
+                          type: string
+                        targetCluster:
+                          properties:
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - name
+                          - namespace
+                          type: object
+                        tolerations:
+                          items:
+                            type: string
+                          type: array
+                        tracesConfiguration:
+                          properties:
+                            dumperConfigMode:
+                              default: auto
+                              enum:
+                              - override
+                              - partial-override
+                              - auto
+                              - cluster
+                              type: string
+                            ensureFreeSpace:
+                              default: 20
+                              type: integer
+                            maxCapacityPerIoNode:
+                              default: 10
+                              type: integer
+                          type: object
+                        upgradePolicy:
+                          properties:
+                            type:
+                              default: all-at-once
+                              enum:
+                              - manual
+                              - all-at-once
+                              - rolling
+                              - all-at-once-force
+                              type: string
+                          type: object
+                        wekaHome:
+                          properties:
+                            cacertSecret:
+                              type: string
+                          type: object
+                        wekaHomeConfig:
+                          properties:
+                            cacertSecret:
+                              type: string
+                          type: object
+                        wekaSecretRef:
+                          type: string
+                      required:
+                      - image
+                      type: object
+                    status:
+                      description: WekaClientStatus defines the observed state of WekaClient
+                      properties:
+                        conditions:
+                          items:
+                            properties:
+                              lastTransitionTime:
+                                format: date-time
+                                type: string
+                              message:
+                                maxLength: 32768
+                                type: string
+                              observedGeneration:
+                                format: int64
+                                minimum: 0
+                                type: integer
+                              reason:
+                                maxLength: 1024
+                                minLength: 1
+                                pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                                type: string
+                              status:
+                                enum:
+                                - "True"
+                                - "False"
+                                - Unknown
+                                type: string
+                              type:
+                                maxLength: 316
+                                pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                                type: string
+                            required:
+                            - lastTransitionTime
+                            - message
+                            - reason
+                            - status
+                            - type
+                            type: object
+                          type: array
+                        lastAppliedSpec:
+                          type: string
+                        printer:
+                          properties:
+                            containers:
+                              type: string
+                          type: object
+                        stats:
+                          properties:
+                            containers:
+                              properties:
+                                active:
+                                  format: int64
+                                  type: integer
+                                created:
+                                  format: int64
+                                  type: integer
+                                desired:
+                                  format: int64
+                                  type: integer
+                              type: object
+                          type: object
+                        status:
+                          default: Init
+                          enum:
+                          - Init
+                          - Running
+                          - Upgrading
+                          - Destroying
+                          type: string
+                      type: object
+                  type: object
+              served: true
+              storage: true
+              subresources:
+                status: {}
+
+      # -----------------------------------------------------------------------
       # STAGE 3: CSI driver (depends on weka-operator for CRD readiness)
       # Public Helm repo — no auth needed.
       # Pin to 2.8.7 (latest stable as of Phase 27); update this when upgrading.
@@ -273,7 +715,7 @@ spec:
         description: "WekaClient CR — deploys WEKA client DaemonSet on labeled nodes"
         enabled: true
         dependsOn:
-          - weka-operator
+          - weka-client-crd
           - weka-client-secret
         targetNamespace: default
         kubernetesManifest: |
