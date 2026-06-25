@@ -69,7 +69,9 @@ Phase numbering continues from the previous milestone (last phase was 26). This 
   3. The customer enters quay credentials (username, masked password, operator version default `v1.13.0`), WEKA connection (one or more `host:port` endpoints, image version tag, `http`/`https` scheme dropdown), and WEKA credentials (org default `Root`, username, masked password); the review step shows a masked summary plus a namespace selector before submit.
   4. The install view shows each stage transitioning Pending → In-progress → Done/Failed driven by the existing `componentStatus` SSE events; on a stage failure the customer sees a clear, specific error and can retry the install.
   5. After `app-store-install` reaches `Ready` the wizard chains the untouched `app-store-cluster-init` CR as the final stage and redirects to the App Store when cluster-init reaches `Ready`.
-**Plans**: TBD
+**Plans**: 2 plans
+- [ ] 30-01-PLAN.md — Wizard Stepper: 5-step form (node prereqs, quay, WEKA connection, WEKA creds, masked review) + client-side validation + hard-block removal (WIZ-01..08)
+- [ ] 30-02-PLAN.md — Live progress: SSE per-stage view, failure+Retry, cluster-init chain + redirect (PROG-01, PROG-03)
 **UI hint**: yes
 
 ### Phase 31: End-to-End Verification
