@@ -428,6 +428,8 @@ kind: Node
         };
 
         es.onerror = () => {
+          setInstallError('Connection to deployment stream lost. Check the server and retry.');
+          setProgressActive(false);
           es.close();
         };
       }
@@ -488,6 +490,7 @@ kind: Node
         };
 
         es.onerror = () => {
+          setInstallError('Connection to cluster-init stream lost. Check the server and retry.');
           es.close();
         };
       }
