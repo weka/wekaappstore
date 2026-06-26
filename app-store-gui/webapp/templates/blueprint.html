@@ -124,6 +124,32 @@
               {% for var_name, var_meta in variable_schema.items() %}
                 {% if var_name == "namespace" %}
                   {# namespace is always rendered above as a fixed field; skip here #}
+                {% elif var_meta.get("type") == "section" %}
+                  <div class="border-t border-white/10 pt-4 mt-2">
+                    <h3 class="text-sm font-semibold mb-1">{{ var_meta.get("title", var_name | replace("_", " ") | title) }}</h3>
+                    {% if var_meta.get("description") %}
+                      <p class="muted text-xs leading-relaxed">{{ var_meta.get("description") }}</p>
+                    {% endif %}
+                  </div>
+                {% elif var_meta.get("type") == "radio" %}
+                  <div>
+                    <label class="block text-sm mb-2">{{ var_name | replace("_", " ") | title }}</label>
+                    <div class="flex gap-2 flex-wrap">
+                      {% for opt in var_meta.get("options", []) %}
+                        <button type="button"
+                                data-radio-for="field-{{ var_name }}"
+                                data-radio-value="{{ opt.value }}"
+                                class="radio-opt px-4 py-1.5 text-sm rounded-md border transition-colors
+                                       {% if opt.value == var_meta.get('default', '') %}radio-opt-active bg-yellow-400 text-black border-yellow-400{% else %}bg-gray-800 border-white/10 text-white hover:border-yellow-400{% endif %}">
+                          {{ opt.label }}
+                        </button>
+                      {% endfor %}
+                    </div>
+                    <input type="hidden" id="field-{{ var_name }}" name="{{ var_name }}" value="{{ var_meta.get('default', '') }}" />
+                    {% if var_meta.get("description") %}
+                      <div class="muted text-xs mt-1">{{ var_meta.get("description") }}</div>
+                    {% endif %}
+                  </div>
                 {% elif var_meta.get("type") == "credential" %}
                   {% set ctype = var_meta.get("credential_type", "") %}
                   {% set creds = available_creds.get(ctype, []) %}
@@ -152,14 +178,15 @@
                     {% endif %}
                   </div>
                 {% else %}
-                  <div>
+                  <div {% if var_meta.get("enabledWhen") %}data-enabled-when="{{ var_meta.get('enabledWhen') }}"{% endif %}>
                     <label class="block text-sm mb-1" for="field-{{ var_name }}">
                       {{ var_name | replace("_", " ") | title }}
                     </label>
                     <input id="field-{{ var_name }}" name="{{ var_name }}"
                            placeholder="{{ var_meta.get('placeholder', '') }}"
                            {% if var_meta.get("required") %}required{% endif %}
-                           class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                           {% if var_meta.get("enabledWhen") %}disabled{% endif %}
+                           class="w-full px-3 py-2 text-sm rounded-md bg-gray-800 border border-white/10 focus:outline-none focus:ring-2 focus:ring-yellow-400 disabled:opacity-40 disabled:cursor-not-allowed" />
                     {% if var_meta.get("description") %}
                       <div class="muted text-xs mt-1">{{ var_meta.get("description") }}</div>
                     {% endif %}
@@ -254,6 +281,41 @@
         const btn = document.getElementById('deploy-btn');
         if (btn) btn.disabled = true;
       }
+
+      // Wire radio button groups: clicking a button updates the hidden input and re-styles the group.
+      document.querySelectorAll('button[data-radio-for]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const targetId = btn.dataset.radioFor;
+          const hidden = document.getElementById(targetId);
+          if (!hidden) return;
+          hidden.value = btn.dataset.radioValue;
+          document.querySelectorAll(`button[data-radio-for="${targetId}"]`).forEach(b => {
+            const active = b.dataset.radioValue === btn.dataset.radioValue;
+            b.classList.toggle('radio-opt-active', active);
+            b.classList.toggle('bg-yellow-400', active);
+            b.classList.toggle('text-black', active);
+            b.classList.toggle('border-yellow-400', active);
+            b.classList.toggle('bg-gray-800', !active);
+            b.classList.toggle('text-white', !active);
+          });
+          hidden.dispatchEvent(new Event('change'));
+        });
+      });
+
+      // Wire enabledWhen fields: enable/disable input and adjust opacity based on a controller field's value.
+      document.querySelectorAll('[data-enabled-when]').forEach(container => {
+        const [controllerName, expectedValue] = container.dataset.enabledWhen.split('=');
+        const controller = document.getElementById(`field-${controllerName}`);
+        const input = container.querySelector('input:not([type=hidden]),select,textarea');
+        if (!controller || !input) return;
+        function syncEnabled() {
+          const enabled = controller.value === expectedValue;
+          input.disabled = !enabled;
+          container.style.opacity = enabled ? '1' : '0.4';
+        }
+        controller.addEventListener('change', syncEnabled);
+        syncEnabled();
+      });
     });
 
     const form = document.getElementById('deploy-form');

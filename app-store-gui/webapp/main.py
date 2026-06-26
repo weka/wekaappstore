@@ -3044,6 +3044,9 @@ async def deploy_stream(
                 )
             if user_vars.get("join_ip_ports"):
                 user_vars.update(split_endpoints(user_vars.get("join_ip_ports", "")))
+            if user_vars.get("eth_devices"):
+                entries = [e.strip() for e in user_vars["eth_devices"].split(",") if e.strip()]
+                user_vars["eth_devices_list"] = json.dumps(entries)
 
             rendered = template.render(**user_vars)
 

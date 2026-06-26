@@ -29,6 +29,29 @@ x-variables:
     required: true
     validate: false
     description: "GUI-built dockerconfigjson string for quay.io pull secret (injected by server)"
+  _networking:
+    type: section
+    title: "Networking"
+    description: >-
+      You need to decide which WEKA NeuralMesh network mode you want to use for the CSI clients.
+      This is determined by the fabric of your NeuralMesh Cluster, if you have Infiniband fabric
+      then DPDK will be your only option. If your fabric is Ethernet then you have the option of
+      DPDK or UDP mode. UDP Mode is the slower option and does not take advantage of the higher
+      performance of WEKA DPDK Client mode.
+  network_mode:
+    type: radio
+    default: ""
+    options:
+      - value: ""
+        label: "Auto"
+      - value: "dpdk"
+        label: "DPDK"
+      - value: "udp"
+        label: "UDP"
+    description: "DPDK uses kernel-bypass via specified NIC(s). UDP is software networking. Auto uses cluster default."
+  eth_devices:
+    enabledWhen: "network_mode=dpdk"
+    description: "Comma-delimited NIC device names for DPDK mode (e.g. ibs4039f1 or ibs4039f1,ibs4039f2)"
 
 # Per-blueprint SSE deploy timeout (seconds).  The full operator+CSI+WekaClient install
 # runs ~5 sequential stages each with a 300s readinessCheck, so the legacy 900s cap
@@ -733,6 +756,13 @@ spec:
               weka.io/supports-clients: "true"
             wekaSecretRef: weka-client-cluster-dev
             joinIpPorts: [[ join_ip_ports_list ]]
+{% if network_mode == "dpdk" and eth_devices %}
+            network:
+              ethDevices: [[ eth_devices_list ]]
+{% elif network_mode == "udp" %}
+            network:
+              udpMode: true
+{% endif %}
 
       # -----------------------------------------------------------------------
       # STAGE 5: StorageClass demote Job (depends on csi-api-secret)
