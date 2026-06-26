@@ -168,6 +168,8 @@ spec:
         waitForReady: true
         readinessCheck:
           type: job
+          name: install-gateway-api-crds
+          namespace: kube-system
           timeout: 300
         kubernetesManifest: |
           apiVersion: batch/v1
