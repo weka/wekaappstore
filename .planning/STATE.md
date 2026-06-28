@@ -1,10 +1,10 @@
 ---
 gsd_state_version: 1.0
 milestone: v8.0
-milestone_name: Guided Install Wizard — WEKA Operator, CSI & Storage Classes
+milestone_name: milestone
 status: verifying
-stopped_at: Phase 30 context gathered (assumptions mode)
-last_updated: "2026-06-25T00:35:08.798Z"
+stopped_at: context exhaustion at 75% (2026-06-26)
+last_updated: "2026-06-26T06:48:25.345Z"
 last_activity: 2026-06-25
 progress:
   total_phases: 5
@@ -66,6 +66,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-25T00:35:08.792Z
-Stopped at: Phase 30 context gathered (assumptions mode)
+Last session: 2026-06-26T06:48:25.338Z
+Stopped at: context exhaustion at 75% (2026-06-26)
 Resume: `/gsd:execute-phase 30` to execute Phase 30 (Wizard Stepper & Live Progress)

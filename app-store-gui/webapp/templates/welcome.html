@@ -96,7 +96,7 @@
       );
     }
 
-    const STEP_LABELS = ["Welcome", "Node Prerequisites", "Quay Credentials", "WEKA Connection", "WEKA Credentials", "Review"];
+    const STEP_LABELS = ["Welcome", "Node Prerequisites", "Quay Credentials", "WEKA Connection", "Networking", "WEKA Credentials", "Review"];
 
     const NODE_PREREQ_SNIPPET = `# KubeletConfiguration — apply on all worker nodes
 # Add to /etc/kubernetes/kubelet-config.yaml and restart kubelet.
@@ -147,6 +147,8 @@ kind: Node
         weka_org: "Root",
         weka_username: "",
         weka_password: "",
+        network_mode: "",
+        eth_devices: "",
       });
       const [fieldErrors, setFieldErrors] = React.useState({});
 
@@ -181,6 +183,8 @@ kind: Node
           weka_org: form.weka_org.trim(),
           weka_username: form.weka_username.trim(),
           weka_password: form.weka_password,
+          network_mode: form.network_mode,
+          eth_devices: form.network_mode === 'dpdk' ? form.eth_devices.trim() : '',
           namespace: podNamespace,
         };
       }
@@ -231,7 +235,7 @@ kind: Node
           }
         }
 
-        if (stepIndex === 4) {
+        if (stepIndex === 5) {
           if (!form.weka_username.trim()) errors.weka_username = "WEKA username is required";
           if (!form.weka_password) errors.weka_password = "WEKA password is required";
         }
@@ -244,7 +248,7 @@ kind: Node
         // Re-validate all steps before installing
         const errs1 = validateStep(2);
         const errs2 = validateStep(3);
-        const errs3 = validateStep(4);
+        const errs3 = validateStep(5);
         const allErrors = { ...errs1, ...errs2, ...errs3 };
         if (Object.keys(allErrors).length > 0) {
           setFieldErrors(allErrors);
@@ -557,6 +561,50 @@ kind: Node
         if (step === 4) {
           return (
             <Box sx={% raw %}{{ display: 'flex', flexDirection: 'column', gap: 2 }}{% endraw %}>
+              <Typography variant="body2" sx={% raw %}{{ color: 'rgba(255,255,255,0.7)', lineHeight: 1.6 }}{% endraw %}>
+                You need to decide which WEKA NeuralMesh network mode you want to use for the CSI clients.
+                This is determined by the fabric of your NeuralMesh Cluster, if you have Infiniband fabric
+                then DPDK will be your only option. If your fabric is Ethernet then you have the option of
+                DPDK or UDP mode. UDP Mode is the slower option and does not take advantage of the higher
+                performance of WEKA DPDK Client mode.
+              </Typography>
+              <Box>
+                <Typography variant="caption" sx={% raw %}{{ color: 'rgba(255,255,255,0.5)', display: 'block', mb: 1 }}{% endraw %}>Network Mode</Typography>
+                <Box sx={% raw %}{{ display: 'flex', gap: 1 }}{% endraw %}>
+                  {[{value: '', label: 'Auto'}, {value: 'dpdk', label: 'DPDK'}, {value: 'udp', label: 'UDP'}].map(opt => (
+                    <Button
+                      key={opt.value}
+                      variant={form.network_mode === opt.value ? 'contained' : 'outlined'}
+                      size="small"
+                      onClick={() => handleFormChange('network_mode', opt.value)}
+                      sx={% raw %}{{ minWidth: 80, textTransform: 'none' }}{% endraw %}
+                    >{opt.label}</Button>
+                  ))}
+                </Box>
+                <Typography variant="caption" sx={% raw %}{{ color: 'rgba(255,255,255,0.4)', mt: 0.5, display: 'block' }}{% endraw %}>
+                  {form.network_mode === 'dpdk' && 'Kernel-bypass via specified NIC(s). Enter device name(s) below.'}
+                  {form.network_mode === 'udp'  && 'Software networking. No NIC device needed.'}
+                  {form.network_mode === ''     && 'Cluster default networking will be used.'}
+                </Typography>
+              </Box>
+              <TextField
+                label="NIC Device Name(s) — DPDK only"
+                variant="outlined"
+                size="small"
+                fullWidth
+                disabled={form.network_mode !== 'dpdk'}
+                value={form.eth_devices}
+                onChange={(e) => handleFormChange('eth_devices', e.target.value)}
+                helperText="Comma-delimited NIC names, e.g. ibs4039f1 or ibs4039f1,ibs4039f2"
+                sx={% raw %}{{ opacity: form.network_mode === 'dpdk' ? 1 : 0.4 }}{% endraw %}
+              />
+            </Box>
+          );
+        }
+
+        if (step === 5) {
+          return (
+            <Box sx={% raw %}{{ display: 'flex', flexDirection: 'column', gap: 2 }}{% endraw %}>
               <TextField
                 label="WEKA Organization"
                 variant="outlined"
@@ -592,8 +640,9 @@ kind: Node
           );
         }
 
-        // Step 5: Review
-        if (step === 5) {
+        // Step 6: Review
+        if (step === 6) {
+          const networkModeLabel = form.network_mode === 'dpdk' ? 'DPDK' : form.network_mode === 'udp' ? 'UDP' : 'Auto';
           const reviewRows = [
             { label: "Quay Username", value: form.quay_username },
             { label: "Quay Password", value: "••••••••" },
@@ -601,6 +650,8 @@ kind: Node
             { label: "WEKA Endpoints", value: form.join_ip_ports },
             { label: "WEKA Image Version", value: form.weka_image_version },
             { label: "API Scheme", value: form.weka_endpoint_scheme },
+            { label: "Network Mode", value: networkModeLabel },
+            { label: "NIC Device(s)", value: form.network_mode === 'dpdk' ? (form.eth_devices || '—') : '—' },
             { label: "WEKA Organization", value: form.weka_org },
             { label: "WEKA Username", value: form.weka_username },
             { label: "WEKA Password", value: "••••••••" },
