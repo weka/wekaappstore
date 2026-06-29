@@ -196,8 +196,11 @@ spec:
                       Map of variable name → string value. Substituted as ${VAR} into:
                         - kubernetesManifest strings
                         - The raw content of ConfigMap/Secret referenced by valuesFiles
-                      The variable ${namespace} auto-defaults to the CR's metadata.namespace
-                      if not explicitly set. Use $$ to escape a literal dollar sign.
+                      The variable ${namespace} auto-defaults to the CR's metadata.namespace.
+                      The variable ${appStoreNamespace} auto-defaults to the namespace the
+                      App Store operator is running in (i.e. where WarpCredential derived
+                      secrets live). Neither needs to be declared in this map.
+                      Use $$ to escape a literal dollar sign.
                       Undefined references raise a permanent error.
                       Variable names must match Python identifier syntax: [_a-zA-Z][_a-zA-Z0-9]*.
                     additionalProperties:

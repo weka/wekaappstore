@@ -1195,7 +1195,8 @@ def handle_appstack_deployment(body, spec, name, namespace, status, **kwargs):
             raise kopf.PermanentError(
                 f"Invalid variable value for {key!r}: must be a string"
             )
-    stack_vars = {'namespace': namespace, **raw_user_vars}
+    appstore_ns = os.environ.get('MY_POD_NAMESPACE', 'wekaappstore')
+    stack_vars = {'namespace': namespace, 'appStoreNamespace': appstore_ns, **raw_user_vars}
 
     # Resolve dependencies
     try:
@@ -1708,7 +1709,8 @@ def delete_warrpappstore_function(spec, name, namespace, **kwargs):
         # ${namespace}/${VAR} tokens and rejects the manifest ("the namespace from the
         # provided object ${namespace} does not match ..."). render() is best-effort and
         # never raises, so deletion is not blocked.
-        stack_vars = {'namespace': namespace, **(app_stack.get('variables') or {})}
+        appstore_ns = os.environ.get('MY_POD_NAMESPACE', 'wekaappstore')
+        stack_vars = {'namespace': namespace, 'appStoreNamespace': appstore_ns, **(app_stack.get('variables') or {})}
 
         # Resolve dependencies to get proper order
         try:

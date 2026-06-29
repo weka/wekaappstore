@@ -342,8 +342,8 @@ spec:
                 backendRefs:
                   - name: wekaappstoregui-svc
                     port: 80
-        targetNamespace: wekaappstore
-      
+        targetNamespace: [[ namespace ]]
+
       # Install NVIDIA DCGM ServiceMonitor via operator manifests
       - name: nvidia-dcgm-servicemonitor
         description: "ServiceMonitor for NVIDIA DCGM exporter"
