@@ -127,6 +127,26 @@ spec:
           timeout: 300
         targetNamespace: gpu-operator
 
+      # NVIDIA NIM Operator — reconciles NIMCache/NIMService CRs into NIM pods.
+      # Required before the NVIDIA RAG Blueprint (in neuralmesh-aidp) is installed;
+      # the blueprint ships NIMCache/NIMService CRs but not their controller.
+      - name: nim-operator
+        description: "NVIDIA NIM Operator — reconciles NIMCache/NIMService CRs"
+        enabled: true
+        helmChart:
+          repository: "https://helm.ngc.nvidia.com/nvidia"
+          name: "k8s-nim-operator"
+          version: "3.1.1"
+          releaseName: "nim-operator"
+          crdsStrategy: Auto
+        waitForReady: true
+        readinessCheck:
+          type: pod
+          selector: "app.kubernetes.io/name=k8s-nim-operator"
+          namespace: nim-operator
+          timeout: 300
+        targetNamespace: nim-operator
+
         # Service Account for CRD installer Checker
       - name: gateway-api-crds-serviceaccount
         description: "Service Account for CRD installer Checker"

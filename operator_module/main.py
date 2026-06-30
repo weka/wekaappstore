@@ -407,6 +407,10 @@ def _apply_manifest_multi_ns(manifest_yaml, default_namespace):
     """kubectl apply a possibly multi-namespace manifest, one document at a time.
 
     Returns (ok: bool, message: str). Stops at the first failing document.
+    If a resource already exists with immutable field differences (e.g. a bound PVC
+    whose storageClassName or accessModes differ), the document is skipped with a
+    warning rather than failing the entire component — so missing siblings are still
+    created on subsequent documents.
     """
     try:
         docs = _split_manifest_docs(manifest_yaml)
@@ -419,6 +423,9 @@ def _apply_manifest_multi_ns(manifest_yaml, default_namespace):
         cmd = ['kubectl', 'apply', '-f', '-'] + ns_args
         result = subprocess.run(cmd, input=doc_text, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
+            if 'immutable' in result.stderr.lower():
+                logging.warning(f"Skipping {kind}: already exists with immutable field differences — {result.stderr.strip()[:300]}")
+                continue
             return False, result.stderr
     return True, 'Manifest applied successfully'
 

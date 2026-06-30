@@ -110,7 +110,8 @@ spec:
                     proxy_set_header Connection "";
                     chunked_transfer_encoding off;
 
-                    proxy_pass http://weka_s3;
+                    proxy_ssl_verify off;
+                    proxy_pass https://weka_s3;
                  }
               }
           ---
